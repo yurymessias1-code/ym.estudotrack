@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ymcontrole de estudos</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">YM</div>
+          <div>
+            <strong>ymcontrole de estudos</strong>
+            <span>Estudos, questões e julgados</span>
+          </div>
+        </div>
+
+        <nav class="side-nav" aria-label="Navegação principal">
+          <button class="nav-button active" data-view="dashboard">Painel</button>
+          <button class="nav-button" data-view="controle">Controle</button>
+          <button class="nav-button" data-view="plano">Matérias</button>
+          <button class="nav-button" data-view="questoes">Questões</button>
+          <button class="nav-button" data-view="flashcards">Flashcards</button>
+          <button class="nav-button" data-view="jurisprudencias">Jurisprudências</button>
+          <button class="nav-button" data-view="pomodoro">Pomodoro</button>
+          <button class="nav-button" data-view="relatorios">Relatórios</button>
+        </nav>
+
+        <div class="quick-panel">
+          <p class="eyebrow">Hoje</p>
+          <strong id="sideTodayHours">0h</strong>
+          <span id="sideTodayMeta">Nenhuma sessão registrada.</span>
+        </div>
+
+        <div class="storage-actions">
+          <button class="button ghost" id="exportBtn" type="button">Exportar</button>
+          <label class="button ghost import-label" for="importInput">
+            Importar
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Rotina de estudos</p>
+            <h1 id="pageTitle">Painel</h1>
+          </div>
+          <div class="topbar-actions">
+            <span id="currentDate" class="date-pill"></span>
+            <button class="button secondary" data-view="pomodoro" type="button">Abrir Pomodoro</button>
+            <button class="button primary" data-view="plano" type="button">Nova matéria</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard" aria-labelledby="dashboardTitle">
+          <div class="dashboard-visual">
+            <div class="visual-copy">
+              <p class="eyebrow">Visão geral</p>
+              <h2 id="dashboardTitle">Acompanhe o que rende e o que precisa de reforço</h2>
+              <div class="quick-actions">
+                <button class="button primary" data-view="questoes" type="button">Lançar questões</button>
+                <button class="button secondary" data-view="flashcards" type="button">Revisar flashcards</button>
+                <button class="button secondary" data-view="jurisprudencias" type="button">Salvar julgado</button>
+                <button class="button ghost" data-view="controle" type="button">Ver controle</button>
+              </div>
+            </div>
+            <canvas id="studyCanvas" width="620" height="300" aria-label="Resumo visual do progresso"></canvas>
+          </div>
+
+          <div class="stat-grid" id="statGrid"></div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Tempo</p>
+                  <h2>Últimos 7 dias</h2>
+                </div>
+              </div>
+              <div class="bar-chart" id="weekChart"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Diagnóstico</p>
+                  <h2>Pontos fortes e fracos</h2>
+                </div>
+              </div>
+              <div id="strengthList" class="insight-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="plano" aria-labelledby="planoTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Planejamento</p>
+              <h2 id="planoTitle">Matérias e assuntos</h2>
+            </div>
+            <button class="button ghost danger" id="resetDemoBtn" type="button">Restaurar exemplo</button>
+          </div>
+
+          <div class="content-grid two-columns">
+            <form class="panel form-panel" id="subjectForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matéria</p>
+                  <h3>Adicionar matéria</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="subjectName" name="subjectName" type="text" placeholder="Ex.: Direito Administrativo" required />
+              </label>
+              <label>
+                Meta semanal em horas
+                <input id="subjectGoal" name="subjectGoal" type="number" min="0" step="0.5" value="3" required />
+              </label>
+              <label>
+                Cor
+                <input id="subjectColor" name="subjectColor" type="color" value="#0f766e" />
+              </label>
+              <button class="button primary" type="submit">Adicionar matéria</button>
+            </form>
+
+            <form class="panel form-panel" id="topicForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Assunto</p>
+                  <h3>Adicionar assunto</h3>
+                </div>
+              </div>
+              <label>
+                Matéria
+                <select id="topicSubject" required></select>
+              </label>
+              <label>
+                Assunto
+                <input id="topicName" type="text" placeholder="Ex.: Controle de constitucionalidade" required />
+              </label>
+              <label>
+                Prioridade
+                <select id="topicPriority">
+                  <option value="Alta">Alta</option>
+                  <option value="Média" selected>Média</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
+              <button class="button primary" type="submit">Adicionar assunto</button>
+            </form>
+          </div>
+
+          <div class="subject-board" id="subjectBoard"></div>
+        </section>
+
+        <section class="view" id="questoes" aria-labelledby="questoesTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Desempenho</p>
+              <h2 id="questoesTitle">Controle de acertos e erros</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="questionForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Questões</p>
+                  <h3>Novo lançamento</h3>
+                </div>
+              </div>
+              <label>
+                Assunto
+                <select id="questionTopic" required></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Acertos
+                  <input id="questionCorrect" type="number" min="0" value="0" required />
+                </label>
+                <label>
+                  Erros
+                  <input id="questionWrong" type="number" min="0" value="0" required />
+                </label>
+              </div>
+              <label>
+                Data
+                <input id="questionDate" type="date" required />
+              </label>
+              <label>
+                Observações
+                <textarea id="questionNotes" rows="4" placeholder="Ex.: revisar prazos e competência"></textarea>
+              </label>
+              <button class="button primary" type="submit">Salvar questões</button>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h3>Lançamentos recentes</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Assunto</th>
+                      <th>Acertos</th>
+                      <th>Erros</th>
+                      <th>%</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="questionHistory"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Mapa</p>
+                <h3>Precisão por assunto</h3>
+              </div>
+            </div>
+            <div class="topic-performance" id="topicPerformance"></div>
+          </section>
+        </section>
+
+        <section class="view" id="jurisprudencias" aria-labelledby="jurisTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Julgados</p>
+              <h2 id="jurisTitle">Jurisprudências STJ e STF</h2>
+            </div>
+            <div class="segmented" role="tablist" aria-label="Tribunal">
+              <button class="segment active" data-case-tab="STJ" role="tab" type="button">STJ</button>
+              <button class="segment" data-case-tab="STF" role="tab" type="button">STF</button>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="caseForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="caseCourtLabel">STJ</p>
+                  <h3>Nova jurisprudência</h3>
+                </div>
+              </div>
+              <label>
+                Título
+                <input id="caseTitle" type="text" placeholder="Ex.: Tema repetitivo sobre improbidade" required />
+              </label>
+              <label>
+                Assunto relacionado
+                <select id="caseTopic"></select>
+              </label>
+              <label>
+                Data
+                <input id="caseDate" type="date" required />
+              </label>
+              <label>
+                Tema ou classe
+                <input id="caseTheme" type="text" placeholder="Ex.: Tema 1199, ADI, REsp" />
+              </label>
+              <label>
+                Tese, resumo ou ementa
+                <textarea id="caseSummary" rows="5" required></textarea>
+              </label>
+              <label>
+                Fonte
+                <input id="caseSource" type="url" placeholder="https://..." />
+              </label>
+              <button class="button primary" type="submit">Salvar jurisprudência</button>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Aba atual</p>
+                  <h3 id="caseListTitle">STJ</h3>
+                </div>
+              </div>
+              <div class="case-list" id="caseList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="pomodoro" aria-labelledby="pomodoroTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Foco</p>
+              <h2 id="pomodoroTitle">Pomodoro e tempo de estudo</h2>
+            </div>
+          </div>
+
+          <div class="content-grid pomodoro-grid">
+            <section class="panel timer-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="timerMode">Foco</p>
+                  <h3 id="timerTopicLabel">Selecione um assunto</h3>
+                </div>
+                <span class="cycle-pill" id="cycleCounter">Ciclo 1</span>
+              </div>
+
+              <div class="timer-face" aria-live="polite">
+                <span id="timerDisplay">25:00</span>
+              </div>
+
+              <div class="timer-controls">
+                <button class="button primary" id="startTimerBtn" type="button">Iniciar</button>
+                <button class="button secondary" id="pauseTimerBtn" type="button">Pausar</button>
+                <button class="button ghost" id="resetTimerBtn" type="button">Zerar</button>
+                <button class="button ghost" id="finishTimerBtn" type="button">Registrar</button>
+              </div>
+            </section>
+
+            <form class="panel form-panel" id="timerSettingsForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Sessão</p>
+                  <h3>Configurar Pomodoro</h3>
+                </div>
+              </div>
+              <label>
+                Assunto
+                <select id="timerTopic" required></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Foco
+                  <input id="focusMinutes" type="number" min="5" max="120" value="25" required />
+                </label>
+                <label>
+                  Pausa
+                  <input id="breakMinutes" type="number" min="1" max="30" value="5" required />
+                </label>
+              </div>
+              <label>
+                Ciclos
+                <input id="cycleTotal" type="number" min="1" max="8" value="4" required />
+              </label>
+              <button class="button secondary" type="submit">Aplicar ajustes</button>
+            </form>
+
+            <form class="panel form-panel" id="studyLogForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Tempo</p>
+                  <h3>Registro manual</h3>
+                </div>
+              </div>
+              <label>
+                Assunto
+                <select id="studyTopic" required></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Minutos
+                  <input id="studyMinutes" type="number" min="1" value="30" required />
+                </label>
+                <label>
+                  Data
+                  <input id="studyDate" type="date" required />
+                </label>
+              </div>
+              <label>
+                Nota
+                <input id="studyNote" type="text" placeholder="Ex.: leitura de lei seca" />
+              </label>
+              <button class="button primary" type="submit">Registrar tempo</button>
+            </form>
+
+            <section class="panel form-panel media-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Música</p>
+                  <h3>Música de foco</h3>
+                </div>
+              </div>
+              <form class="music-form" id="musicForm">
+                <label>
+                  Link do YouTube ou Spotify
+                  <input id="musicUrl" type="url" placeholder="Cole o link da música, playlist ou vídeo" />
+                </label>
+                <div class="music-actions">
+                  <button class="button primary" type="submit">Salvar player</button>
+                  <button class="button ghost" id="clearMusicBtn" type="button">Limpar</button>
+                </div>
+              </form>
+              <div class="music-player" id="musicPlayer"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Sessões</p>
+                <h3>Tempo registrado</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Assunto</th>
+                    <th>Tempo</th>
+                    <th>Origem</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="studyHistory"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="controle" aria-labelledby="controleTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Controle</p>
+              <h2 id="controleTitle">Controle de estudos</h2>
+            </div>
+            <div class="segmented" aria-label="Período de controle">
+              <button class="segment active" data-control-range="day" type="button">Dia</button>
+              <button class="segment" data-control-range="week" type="button">Semana</button>
+              <button class="segment" data-control-range="month" type="button">Mês</button>
+              <button class="segment" data-control-range="year" type="button">Ano</button>
+            </div>
+          </div>
+
+          <div class="stat-grid" id="controlStats"></div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Linha do tempo</p>
+                  <h3 id="controlTimelineTitle">Período atual</h3>
+                </div>
+              </div>
+              <div class="control-list" id="controlTimeline"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Metas</p>
+                  <h3>Meta por matéria</h3>
+                </div>
+              </div>
+              <div class="control-list" id="controlGoals"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Histórico</p>
+                <h3>Atividades do período</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Tipo</th>
+                    <th>Assunto</th>
+                    <th>Resultado</th>
+                  </tr>
+                </thead>
+                <tbody id="controlHistory"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="flashcards" aria-labelledby="flashcardsTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Memorização</p>
+              <h2 id="flashcardsTitle">Flashcards</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="flashcardForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Novo cartão</p>
+                  <h3>Cadastrar flashcard</h3>
+                </div>
+              </div>
+              <label>
+                Assunto
+                <select id="flashcardTopic" required></select>
+              </label>
+              <label>
+                Frente
+                <textarea id="flashcardFront" rows="4" placeholder="Pergunta, conceito ou enunciado" required></textarea>
+              </label>
+              <label>
+                Verso
+                <textarea id="flashcardBack" rows="5" placeholder="Resposta, regra, exceção ou observação" required></textarea>
+              </label>
+              <label>
+                Prioridade
+                <select id="flashcardPriority">
+                  <option value="Alta">Alta</option>
+                  <option value="Média" selected>Média</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
+              <button class="button primary" type="submit">Salvar flashcard</button>
+            </form>
+
+            <section class="panel flashcard-review-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Revisão</p>
+                  <h3>Flashcard da vez</h3>
+                </div>
+                <span class="cycle-pill" id="flashcardDueCount">0 pendentes</span>
+              </div>
+              <div id="flashcardReview" class="flashcard-review"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Biblioteca</p>
+                <h3>Flashcards cadastrados</h3>
+              </div>
+            </div>
+            <div class="flashcard-library" id="flashcardLibrary"></div>
+          </section>
+        </section>
+
+        <section class="view" id="relatorios" aria-labelledby="relatoriosTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Análise</p>
+              <h2 id="relatoriosTitle">Relatórios por período</h2>
+            </div>
+            <div class="segmented" aria-label="Período">
+              <button class="segment active" data-report-range="day" type="button">Dia</button>
+              <button class="segment" data-report-range="week" type="button">Semana</button>
+              <button class="segment" data-report-range="month" type="button">Mês</button>
+              <button class="segment" data-report-range="year" type="button">Ano</button>
+            </div>
+          </div>
+
+          <div class="stat-grid" id="reportStats"></div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matérias</p>
+                  <h3>Tempo por matéria</h3>
+                </div>
+              </div>
+              <div class="bar-chart horizontal" id="subjectTimeChart"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Questões</p>
+                  <h3>Precisão por matéria</h3>
+                </div>
+              </div>
+              <div id="subjectAccuracyList" class="insight-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

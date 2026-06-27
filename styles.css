@@ -130,6 +130,31 @@ button {
   font-size: 0.92rem;
 }
 
+.profile-panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.profile-panel strong {
+  overflow-wrap: anywhere;
+}
+
+.profile-panel span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.profile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .storage-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -445,7 +470,9 @@ button:focus-visible {
 .insight-list,
 .topic-performance,
 .control-list,
-.flashcard-library {
+.flashcard-library,
+.source-library,
+.note-library {
   display: grid;
   gap: 12px;
 }
@@ -474,7 +501,9 @@ button:focus-visible {
 
 .control-row,
 .flashcard-review,
-.flashcard-library-card {
+.flashcard-library-card,
+.source-card,
+.note-card {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -485,7 +514,9 @@ button:focus-visible {
 
 .control-row-top,
 .flashcard-card-top,
-.flashcard-review-top {
+.flashcard-review-top,
+.source-card-top,
+.note-card-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -494,7 +525,9 @@ button:focus-visible {
 
 .control-row-top strong,
 .flashcard-card-top strong,
-.flashcard-review-top strong {
+.flashcard-review-top strong,
+.source-card-top strong,
+.note-card-top strong {
   overflow-wrap: anywhere;
 }
 
@@ -532,6 +565,72 @@ button:focus-visible {
 }
 
 .flashcard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.highlight-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.marker-yellow {
+  background: #fff7a8;
+}
+
+.marker-green {
+  background: #bbf7d0;
+}
+
+.marker-blue {
+  background: #bfdbfe;
+}
+
+.marker-clear {
+  background: #ffffff;
+}
+
+.note-editor {
+  min-height: 220px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.note-editor:empty::before {
+  content: "Escreva suas anotações aqui. Selecione um trecho e use o marca-texto acima.";
+  color: var(--muted);
+}
+
+.note-content {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.source-preview {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.source-preview iframe {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.source-preview-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -871,7 +970,9 @@ td {
   .performance-top,
   .control-row-top,
   .flashcard-card-top,
-  .flashcard-review-top {
+  .flashcard-review-top,
+  .source-card-top,
+  .note-card-top {
     align-items: stretch;
     flex-direction: column;
   }
@@ -880,6 +981,9 @@ td {
   .quick-actions,
   .timer-controls,
   .storage-actions,
+  .profile-actions,
+  .highlight-toolbar,
+  .source-preview-actions,
   .side-nav,
   .stat-grid,
   .subject-board,

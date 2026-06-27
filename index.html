@@ -23,6 +23,7 @@
           <button class="nav-button" data-view="plano">Matérias</button>
           <button class="nav-button" data-view="questoes">Questões</button>
           <button class="nav-button" data-view="flashcards">Flashcards</button>
+          <button class="nav-button" data-view="anotacoes">Anotações</button>
           <button class="nav-button" data-view="jurisprudencias">Jurisprudências</button>
           <button class="nav-button" data-view="pomodoro">Pomodoro</button>
           <button class="nav-button" data-view="relatorios">Relatórios</button>
@@ -33,6 +34,24 @@
           <strong id="sideTodayHours">0h</strong>
           <span id="sideTodayMeta">Nenhuma sessão registrada.</span>
         </div>
+
+        <form class="profile-panel" id="profileForm">
+          <p class="eyebrow">Perfil</p>
+          <strong id="profileLabel">Meu perfil</strong>
+          <label>
+            Nome
+            <input id="profileName" type="text" placeholder="Ex.: Ana, João, Yury" />
+          </label>
+          <label>
+            Trocar perfil neste navegador
+            <select id="profileSelect"></select>
+          </label>
+          <div class="profile-actions">
+            <button class="button secondary" type="submit">Salvar</button>
+            <button class="button ghost" id="newProfileBtn" type="button">Novo</button>
+          </div>
+          <span id="profileStatus">Dados separados neste navegador.</span>
+        </form>
 
         <div class="storage-actions">
           <button class="button ghost" id="exportBtn" type="button">Exportar</button>
@@ -64,6 +83,7 @@
               <div class="quick-actions">
                 <button class="button primary" data-view="questoes" type="button">Lançar questões</button>
                 <button class="button secondary" data-view="flashcards" type="button">Revisar flashcards</button>
+                <button class="button secondary" data-view="anotacoes" type="button">Anotar lei</button>
                 <button class="button secondary" data-view="jurisprudencias" type="button">Salvar julgado</button>
                 <button class="button ghost" data-view="controle" type="button">Ver controle</button>
               </div>
@@ -522,6 +542,14 @@
                   <option value="Baixa">Baixa</option>
                 </select>
               </label>
+              <label>
+                Dificuldade de repetição
+                <select id="flashcardDifficulty">
+                  <option value="hard">Difícil</option>
+                  <option value="medium" selected>Média</option>
+                  <option value="easy">Fácil</option>
+                </select>
+              </label>
               <button class="button primary" type="submit">Salvar flashcard</button>
             </form>
 
@@ -535,6 +563,30 @@
               </div>
               <div id="flashcardReview" class="flashcard-review"></div>
             </section>
+
+            <form class="panel form-panel" id="flashcardSettingsForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Repetição</p>
+                  <h3>Intervalos por dificuldade</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Difícil
+                  <input id="hardInterval" type="number" min="1" max="99" value="4" required />
+                </label>
+                <label>
+                  Média
+                  <input id="mediumInterval" type="number" min="1" max="99" value="8" required />
+                </label>
+              </div>
+              <label>
+                Fácil
+                <input id="easyInterval" type="number" min="1" max="99" value="12" required />
+              </label>
+              <button class="button secondary" type="submit">Salvar intervalos</button>
+            </form>
           </div>
 
           <section class="panel">
@@ -546,6 +598,98 @@
             </div>
             <div class="flashcard-library" id="flashcardLibrary"></div>
           </section>
+        </section>
+
+        <section class="view" id="anotacoes" aria-labelledby="anotacoesTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Estudo ativo</p>
+              <h2 id="anotacoesTitle">Anotações e fontes</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Fonte</p>
+                  <h3>Adicionar site base</h3>
+                </div>
+              </div>
+              <form class="form-panel" id="sourceForm">
+                <label>
+                  Categoria
+                  <input id="sourceCategory" type="text" placeholder="Ex.: Constitucional, Leis, Planalto" required />
+                </label>
+                <label>
+                  Nome da fonte
+                  <input id="sourceTitle" type="text" placeholder="Ex.: Constituição Federal - Planalto" required />
+                </label>
+                <label>
+                  Link
+                  <input id="sourceUrl" type="url" placeholder="https://www.planalto.gov.br/..." required />
+                </label>
+                <button class="button primary" type="submit">Salvar fonte</button>
+              </form>
+              <div class="source-library" id="sourceLibrary"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Visualização</p>
+                  <h3>Fonte selecionada</h3>
+                </div>
+                <button class="button ghost" id="refreshSourceBtn" type="button">Atualizar fonte</button>
+              </div>
+              <label>
+                Fonte
+                <select id="activeSourceSelect"></select>
+              </label>
+              <div class="source-preview" id="sourcePreview"></div>
+            </section>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="noteForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Anotação</p>
+                  <h3>Nova anotação</h3>
+                </div>
+              </div>
+              <label>
+                Título
+                <input id="noteTitle" type="text" placeholder="Ex.: Art. 37 - Administração Pública" required />
+              </label>
+              <label>
+                Categoria
+                <input id="noteCategory" type="text" placeholder="Ex.: Administrativo" required />
+              </label>
+              <label>
+                Fonte usada como base
+                <select id="noteSource"></select>
+              </label>
+              <div class="highlight-toolbar" aria-label="Ferramentas de marca-texto">
+                <button class="mini-button marker-yellow" data-highlight="yellow" type="button">Amarelo</button>
+                <button class="mini-button marker-green" data-highlight="green" type="button">Verde</button>
+                <button class="mini-button marker-blue" data-highlight="blue" type="button">Azul</button>
+                <button class="mini-button marker-clear" data-highlight="clear" type="button">Limpar</button>
+              </div>
+              <div id="noteEditor" class="note-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+              <button class="button primary" type="submit">Salvar anotação</button>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Biblioteca</p>
+                  <h3>Anotações salvas</h3>
+                </div>
+              </div>
+              <div class="note-library" id="noteLibrary"></div>
+            </section>
+          </div>
         </section>
 
         <section class="view" id="relatorios" aria-labelledby="relatoriosTitle">

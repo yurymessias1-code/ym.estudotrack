@@ -1,4 +1,6 @@
-const STORAGE_KEY = "concursoTrack.v1";
+const LEGACY_STORAGE_KEY = "concursoTrack.v1";
+const PROFILE_ROOT_KEY = "ymEstudos.profiles.v1";
+const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
 
 const titles = {
   dashboard: "Painel",
@@ -6,6 +8,7 @@ const titles = {
   plano: "Matérias",
   questoes: "Questões",
   flashcards: "Flashcards",
+  anotacoes: "Anotações",
   jurisprudencias: "Jurisprudências",
   pomodoro: "Pomodoro",
   relatorios: "Relatórios",
@@ -82,26 +85,81 @@ function escapeHTML(value) {
 }
 
 function loadState() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return createSeedState();
+  const root = getProfilesRoot();
+  const activeProfileId = root.activeProfileId;
 
+  if (activeProfileId) {
+    const savedProfile = readJSON(profileStorageKey(activeProfileId));
+    if (savedProfile) return normalizeState(savedProfile, activeProfileId);
+  }
+
+  const legacy = readJSON(LEGACY_STORAGE_KEY);
+  if (legacy) return normalizeState(legacy);
+
+  return createEmptyState();
+}
+
+function readJSON(key) {
   try {
-    const parsed = JSON.parse(saved);
-    return normalizeState(parsed);
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : null;
   } catch {
-    return createSeedState();
+    return null;
   }
 }
 
-function normalizeState(candidate) {
-  const seed = createSeedState();
+function getProfilesRoot() {
+  const root = readJSON(PROFILE_ROOT_KEY);
   return {
-    version: 1,
-    subjects: Array.isArray(candidate.subjects) ? candidate.subjects : seed.subjects,
-    topics: Array.isArray(candidate.topics) ? candidate.topics : seed.topics,
-    questionLogs: Array.isArray(candidate.questionLogs) ? candidate.questionLogs : seed.questionLogs,
-    studyLogs: Array.isArray(candidate.studyLogs) ? candidate.studyLogs : seed.studyLogs,
-    flashcards: Array.isArray(candidate.flashcards) ? candidate.flashcards : seed.flashcards,
+    activeProfileId: typeof root?.activeProfileId === "string" ? root.activeProfileId : "",
+    profiles: Array.isArray(root?.profiles) ? root.profiles : [],
+  };
+}
+
+function profileStorageKey(profileId) {
+  return `${PROFILE_KEY_PREFIX}${profileId}.v1`;
+}
+
+function makeProfile(profile = {}) {
+  return {
+    id: profile.id || `perfil-${uid()}`,
+    name: typeof profile.name === "string" ? profile.name : "",
+    createdAt: profile.createdAt || todayISO(),
+  };
+}
+
+function normalizeFlashcard(card = {}) {
+  const validDifficulties = ["hard", "medium", "easy"];
+  const difficulty = validDifficulties.includes(card.difficulty) ? card.difficulty : "medium";
+  return {
+    id: card.id || uid(),
+    topicId: card.topicId || "",
+    front: typeof card.front === "string" ? card.front : "",
+    back: typeof card.back === "string" ? card.back : "",
+    priority: card.priority || "Média",
+    difficulty,
+    createdAt: card.createdAt || todayISO(),
+    dueDate: card.dueDate || todayISO(),
+    nextDueReviewNumber: Number(card.nextDueReviewNumber || 0),
+    reviews: Number(card.reviews || 0),
+    correct: Number(card.correct || 0),
+    wrong: Number(card.wrong || 0),
+    lastReviewed: card.lastReviewed || "",
+  };
+}
+
+function normalizeState(candidate, fallbackProfileId = "") {
+  const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
+  return {
+    version: 2,
+    profile: makeProfile(candidate.profile || empty.profile),
+    subjects: Array.isArray(candidate.subjects) ? candidate.subjects : empty.subjects,
+    topics: Array.isArray(candidate.topics) ? candidate.topics : empty.topics,
+    questionLogs: Array.isArray(candidate.questionLogs) ? candidate.questionLogs : empty.questionLogs,
+    studyLogs: Array.isArray(candidate.studyLogs) ? candidate.studyLogs : empty.studyLogs,
+    flashcards: Array.isArray(candidate.flashcards) ? candidate.flashcards.map(normalizeFlashcard) : empty.flashcards,
+    sources: Array.isArray(candidate.sources) ? candidate.sources : empty.sources,
+    notes: Array.isArray(candidate.notes) ? candidate.notes : empty.notes,
     cases: {
       STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ : [],
       STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF : [],
@@ -114,6 +172,14 @@ function normalizeState(candidate) {
       breakMinutes: Number(candidate.settings?.breakMinutes) || 5,
       cycles: Number(candidate.settings?.cycles) || 4,
     },
+    flashcardSettings: {
+      reviewCounter: Number(candidate.flashcardSettings?.reviewCounter || 0),
+      intervals: {
+        hard: Number(candidate.flashcardSettings?.intervals?.hard) || 4,
+        medium: Number(candidate.flashcardSettings?.intervals?.medium) || 8,
+        easy: Number(candidate.flashcardSettings?.intervals?.easy) || 12,
+      },
+    },
     ui: {
       view: candidate.ui?.view || "dashboard",
       caseCourt: candidate.ui?.caseCourt || "STJ",
@@ -121,11 +187,45 @@ function normalizeState(candidate) {
       controlRange: candidate.ui?.controlRange || "week",
       activeFlashcardId: candidate.ui?.activeFlashcardId || "",
       flashcardAnswerOpen: Boolean(candidate.ui?.flashcardAnswerOpen),
+      activeSourceId: candidate.ui?.activeSourceId || "",
+      activeNoteId: candidate.ui?.activeNoteId || "",
+    },
+  };
+}
+
+function createEmptyState(profile = {}) {
+  return {
+    version: 2,
+    profile: makeProfile(profile),
+    subjects: [],
+    topics: [],
+    questionLogs: [],
+    studyLogs: [],
+    flashcards: [],
+    sources: [],
+    notes: [],
+    cases: { STJ: [], STF: [] },
+    media: { url: "" },
+    settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
+    flashcardSettings: {
+      reviewCounter: 0,
+      intervals: { hard: 4, medium: 8, easy: 12 },
+    },
+    ui: {
+      view: "dashboard",
+      caseCourt: "STJ",
+      reportRange: "day",
+      controlRange: "week",
+      activeFlashcardId: "",
+      flashcardAnswerOpen: false,
+      activeSourceId: "",
+      activeNoteId: "",
     },
   };
 }
 
 function createSeedState() {
+  const profile = state?.profile || {};
   const now = new Date();
   const s1 = uid();
   const s2 = uid();
@@ -138,7 +238,8 @@ function createSeedState() {
   const day = (offset) => toISODate(addDays(now, offset));
 
   return {
-    version: 1,
+    ...createEmptyState(profile),
+    version: 2,
     subjects: [
       { id: s1, name: "Direito Constitucional", color: "#0f766e", goalHours: 5 },
       { id: s2, name: "Direito Administrativo", color: "#c2410c", goalHours: 4 },
@@ -172,8 +273,10 @@ function createSeedState() {
         front: "Quando cabe controle concentrado de constitucionalidade?",
         back: "Quando a discussão recai diretamente sobre a validade constitucional de lei ou ato normativo perante a Constituição.",
         priority: "Alta",
+        difficulty: "hard",
         createdAt: day(-3),
         dueDate: day(0),
+        nextDueReviewNumber: 0,
         reviews: 0,
         correct: 0,
         wrong: 0,
@@ -185,8 +288,10 @@ function createSeedState() {
         front: "Diferença entre anulação e revogação do ato administrativo.",
         back: "Anulação decorre de ilegalidade e pode ter efeitos retroativos; revogação decorre de conveniência e oportunidade.",
         priority: "Média",
+        difficulty: "medium",
         createdAt: day(-2),
         dueDate: day(0),
+        nextDueReviewNumber: 0,
         reviews: 0,
         correct: 0,
         wrong: 0,
@@ -231,7 +336,19 @@ function createSeedState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  state.profile = makeProfile(state.profile);
+  const root = getProfilesRoot();
+  const profileRecord = {
+    id: state.profile.id,
+    name: state.profile.name || "Perfil sem nome",
+    updatedAt: new Date().toISOString(),
+  };
+  const profiles = root.profiles.filter((profile) => profile.id !== state.profile.id);
+  profiles.push(profileRecord);
+  profiles.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  localStorage.setItem(profileStorageKey(state.profile.id), JSON.stringify(state));
+  localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: state.profile.id, profiles }));
 }
 
 function getSubject(id) {
@@ -366,17 +483,22 @@ function ensureFormDefaults() {
   $("#breakMinutes").value = state.settings.breakMinutes;
   $("#cycleTotal").value = state.settings.cycles;
   $("#musicUrl").value = state.media.url;
+  $("#hardInterval").value = state.flashcardSettings.intervals.hard;
+  $("#mediumInterval").value = state.flashcardSettings.intervals.medium;
+  $("#easyInterval").value = state.flashcardSettings.intervals.easy;
 }
 
 function render() {
   ensureFormDefaults();
   renderNavigation();
+  renderProfilePanel();
   renderSelectors();
   renderDashboard();
   renderControl();
   renderPlan();
   renderQuestions();
   renderFlashcards();
+  renderNotes();
   renderCases();
   renderPomodoro();
   renderReports();
@@ -395,6 +517,26 @@ function renderNavigation() {
     month: "short",
     year: "numeric",
   });
+}
+
+function renderProfilePanel() {
+  const root = getProfilesRoot();
+  const name = state.profile?.name?.trim();
+  $("#profileLabel").textContent = name || "Perfil local";
+  if (document.activeElement !== $("#profileName")) {
+    $("#profileName").value = name || "";
+  }
+
+  const profiles = root.profiles.length
+    ? root.profiles
+    : [{ id: state.profile.id, name: state.profile.name || "Perfil local" }];
+  $("#profileSelect").innerHTML = profiles
+    .map((profile) => `<option value="${profile.id}">${escapeHTML(profile.name || "Perfil sem nome")}</option>`)
+    .join("");
+  $("#profileSelect").value = state.profile.id;
+  $("#profileStatus").textContent = name
+    ? `Dados de ${name} salvos separadamente neste navegador.`
+    : "Cada pessoa pode criar um perfil local próprio neste navegador.";
 }
 
 function renderSelectors() {
@@ -899,14 +1041,16 @@ function renderFlashcards() {
 }
 
 function getDueFlashcards() {
-  const today = todayISO();
+  const counter = Number(state.flashcardSettings.reviewCounter || 0);
   return [...state.flashcards]
-    .filter((card) => !card.dueDate || card.dueDate <= today)
+    .filter((card) => Number(card.nextDueReviewNumber || 0) <= counter)
     .sort((a, b) => {
       const priorityWeight = { Alta: 3, Média: 2, Baixa: 1 };
+      const difficultyWeight = { hard: 3, medium: 2, easy: 1 };
       return (
+        Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0) ||
+        (difficultyWeight[b.difficulty] || 0) - (difficultyWeight[a.difficulty] || 0) ||
         (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0) ||
-        String(a.dueDate || "").localeCompare(String(b.dueDate || "")) ||
         String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
       );
     });
@@ -916,11 +1060,19 @@ function getActiveFlashcard(dueCards) {
   const active = state.flashcards.find((card) => card.id === state.ui.activeFlashcardId);
   if (active) return active;
 
-  const next = dueCards[0] || [...state.flashcards].sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")))[0];
+  const next = dueCards[0] || [...state.flashcards].sort((a, b) => Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0))[0];
   state.ui.activeFlashcardId = next?.id || "";
   state.ui.flashcardAnswerOpen = false;
   saveState();
   return next;
+}
+
+function difficultyLabel(value) {
+  return { hard: "Difícil", medium: "Média", easy: "Fácil" }[value] || "Média";
+}
+
+function getDifficultyInterval(value) {
+  return Number(state.flashcardSettings.intervals?.[value] || state.flashcardSettings.intervals?.medium || 8);
 }
 
 function renderFlashcardReview(card, dueCount) {
@@ -942,9 +1094,10 @@ function renderFlashcardReview(card, dueCount) {
     <div class="flashcard-review-top">
       <div>
         <span class="tag">${escapeHTML(card.priority || "Média")}</span>
+        <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
         <strong>${escapeHTML(getTopicLabel(card.topicId))}</strong>
       </div>
-      <span class="tag">${dueCount ? "Pendente" : `Próxima: ${formatDate(card.dueDate)}`}</span>
+      <span class="tag">${dueCount ? "Pendente" : `Volta após ${Math.max(0, Number(card.nextDueReviewNumber || 0) - Number(state.flashcardSettings.reviewCounter || 0))} cartões`}</span>
     </div>
     <div class="flashcard-face">
       <strong>Frente</strong>
@@ -955,6 +1108,7 @@ function renderFlashcardReview(card, dueCount) {
       <span>${Number(card.reviews || 0)} revisões</span>
       <span>${Number(card.correct || 0)} acertos</span>
       <span>${Number(card.wrong || 0)} erros</span>
+      <span>Repetição: ${getDifficultyInterval(card.difficulty)} cartões</span>
     </div>
     <div class="flashcard-actions">
       <button class="button secondary" data-action="showFlashcardAnswer" data-id="${card.id}" type="button">Mostrar resposta</button>
@@ -962,11 +1116,17 @@ function renderFlashcardReview(card, dueCount) {
       <button class="button ghost danger" data-action="reviewFlashcard" data-result="wrong" data-id="${card.id}" type="button">Errei</button>
       <button class="button ghost" data-action="nextFlashcard" type="button">Próximo</button>
     </div>
+    <div class="flashcard-actions">
+      <button class="mini-button bad" data-action="setFlashcardDifficulty" data-difficulty="hard" data-id="${card.id}" type="button">Difícil</button>
+      <button class="mini-button" data-action="setFlashcardDifficulty" data-difficulty="medium" data-id="${card.id}" type="button">Média</button>
+      <button class="mini-button good" data-action="setFlashcardDifficulty" data-difficulty="easy" data-id="${card.id}" type="button">Fácil</button>
+    </div>
   `;
 }
 
 function renderFlashcardLibrary() {
-  const sorted = [...state.flashcards].sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
+  const counter = Number(state.flashcardSettings.reviewCounter || 0);
+  const sorted = [...state.flashcards].sort((a, b) => Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0));
   $("#flashcardLibrary").innerHTML = sorted.length
     ? sorted
         .map(
@@ -975,9 +1135,10 @@ function renderFlashcardLibrary() {
           <div class="flashcard-card-top">
             <div>
               <span class="tag">${escapeHTML(card.priority || "Média")}</span>
+              <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
               <strong>${escapeHTML(card.front)}</strong>
             </div>
-            <span class="tag">${card.dueDate ? `Revisar ${formatDate(card.dueDate)}` : "Sem data"}</span>
+            <span class="tag">${Number(card.nextDueReviewNumber || 0) <= counter ? "Pendente" : `Faltam ${Number(card.nextDueReviewNumber || 0) - counter}`}</span>
           </div>
           <p class="music-note">${escapeHTML(card.back)}</p>
           <div class="flashcard-metrics">
@@ -985,6 +1146,7 @@ function renderFlashcardLibrary() {
             <span>${Number(card.reviews || 0)} revisões</span>
             <span>${Number(card.correct || 0)} acertos</span>
             <span>${Number(card.wrong || 0)} erros</span>
+            <span>Repetição: ${getDifficultyInterval(card.difficulty)} cartões</span>
           </div>
           <div class="inline-actions">
             <button class="mini-button" data-action="studyFlashcard" data-id="${card.id}" type="button">Revisar</button>
@@ -1001,19 +1163,147 @@ function reviewFlashcard(cardId, isCorrect) {
   const card = state.flashcards.find((item) => item.id === cardId);
   if (!card) return;
 
+  state.flashcardSettings.reviewCounter = Number(state.flashcardSettings.reviewCounter || 0) + 1;
   card.reviews = Number(card.reviews || 0) + 1;
   card.correct = Number(card.correct || 0) + (isCorrect ? 1 : 0);
   card.wrong = Number(card.wrong || 0) + (isCorrect ? 0 : 1);
   card.lastReviewed = todayISO();
-
-  const confidence = Math.max(1, Number(card.correct || 0) - Number(card.wrong || 0) + 1);
-  const interval = isCorrect ? Math.min(30, confidence * 2) : 1;
-  card.dueDate = toISODate(addDays(parseISODate(todayISO()), interval));
+  card.nextDueReviewNumber = Number(state.flashcardSettings.reviewCounter || 0) + getDifficultyInterval(card.difficulty);
+  card.dueDate = todayISO();
 
   state.ui.flashcardAnswerOpen = false;
   state.ui.activeFlashcardId = getDueFlashcards().filter((item) => item.id !== card.id)[0]?.id || "";
   saveState();
   renderFlashcards();
+}
+
+function getSource(sourceId) {
+  return state.sources.find((source) => source.id === sourceId);
+}
+
+function renderNotes() {
+  renderSourceSelectors();
+  renderSourceLibrary();
+  renderSourcePreview();
+  renderNoteLibrary();
+}
+
+function renderSourceSelectors() {
+  const options = state.sources
+    .map((source) => `<option value="${source.id}">${escapeHTML(source.category)} - ${escapeHTML(source.title)}</option>`)
+    .join("");
+  const emptyOption = `<option value="">Sem fonte vinculada</option>`;
+  $("#activeSourceSelect").innerHTML = emptyOption + options;
+  $("#noteSource").innerHTML = emptyOption + options;
+  if (state.sources.some((source) => source.id === state.ui.activeSourceId)) {
+    $("#activeSourceSelect").value = state.ui.activeSourceId;
+  }
+}
+
+function renderSourceLibrary() {
+  $("#sourceLibrary").innerHTML = state.sources.length
+    ? [...state.sources]
+        .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.title).localeCompare(String(b.title)))
+        .map(
+          (source) => `
+        <article class="source-card">
+          <div class="source-card-top">
+            <div>
+              <span class="tag">${escapeHTML(source.category)}</span>
+              <strong>${escapeHTML(source.title)}</strong>
+            </div>
+          </div>
+          <p class="music-note">${escapeHTML(source.url)}</p>
+          <div class="inline-actions">
+            <button class="mini-button" data-action="selectSource" data-id="${source.id}" type="button">Usar</button>
+            <button class="mini-button bad" data-action="deleteSource" data-id="${source.id}" type="button">Excluir</button>
+          </div>
+        </article>
+      `
+        )
+        .join("")
+    : `<div class="empty-state">Cadastre sites como Planalto, tribunais ou páginas de lei para usar como fonte.</div>`;
+}
+
+function renderSourcePreview() {
+  const source = getSource(state.ui.activeSourceId);
+  if (!source) {
+    $("#sourcePreview").innerHTML = `<div class="empty-state">Selecione uma fonte para visualizar ou abrir o site base.</div>`;
+    return;
+  }
+
+  const safeUrl = getSafeExternalUrl(source.url);
+  if (!safeUrl) {
+    $("#sourcePreview").innerHTML = `<div class="empty-state">O link desta fonte não é válido.</div>`;
+    return;
+  }
+
+  $("#sourcePreview").innerHTML = `
+    <div class="source-preview-actions">
+      <a class="button secondary" href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer">Abrir site base</a>
+      <button class="button ghost" data-action="useSourceInNote" data-id="${source.id}" type="button">Usar na anotação</button>
+    </div>
+    <iframe src="${escapeHTML(safeUrl)}" title="${escapeHTML(source.title)}" loading="lazy"></iframe>
+    <p class="music-note">Alguns sites oficiais bloqueiam visualização dentro do app. Se isso acontecer, use o botão para abrir o site base e atualize sua anotação manualmente.</p>
+  `;
+}
+
+function renderNoteLibrary() {
+  $("#noteLibrary").innerHTML = state.notes.length
+    ? [...state.notes]
+        .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)))
+        .map((note) => {
+          const source = getSource(note.sourceId);
+          return `
+            <article class="note-card">
+              <div class="note-card-top">
+                <div>
+                  <span class="tag">${escapeHTML(note.category)}</span>
+                  <strong>${escapeHTML(note.title)}</strong>
+                </div>
+                <span class="tag">${formatDate((note.updatedAt || note.createdAt || todayISO()).slice(0, 10))}</span>
+              </div>
+              <div class="note-content">${sanitizeNoteHTML(note.content || "")}</div>
+              <div class="flashcard-metrics">
+                ${source ? `<span>Fonte: ${escapeHTML(source.title)}</span>` : `<span>Sem fonte vinculada</span>`}
+              </div>
+              <div class="inline-actions">
+                <button class="mini-button" data-action="editNote" data-id="${note.id}" type="button">Editar</button>
+                ${source ? `<button class="mini-button" data-action="selectSource" data-id="${source.id}" type="button">Abrir fonte</button>` : ""}
+                <button class="mini-button bad" data-action="deleteNote" data-id="${note.id}" type="button">Excluir</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Suas anotações com marca-texto aparecerão aqui.</div>`;
+}
+
+function applyHighlight(kind) {
+  const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
+  $("#noteEditor").focus();
+  if (kind === "clear") {
+    document.execCommand("removeFormat", false, null);
+    return;
+  }
+  document.execCommand("backColor", false, colors[kind] || colors.yellow);
+}
+
+function sanitizeNoteHTML(html) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html || "";
+  wrapper.querySelectorAll("script, style, iframe, object, embed, link, meta").forEach((element) => element.remove());
+  wrapper.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) element.removeAttribute(attribute.name);
+      if (name === "href" || name === "src") element.removeAttribute(attribute.name);
+      if (name === "style" && !/background|color|font-weight|text-decoration/i.test(attribute.value)) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+  return wrapper.innerHTML;
 }
 
 function renderCases() {
@@ -1458,6 +1748,33 @@ function attachEvents() {
     if (action) handleAction(action);
   });
 
+  $("#profileForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.profile.name = $("#profileName").value.trim();
+    saveState();
+    renderProfilePanel();
+    showToast("Perfil salvo.");
+  });
+
+  $("#profileSelect").addEventListener("change", (event) => {
+    const selectedId = event.target.value;
+    const savedProfile = readJSON(profileStorageKey(selectedId));
+    if (!savedProfile) return;
+    state = normalizeState(savedProfile, selectedId);
+    saveState();
+    resetTimer();
+    render();
+    showToast("Perfil carregado.");
+  });
+
+  $("#newProfileBtn").addEventListener("click", () => {
+    state = createEmptyState();
+    saveState();
+    resetTimer();
+    render();
+    showToast("Novo perfil criado. Seus dados começam em branco.");
+  });
+
   $("#subjectForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = $("#subjectName").value.trim();
@@ -1576,8 +1893,10 @@ function attachEvents() {
       front,
       back,
       priority: $("#flashcardPriority").value,
+      difficulty: $("#flashcardDifficulty").value,
       createdAt: todayISO(),
       dueDate: todayISO(),
+      nextDueReviewNumber: Number(state.flashcardSettings.reviewCounter || 0),
       reviews: 0,
       correct: 0,
       wrong: 0,
@@ -1590,6 +1909,91 @@ function attachEvents() {
     event.target.reset();
     render();
     showToast("Flashcard salvo.");
+  });
+
+  $("#flashcardSettingsForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.flashcardSettings.intervals.hard = clamp(Number($("#hardInterval").value), 1, 99);
+    state.flashcardSettings.intervals.medium = clamp(Number($("#mediumInterval").value), 1, 99);
+    state.flashcardSettings.intervals.easy = clamp(Number($("#easyInterval").value), 1, 99);
+    saveState();
+    renderFlashcards();
+    showToast("Intervalos dos flashcards salvos.");
+  });
+
+  $("#sourceForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const url = getSafeExternalUrl($("#sourceUrl").value.trim());
+    if (!url) {
+      showToast("Informe um link válido para a fonte.");
+      return;
+    }
+    const source = {
+      id: uid(),
+      category: $("#sourceCategory").value.trim(),
+      title: $("#sourceTitle").value.trim(),
+      url,
+      createdAt: todayISO(),
+      updatedAt: new Date().toISOString(),
+    };
+    state.sources.push(source);
+    state.ui.activeSourceId = source.id;
+    saveState();
+    event.target.reset();
+    renderNotes();
+    showToast("Fonte salva.");
+  });
+
+  $("#activeSourceSelect").addEventListener("change", (event) => {
+    state.ui.activeSourceId = event.target.value;
+    saveState();
+    renderNotes();
+  });
+
+  $("#refreshSourceBtn").addEventListener("click", () => {
+    renderSourcePreview();
+    showToast("Fonte atualizada na visualização.");
+  });
+
+  $$(".highlight-toolbar [data-highlight]").forEach((button) => {
+    button.addEventListener("click", () => applyHighlight(button.dataset.highlight));
+  });
+
+  $("#noteForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = $("#noteTitle").value.trim();
+    const category = $("#noteCategory").value.trim();
+    const content = sanitizeNoteHTML($("#noteEditor").innerHTML.trim());
+    if (!title || !category || !content) {
+      showToast("Preencha título, categoria e anotação.");
+      return;
+    }
+
+    const existing = state.notes.find((note) => note.id === state.ui.activeNoteId);
+    if (existing) {
+      existing.title = title;
+      existing.category = category;
+      existing.sourceId = $("#noteSource").value;
+      existing.content = content;
+      existing.updatedAt = new Date().toISOString();
+    } else {
+      state.notes.push({
+        id: uid(),
+        title,
+        category,
+        sourceId: $("#noteSource").value,
+        content,
+        createdAt: todayISO(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    state.ui.activeNoteId = "";
+    saveState();
+    event.target.reset();
+    $("#noteEditor").innerHTML = "";
+    renderNotes();
+    showToast("Anotação salva.");
   });
 
   $("#musicForm").addEventListener("submit", (event) => {
@@ -1616,7 +2020,7 @@ function attachEvents() {
   $("#importInput").addEventListener("change", importData);
   $("#resetDemoBtn").addEventListener("click", () => {
     if (!window.confirm("Restaurar os dados de exemplo e substituir os dados atuais?")) return;
-    state = createSeedState();
+    state = createSeedState(state.profile);
     saveState();
     resetTimer();
     render();
@@ -1666,6 +2070,16 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "setFlashcardDifficulty") {
+    const card = state.flashcards.find((item) => item.id === id);
+    if (!card) return;
+    card.difficulty = action.dataset.difficulty || "medium";
+    saveState();
+    renderFlashcards();
+    showToast(`Dificuldade alterada para ${difficultyLabel(card.difficulty)}.`);
+    return;
+  }
+
   if (type === "nextFlashcard") {
     const cards = getDueFlashcards();
     const currentIndex = cards.findIndex((card) => card.id === state.ui.activeFlashcardId);
@@ -1695,6 +2109,57 @@ function handleAction(action) {
     saveState();
     render();
     showToast("Flashcard excluído.");
+    return;
+  }
+
+  if (type === "selectSource") {
+    state.ui.activeSourceId = id;
+    saveState();
+    renderNotes();
+    showToast("Fonte selecionada.");
+    return;
+  }
+
+  if (type === "useSourceInNote") {
+    state.ui.activeSourceId = id;
+    $("#noteSource").value = id;
+    const source = getSource(id);
+    if (source && !$("#noteCategory").value.trim()) $("#noteCategory").value = source.category;
+    saveState();
+    renderSourcePreview();
+    showToast("Fonte vinculada à anotação.");
+    return;
+  }
+
+  if (type === "deleteSource") {
+    state.sources = state.sources.filter((source) => source.id !== id);
+    state.notes = state.notes.map((note) => (note.sourceId === id ? { ...note, sourceId: "" } : note));
+    if (state.ui.activeSourceId === id) state.ui.activeSourceId = "";
+    saveState();
+    renderNotes();
+    showToast("Fonte removida.");
+    return;
+  }
+
+  if (type === "editNote") {
+    const note = state.notes.find((item) => item.id === id);
+    if (!note) return;
+    state.ui.activeNoteId = id;
+    $("#noteTitle").value = note.title;
+    $("#noteCategory").value = note.category;
+    $("#noteSource").value = note.sourceId || "";
+    $("#noteEditor").innerHTML = sanitizeNoteHTML(note.content || "");
+    saveState();
+    showToast("Anotação carregada para edição.");
+    return;
+  }
+
+  if (type === "deleteNote") {
+    state.notes = state.notes.filter((note) => note.id !== id);
+    if (state.ui.activeNoteId === id) state.ui.activeNoteId = "";
+    saveState();
+    renderNotes();
+    showToast("Anotação excluída.");
     return;
   }
 
@@ -1773,7 +2238,9 @@ function importData(event) {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      state = normalizeState(JSON.parse(String(reader.result)));
+      const imported = normalizeState(JSON.parse(String(reader.result)));
+      imported.profile.id = imported.profile.id || `perfil-${uid()}`;
+      state = imported;
       saveState();
       resetTimer();
       render();

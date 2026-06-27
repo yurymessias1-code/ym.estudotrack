@@ -12,6 +12,7 @@ const titles = {
   jurisprudencias: "Jurisprudências",
   pomodoro: "Pomodoro",
   relatorios: "Relatórios",
+  conta: "Conta",
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -161,12 +162,17 @@ function normalizeState(candidate, fallbackProfileId = "") {
     flashcards: Array.isArray(candidate.flashcards) ? candidate.flashcards.map(normalizeFlashcard) : empty.flashcards,
     sources: Array.isArray(candidate.sources) ? candidate.sources : empty.sources,
     notes: Array.isArray(candidate.notes) ? candidate.notes : empty.notes,
+    goals: Array.isArray(candidate.goals) ? candidate.goals : empty.goals,
     cases: {
       STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ : [],
       STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF : [],
     },
     media: {
       url: typeof candidate.media?.url === "string" ? candidate.media.url : "",
+    },
+    account: {
+      name: typeof candidate.account?.name === "string" ? candidate.account.name : "",
+      email: typeof candidate.account?.email === "string" ? candidate.account.email : "",
     },
     settings: {
       focusMinutes: Number(candidate.settings?.focusMinutes) || 25,
@@ -186,6 +192,10 @@ function normalizeState(candidate, fallbackProfileId = "") {
       caseCourt: candidate.ui?.caseCourt || "STJ",
       reportRange: candidate.ui?.reportRange || "day",
       controlRange: candidate.ui?.controlRange || "week",
+      controlDayDate: candidate.ui?.controlDayDate || todayISO(),
+      controlWeekDate: candidate.ui?.controlWeekDate || todayISO(),
+      controlMonth: candidate.ui?.controlMonth || todayISO().slice(0, 7),
+      controlYear: Number(candidate.ui?.controlYear) || new Date().getFullYear(),
       activeFlashcardId: candidate.ui?.activeFlashcardId || "",
       flashcardAnswerOpen: Boolean(candidate.ui?.flashcardAnswerOpen),
       activeSourceId: candidate.ui?.activeSourceId || "",
@@ -205,8 +215,10 @@ function createEmptyState(profile = {}) {
     flashcards: [],
     sources: [],
     notes: [],
+    goals: [],
     cases: { STJ: [], STF: [] },
     media: { url: "" },
+    account: { name: "", email: "" },
     settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
     flashcardSettings: {
       reviewCounter: 0,
@@ -217,6 +229,10 @@ function createEmptyState(profile = {}) {
       caseCourt: "STJ",
       reportRange: "day",
       controlRange: "week",
+      controlDayDate: todayISO(),
+      controlWeekDate: todayISO(),
+      controlMonth: todayISO().slice(0, 7),
+      controlYear: new Date().getFullYear(),
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
       activeSourceId: "",
@@ -487,6 +503,13 @@ function ensureFormDefaults() {
   $("#hardInterval").value = state.flashcardSettings.intervals.hard;
   $("#mediumInterval").value = state.flashcardSettings.intervals.medium;
   $("#easyInterval").value = state.flashcardSettings.intervals.easy;
+  $("#controlDayDate").value = state.ui.controlDayDate || todayISO();
+  $("#controlWeekDate").value = state.ui.controlWeekDate || todayISO();
+  $("#controlMonthInput").value = state.ui.controlMonth || todayISO().slice(0, 7);
+  $("#controlYearInput").value = state.ui.controlYear || new Date().getFullYear();
+  $("#goalDate").value ||= todayISO();
+  $("#accountName").value = state.account.name || state.profile.name || "";
+  $("#accountEmail").value = state.account.email || "";
 }
 
 function render() {
@@ -496,6 +519,7 @@ function render() {
   renderSelectors();
   renderDashboard();
   renderControl();
+  renderGoals();
   renderPlan();
   renderQuestions();
   renderFlashcards();
@@ -590,6 +614,7 @@ function statCard(label, value, caption) {
 function renderControl() {
   const range = state.ui.controlRange || "week";
   $$(".segment[data-control-range]").forEach((button) => button.classList.toggle("active", button.dataset.controlRange === range));
+  $$("[data-period-field]").forEach((field) => field.classList.toggle("active", field.dataset.periodField === range));
 
   const meta = getControlPeriodMeta(range);
   const studyLogs = state.studyLogs.filter((log) => isDateBetween(log.date, meta.start, meta.end));
@@ -617,44 +642,49 @@ function renderControl() {
 
 function getControlPeriodMeta(range) {
   const today = parseISODate(todayISO());
-  const startOfWeek = addDays(today, -((today.getDay() + 6) % 7));
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const yearStart = new Date(today.getFullYear(), 0, 1);
-  const yearEnd = new Date(today.getFullYear(), 11, 31);
 
   if (range === "day") {
+    const selected = parseISODate(state.ui.controlDayDate || todayISO());
     return {
-      start: today,
-      end: today,
-      label: "Hoje",
-      caption: formatDate(todayISO()),
+      start: selected,
+      end: selected,
+      label: formatDate(toISODate(selected)),
+      caption: "dia selecionado",
       timelineTitle: "Resumo do dia",
       unit: "day",
     };
   }
 
   if (range === "month") {
+    const [year, month] = String(state.ui.controlMonth || todayISO().slice(0, 7)).split("-").map(Number);
+    const monthStart = new Date(year || today.getFullYear(), (month || today.getMonth() + 1) - 1, 1);
+    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
     return {
-      start: new Date(today.getFullYear(), today.getMonth(), 1),
-      end: endOfMonth,
-      label: today.toLocaleDateString("pt-BR", { month: "long" }),
-      caption: String(today.getFullYear()),
-      timelineTitle: "Dias do mês",
+      start: monthStart,
+      end: monthEnd,
+      label: monthStart.toLocaleDateString("pt-BR", { month: "long" }),
+      caption: String(monthStart.getFullYear()),
+      timelineTitle: "Dias do mês selecionado",
       unit: "day",
     };
   }
 
   if (range === "year") {
+    const selectedYear = Number(state.ui.controlYear) || today.getFullYear();
+    const yearStart = new Date(selectedYear, 0, 1);
+    const yearEnd = new Date(selectedYear, 11, 31);
     return {
       start: yearStart,
       end: yearEnd,
-      label: String(today.getFullYear()),
-      caption: "ano atual",
-      timelineTitle: "Meses do ano",
+      label: String(selectedYear),
+      caption: "ano selecionado",
+      timelineTitle: "Meses do ano selecionado",
       unit: "month",
     };
   }
 
+  const weekReference = parseISODate(state.ui.controlWeekDate || todayISO());
+  const startOfWeek = addDays(weekReference, -((weekReference.getDay() + 6) % 7));
   return {
     start: startOfWeek,
     end: addDays(startOfWeek, 6),
@@ -787,6 +817,39 @@ function renderControlGoals(range, studyLogs) {
         )
         .join("")
     : `<div class="empty-state">Cadastre matérias para acompanhar metas.</div>`;
+}
+
+function renderGoals() {
+  const today = parseISODate(todayISO());
+  $("#goalList").innerHTML = state.goals.length
+    ? [...state.goals]
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+        .map((goal) => {
+          const target = parseISODate(goal.date);
+          const days = Math.ceil((target - today) / 86400000);
+          const label = days > 0 ? `${days} dias` : days === 0 ? "Hoje" : `${Math.abs(days)} dias atrás`;
+          const status = days > 0 ? "faltam" : days === 0 ? "é hoje" : "passou";
+          return `
+            <article class="goal-card">
+              <div class="goal-card-top">
+                <div>
+                  <span class="tag">${escapeHTML(goal.category || "Objetivo")}</span>
+                  <strong>${escapeHTML(goal.title)}</strong>
+                </div>
+                <span class="tag">${formatDate(goal.date)}</span>
+              </div>
+              <div class="goal-days">${escapeHTML(label)}</div>
+              <div class="control-metrics">
+                <span>${escapeHTML(status)}</span>
+              </div>
+              <div class="inline-actions">
+                <button class="mini-button bad" data-action="deleteGoal" data-id="${goal.id}" type="button">Excluir</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Cadastre a data da prova ou outro objetivo para ver a contagem regressiva.</div>`;
 }
 
 function renderControlHistory(studyLogs, questionLogs) {
@@ -1757,6 +1820,7 @@ function attachEvents() {
       state.ui.controlRange = controlTab.dataset.controlRange;
       saveState();
       renderControl();
+      renderGoals();
       return;
     }
 
@@ -1789,6 +1853,86 @@ function attachEvents() {
     resetTimer();
     render();
     showToast("Novo perfil criado. Seus dados começam em branco.");
+  });
+
+  $("#controlDayDate").addEventListener("change", (event) => {
+    state.ui.controlDayDate = event.target.value || todayISO();
+    saveState();
+    renderControl();
+  });
+
+  $("#controlWeekDate").addEventListener("change", (event) => {
+    state.ui.controlWeekDate = event.target.value || todayISO();
+    saveState();
+    renderControl();
+  });
+
+  $("#controlMonthInput").addEventListener("change", (event) => {
+    state.ui.controlMonth = event.target.value || todayISO().slice(0, 7);
+    saveState();
+    renderControl();
+  });
+
+  $("#controlYearInput").addEventListener("change", (event) => {
+    state.ui.controlYear = Number(event.target.value) || new Date().getFullYear();
+    saveState();
+    renderControl();
+  });
+
+  $("#goalForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = $("#goalTitle").value.trim();
+    const date = $("#goalDate").value;
+    if (!title || !date) {
+      showToast("Informe nome e data do objetivo.");
+      return;
+    }
+    state.goals.push({
+      id: uid(),
+      title,
+      date,
+      category: $("#goalCategory").value.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    saveState();
+    event.target.reset();
+    $("#goalDate").value = todayISO();
+    renderGoals();
+    showToast("Objetivo salvo.");
+  });
+
+  $("#accountForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.account.name = $("#accountName").value.trim();
+    state.account.email = $("#accountEmail").value.trim();
+    state.profile.name = state.account.name || state.profile.name;
+    saveState();
+    renderProfilePanel();
+    showToast("Login local salvo.");
+  });
+
+  $("#generateBackupBtn").addEventListener("click", () => {
+    $("#backupCode").value = createBackupPayload();
+    showToast("Backup gerado.");
+  });
+
+  $("#downloadBackupBtn").addEventListener("click", () => {
+    downloadBackupFile();
+  });
+
+  $("#restoreBackupBtn").addEventListener("click", () => {
+    restoreBackupFromText($("#backupCode").value);
+  });
+
+  $("#copyBackupBtn").addEventListener("click", async () => {
+    const text = $("#backupCode").value || createBackupPayload();
+    $("#backupCode").value = text;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Backup copiado.");
+    } catch {
+      showToast("Backup gerado. Copie manualmente o texto.");
+    }
   });
 
   $("#subjectForm").addEventListener("submit", (event) => {
@@ -2190,6 +2334,14 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "deleteGoal") {
+    state.goals = state.goals.filter((goal) => goal.id !== id);
+    saveState();
+    renderGoals();
+    showToast("Objetivo excluído.");
+    return;
+  }
+
   if (type === "deleteSubject") {
     if (!window.confirm("Excluir esta matéria e seus assuntos?")) return;
     const topicIds = state.topics.filter((topic) => topic.subjectId === id).map((topic) => topic.id);
@@ -2259,13 +2411,56 @@ function exportData() {
   URL.revokeObjectURL(url);
 }
 
+function createBackupPayload() {
+  return JSON.stringify(
+    {
+      app: "ymcontrole-de-estudos",
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      data: state,
+    },
+    null,
+    2
+  );
+}
+
+function downloadBackupFile() {
+  const payload = createBackupPayload();
+  $("#backupCode").value = payload;
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `ymcontrole-backup-${todayISO()}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  showToast("Arquivo de backup baixado.");
+}
+
+function restoreBackupFromText(text) {
+  try {
+    const parsed = JSON.parse(String(text || ""));
+    const payload = parsed.data ? parsed.data : parsed;
+    const restored = normalizeState(payload);
+    restored.profile.id = restored.profile.id || `perfil-${uid()}`;
+    state = restored;
+    saveState();
+    resetTimer();
+    render();
+    showToast("Backup restaurado.");
+  } catch {
+    showToast("Backup inválido. Cole um JSON gerado pelo app.");
+  }
+}
+
 function importData(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const imported = normalizeState(JSON.parse(String(reader.result)));
+      const parsed = JSON.parse(String(reader.result));
+      const imported = normalizeState(parsed.data ? parsed.data : parsed);
       imported.profile.id = imported.profile.id || `perfil-${uid()}`;
       state = imported;
       saveState();

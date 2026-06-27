@@ -4,14 +4,15 @@ Aplicativo web estático para controle de estudos para concursos, com:
 
 - matérias e assuntos;
 - controle de questões, acertos e erros;
-- controle por dia, semana, mês e ano;
+- controle por dia, semana, mês e ano com seleção de período específico;
+- objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF;
 - Pomodoro com registro de tempo;
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
 - anotações com marca-texto, categorias e fonte externa vinculada;
 - perfis locais separados por usuário no mesmo navegador;
-- exportação e importação dos dados em JSON.
+- exportação, importação e backup dos dados em JSON.
 
 ## Como publicar no GitHub
 
@@ -51,8 +52,21 @@ Isso significa que cada pessoa que abrir o site em seu próprio navegador terá 
 Se mais de uma pessoa usar o mesmo computador ou navegador, use o painel **Perfil** na lateral para criar um perfil local diferente para cada pessoa.
 
 Para levar dados para outro navegador, computador ou celular, use os botões **Exportar** e **Importar** dentro do app.
+Também existe uma aba **Conta** com login local e geração/restauração de backup.
 
 Para sincronizar automaticamente entre dispositivos com login e senha, será necessário adicionar um backend, como Supabase, Firebase ou outro banco com autenticação.
+
+## Controle por período e objetivos
+
+A aba **Controle** permite selecionar:
+
+- um dia específico;
+- uma semana de referência;
+- um mês específico;
+- um ano específico.
+
+Os dados exibidos mudam de acordo com o período escolhido.
+Na mesma aba é possível cadastrar objetivos, como data de prova, revisão final ou qualquer meta pessoal, com contagem de dias restantes.
 
 ## Flashcards por dificuldade
 

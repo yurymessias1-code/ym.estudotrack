@@ -27,6 +27,7 @@
           <button class="nav-button" data-view="jurisprudencias">Jurisprudências</button>
           <button class="nav-button" data-view="pomodoro">Pomodoro</button>
           <button class="nav-button" data-view="relatorios">Relatórios</button>
+          <button class="nav-button" data-view="conta">Conta</button>
         </nav>
 
         <div class="quick-panel">
@@ -459,6 +460,33 @@
             </div>
           </div>
 
+          <section class="panel control-period-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Período específico</p>
+                <h3>Escolha o intervalo do controle</h3>
+              </div>
+            </div>
+            <div class="period-picker-grid">
+              <label data-period-field="day">
+                Dia
+                <input id="controlDayDate" type="date" />
+              </label>
+              <label data-period-field="week">
+                Semana de referência
+                <input id="controlWeekDate" type="date" />
+              </label>
+              <label data-period-field="month">
+                Mês
+                <input id="controlMonthInput" type="month" />
+              </label>
+              <label data-period-field="year">
+                Ano
+                <input id="controlYearInput" type="number" min="2000" max="2100" />
+              </label>
+            </div>
+          </section>
+
           <div class="stat-grid" id="controlStats"></div>
 
           <div class="content-grid two-columns">
@@ -480,6 +508,40 @@
                 </div>
               </div>
               <div class="control-list" id="controlGoals"></div>
+            </section>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="goalForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Objetivo</p>
+                  <h3>Novo objetivo</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="goalTitle" type="text" placeholder="Ex.: Prova do TJ, revisão final, simulado" required />
+              </label>
+              <label>
+                Data-alvo
+                <input id="goalDate" type="date" required />
+              </label>
+              <label>
+                Categoria
+                <input id="goalCategory" type="text" placeholder="Ex.: Concurso, revisão, meta pessoal" />
+              </label>
+              <button class="button primary" type="submit">Salvar objetivo</button>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Contagem</p>
+                  <h3>Objetivos salvos</h3>
+                </div>
+              </div>
+              <div class="goal-list" id="goalList"></div>
             </section>
           </div>
 
@@ -688,6 +750,58 @@
                 </div>
               </div>
               <div class="note-library" id="noteLibrary"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="conta" aria-labelledby="contaTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Conta</p>
+              <h2 id="contaTitle">Login local e backup</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="accountForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Identificação</p>
+                  <h3>Login local</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="accountName" type="text" placeholder="Seu nome" />
+              </label>
+              <label>
+                E-mail
+                <input id="accountEmail" type="email" placeholder="voce@email.com" />
+              </label>
+              <button class="button primary" type="submit">Salvar login local</button>
+              <p class="music-note">Este login identifica e separa os dados neste navegador. Backup online real exige backend externo.</p>
+            </form>
+
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Backup</p>
+                  <h3>Salvar ou restaurar estudos</h3>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="button secondary" id="generateBackupBtn" type="button">Gerar backup</button>
+                <button class="button ghost" id="downloadBackupBtn" type="button">Baixar arquivo</button>
+              </div>
+              <label>
+                Código de backup
+                <textarea id="backupCode" rows="8" placeholder="Gere um backup ou cole aqui um backup antigo"></textarea>
+              </label>
+              <div class="profile-actions">
+                <button class="button primary" id="restoreBackupBtn" type="button">Restaurar backup</button>
+                <button class="button ghost" id="copyBackupBtn" type="button">Copiar</button>
+              </div>
+              <p class="music-note">Guarde o código ou arquivo de backup. Ele leva seus estudos para outro navegador ou computador.</p>
             </section>
           </div>
         </section>

@@ -472,7 +472,8 @@ button:focus-visible {
 .control-list,
 .flashcard-library,
 .source-library,
-.note-library {
+.note-library,
+.goal-list {
   display: grid;
   gap: 12px;
 }
@@ -503,7 +504,8 @@ button:focus-visible {
 .flashcard-review,
 .flashcard-library-card,
 .source-card,
-.note-card {
+.note-card,
+.goal-card {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -516,7 +518,8 @@ button:focus-visible {
 .flashcard-card-top,
 .flashcard-review-top,
 .source-card-top,
-.note-card-top {
+.note-card-top,
+.goal-card-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -527,7 +530,8 @@ button:focus-visible {
 .flashcard-card-top strong,
 .flashcard-review-top strong,
 .source-card-top strong,
-.note-card-top strong {
+.note-card-top strong,
+.goal-card-top strong {
   overflow-wrap: anywhere;
 }
 
@@ -634,6 +638,29 @@ button:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.control-period-panel {
+  margin-bottom: 18px;
+}
+
+.period-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+[data-period-field] {
+  display: none;
+}
+
+[data-period-field].active {
+  display: grid;
+}
+
+.goal-days {
+  font-size: 1.9rem;
+  font-weight: 900;
 }
 
 .mini-button {
@@ -972,7 +999,8 @@ td {
   .flashcard-card-top,
   .flashcard-review-top,
   .source-card-top,
-  .note-card-top {
+  .note-card-top,
+  .goal-card-top {
     align-items: stretch;
     flex-direction: column;
   }
@@ -987,6 +1015,7 @@ td {
   .side-nav,
   .stat-grid,
   .subject-board,
+  .period-picker-grid,
   .split-inputs {
     grid-template-columns: 1fr;
   }

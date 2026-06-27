@@ -26,6 +26,7 @@ let timer = {
   remaining: state.settings.focusMinutes * 60,
   elapsedFocusSeconds: 0,
   cycle: 1,
+  topicId: "",
 };
 
 function todayISO() {
@@ -1343,7 +1344,8 @@ function renderCaseCard(item, court) {
 }
 
 function renderPomodoro() {
-  const topic = getTopic($("#timerTopic").value);
+  const activeTopicId = timer.topicId || $("#timerTopic").value;
+  const topic = getTopic(activeTopicId);
   const subject = topic ? getSubject(topic.subjectId) : null;
   $("#timerTopicLabel").textContent = topic ? `${subject?.name || "Sem matéria"}: ${topic.name}` : "Selecione um assunto";
   $("#timerMode").textContent = timer.mode === "focus" ? "Foco" : "Pausa";
@@ -1351,7 +1353,9 @@ function renderPomodoro() {
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
   renderMusicPlayer();
 
-  const recent = [...state.studyLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+  const recent = [...state.studyLogs]
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, 12);
   $("#studyHistory").innerHTML = recent.length
     ? recent
         .map(
@@ -1642,15 +1646,18 @@ function resetTimer() {
   timer.remaining = state.settings.focusMinutes * 60;
   timer.elapsedFocusSeconds = 0;
   timer.cycle = 1;
+  timer.topicId = "";
   renderPomodoro();
 }
 
 function startTimer() {
   if (timer.running) return;
-  if (!$("#timerTopic").value) {
+  const topicId = $("#timerTopic").value;
+  if (!topicId) {
     showToast("Cadastre e selecione um assunto para usar o Pomodoro.");
     return;
   }
+  if (!timer.topicId) timer.topicId = topicId;
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
   renderPomodoro();
@@ -1683,6 +1690,7 @@ function tickTimer() {
       timer.mode = "focus";
       timer.remaining = state.settings.focusMinutes * 60;
       timer.cycle = 1;
+      timer.topicId = "";
       showToast("Pomodoro completo.");
     }
   }
@@ -1693,10 +1701,18 @@ function tickTimer() {
 }
 
 function logPomodoroFocus() {
-  const topicId = $("#timerTopic").value;
+  const topicId = timer.topicId || $("#timerTopic").value;
   const minutes = Math.max(1, Math.round(timer.elapsedFocusSeconds / 60));
   if (!topicId || !minutes) return;
-  state.studyLogs.push({ id: uid(), topicId, minutes, date: todayISO(), source: "Pomodoro", note: `Ciclo ${timer.cycle}` });
+  state.studyLogs.push({
+    id: uid(),
+    topicId,
+    minutes,
+    date: todayISO(),
+    source: "Pomodoro",
+    note: `Ciclo ${timer.cycle}`,
+    createdAt: new Date().toISOString(),
+  });
   timer.elapsedFocusSeconds = 0;
   saveState();
 }
@@ -1863,19 +1879,30 @@ function attachEvents() {
     event.preventDefault();
     const topicId = $("#studyTopic").value;
     const minutes = Number($("#studyMinutes").value);
-    if (!topicId || minutes <= 0) return;
+    if (!topicId) {
+      showToast("Cadastre e selecione um assunto para registrar tempo.");
+      return;
+    }
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showToast("Informe uma quantidade de minutos maior que zero.");
+      return;
+    }
+    const selectedDate = $("#studyDate").value || todayISO();
+    const selectedNote = $("#studyNote").value.trim();
     state.studyLogs.push({
       id: uid(),
       topicId,
-      minutes,
-      date: $("#studyDate").value || todayISO(),
+      minutes: Math.round(minutes),
+      date: selectedDate,
       source: "Manual",
-      note: $("#studyNote").value.trim(),
+      note: selectedNote,
+      createdAt: new Date().toISOString(),
     });
     saveState();
-    event.target.reset();
+    $("#studyTopic").value = topicId;
     $("#studyMinutes").value = 30;
-    $("#studyDate").value = todayISO();
+    $("#studyDate").value = selectedDate;
+    $("#studyNote").value = "";
     render();
     showToast("Tempo registrado.");
   });

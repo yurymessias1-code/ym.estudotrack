@@ -671,8 +671,8 @@
             </div>
           </div>
 
-          <div class="content-grid form-and-list">
-            <section class="panel form-panel">
+          <div class="notebook-layout">
+            <section class="panel form-panel notebook-sidebar source-panel">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Fonte</p>
@@ -727,10 +727,13 @@
                   <button class="button ghost hidden" id="cancelSourceEditBtn" type="button">Cancelar edição</button>
                 </div>
               </form>
+              <div class="notebook-divider">
+                <span>Fontes salvas</span>
+              </div>
               <div class="source-library" id="sourceLibrary"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel notebook-page source-viewer">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Visualização</p>
@@ -763,8 +766,8 @@
             <div class="category-list" id="categoryList"></div>
           </section>
 
-          <div class="content-grid form-and-list">
-            <form class="panel form-panel" id="noteForm">
+          <div class="notebook-notes-area">
+            <form class="panel form-panel notebook-editor" id="noteForm">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Anotação</p>
@@ -802,7 +805,7 @@
               <button class="button primary" type="submit">Salvar anotação</button>
             </form>
 
-            <section class="panel">
+            <section class="panel notebook-library-panel">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Biblioteca</p>

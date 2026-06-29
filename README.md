@@ -10,7 +10,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - Pomodoro com registro de tempo;
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
-- anotações com marca-texto, categorias e fonte externa vinculada;
+- anotações em layout de caderno, com marca-texto, categorias e fonte externa vinculada;
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador;
 - modo claro e modo escuro;
@@ -83,7 +83,8 @@ Esses números podem ser alterados pelo próprio usuário na aba **Flashcards**,
 
 ## Anotações e fontes
 
-A aba **Anotações** permite cadastrar sites usados como base, como Planalto, tribunais, PDFs hospedados ou páginas de lei.
+A aba **Anotações** funciona como um caderno de estudos: a coluna esquerda reúne cadastro e lista rolável de fontes, a área principal mostra a fonte vinculada e a parte inferior fica para escrever e consultar anotações.
+Ela permite cadastrar sites usados como base, como Planalto, tribunais, PDFs hospedados ou páginas de lei.
 As fontes podem ser divididas por categoria e vinculadas às anotações.
 
 Cada fonte possui um campo de texto hospedado no app: cole ali o trecho da lei ou do site, selecione a parte desejada e aplique marca-texto.
@@ -91,7 +92,7 @@ Os grifos ficam salvos na própria fonte dentro do app e continuam vinculados ao
 
 O editor de fonte e o editor de anotação possuem marca-texto em amarelo, verde, azul e cor personalizada.
 Também é possível editar ou excluir fontes/sites cadastrados e criar/excluir categorias.
-Na fonte selecionada, também há botões para limpar apenas o texto/grifos salvos ou excluir a fonte inteira.
+Cada card de fonte possui botão para excluir a fonte inteira. Na fonte selecionada, também há botões para limpar apenas o texto/grifos salvos ou excluir a fonte inteira.
 
 Para carregar o texto de uma fonte, use uma destas opções:
 

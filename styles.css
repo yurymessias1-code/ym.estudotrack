@@ -390,6 +390,50 @@ button {
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
 }
 
+.notebook-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.notebook-sidebar {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.notebook-page {
+  min-width: 0;
+}
+
+.notebook-notes-area {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.08fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.notebook-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-weight: 900;
+  font-size: 0.86rem;
+}
+
+.notebook-divider::before,
+.notebook-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 .pomodoro-grid {
   grid-template-columns: minmax(280px, 1fr) minmax(260px, 360px) minmax(260px, 360px);
   align-items: stretch;
@@ -499,6 +543,13 @@ button:focus-visible {
   gap: 12px;
 }
 
+.source-library {
+  max-height: min(44vh, 520px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
 .topic-item {
   display: grid;
   gap: 8px;
@@ -548,6 +599,12 @@ button:focus-visible {
   gap: 12px;
 }
 
+.source-card-top > div,
+.note-card-top > div,
+.goal-card-top > div {
+  min-width: 0;
+}
+
 .control-row-top strong,
 .flashcard-card-top strong,
 .flashcard-review-top strong,
@@ -555,6 +612,21 @@ button:focus-visible {
 .note-card-top strong,
 .goal-card-top strong {
   overflow-wrap: anywhere;
+}
+
+.source-card .music-note,
+.source-card .flashcard-metrics span,
+.note-card .flashcard-metrics span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.source-card .inline-actions {
+  justify-content: flex-start;
+}
+
+.source-card .mini-button {
+  flex: 1 1 96px;
 }
 
 .control-metrics,
@@ -706,6 +778,10 @@ button:focus-visible {
   margin-top: 14px;
 }
 
+.source-viewer label {
+  margin-bottom: 12px;
+}
+
 .source-preview iframe {
   width: 100%;
   min-height: 520px;
@@ -724,6 +800,26 @@ button:focus-visible {
 .category-panel {
   display: grid;
   gap: 14px;
+}
+
+.notebook-editor .note-editor {
+  min-height: 420px;
+  line-height: 1.7;
+  background-image: linear-gradient(to bottom, transparent 31px, rgba(15, 118, 110, 0.12) 32px);
+  background-size: 100% 32px;
+}
+
+.notebook-sidebar #sourceContentEditor {
+  min-height: 150px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.notebook-library-panel .note-library {
+  max-height: min(72vh, 720px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .sync-alert {
@@ -1127,6 +1223,15 @@ td {
   color: #fde68a;
 }
 
+.theme-dark .notebook-divider::before,
+.theme-dark .notebook-divider::after {
+  background: var(--line);
+}
+
+.theme-dark .notebook-editor .note-editor {
+  background-image: linear-gradient(to bottom, transparent 31px, rgba(45, 212, 191, 0.12) 32px);
+}
+
 .theme-dark .progress-track,
 .theme-dark .horizontal-track,
 .theme-dark .music-player iframe {
@@ -1170,8 +1275,20 @@ td {
   .dashboard-visual,
   .two-columns,
   .form-and-list,
-  .pomodoro-grid {
+  .pomodoro-grid,
+  .notebook-layout,
+  .notebook-notes-area {
     grid-template-columns: 1fr;
+  }
+
+  .notebook-sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  .source-library,
+  .notebook-library-panel .note-library {
+    max-height: 480px;
   }
 }
 

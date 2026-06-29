@@ -1228,6 +1228,7 @@ function renderFlashcardReview(card, dueCount) {
       <button class="button primary" data-action="reviewFlashcard" data-result="correct" data-id="${card.id}" type="button">Acertei</button>
       <button class="button ghost danger" data-action="reviewFlashcard" data-result="wrong" data-id="${card.id}" type="button">Errei</button>
       <button class="button ghost" data-action="nextFlashcard" type="button">Próximo</button>
+      <button class="button ghost danger" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir flashcard</button>
     </div>
     <div class="flashcard-actions">
       <button class="mini-button bad" data-action="setFlashcardDifficulty" data-difficulty="hard" data-id="${card.id}" type="button">Difícil</button>
@@ -1263,7 +1264,7 @@ function renderFlashcardLibrary() {
           </div>
           <div class="inline-actions">
             <button class="mini-button" data-action="studyFlashcard" data-id="${card.id}" type="button">Revisar</button>
-            <button class="mini-button bad" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir</button>
+            <button class="mini-button bad" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir flashcard</button>
           </div>
         </article>
       `
@@ -1288,6 +1289,25 @@ function reviewFlashcard(cardId, isCorrect) {
   state.ui.activeFlashcardId = getDueFlashcards().filter((item) => item.id !== card.id)[0]?.id || "";
   saveState();
   renderFlashcards();
+}
+
+function resetAllStats() {
+  state.questionLogs = [];
+  state.studyLogs = [];
+  state.flashcardSettings.reviewCounter = 0;
+  state.flashcards = state.flashcards.map((card) => ({
+    ...card,
+    dueDate: todayISO(),
+    nextDueReviewNumber: 0,
+    reviews: 0,
+    correct: 0,
+    wrong: 0,
+    lastReviewed: "",
+  }));
+  state.ui.flashcardAnswerOpen = false;
+  state.ui.activeFlashcardId = state.flashcards[0]?.id || "";
+  pauseTimer();
+  resetTimer();
 }
 
 function getSource(sourceId) {
@@ -2335,6 +2355,14 @@ function attachEvents() {
     } catch {
       showToast("Backup gerado. Copie manualmente o texto.");
     }
+  });
+
+  $("#resetStatsBtn").addEventListener("click", () => {
+    if (!window.confirm("Zerar todas as estatísticas do site? Isso apaga históricos de tempo, questões, relatórios e estatísticas dos flashcards, mas mantém cadastros e anotações.")) return;
+    resetAllStats();
+    saveState();
+    render();
+    showToast("Estatísticas zeradas.");
   });
 
   $("#subjectForm").addEventListener("submit", (event) => {

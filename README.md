@@ -10,11 +10,13 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - Pomodoro com registro de tempo;
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
+- exclusão individual de flashcards;
 - anotações em layout de caderno, com marca-texto, categorias e fonte externa vinculada;
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador;
 - modo claro e modo escuro;
 - exportação, importação e backup dos dados em JSON.
+- reset global de estatísticas sem apagar cadastros, fontes e anotações.
 
 ## Como publicar no GitHub
 
@@ -58,6 +60,11 @@ Para levar dados para outro navegador, computador ou celular, use os botões **E
 Também existe uma aba **Conta** com login local e geração/restauração de backup.
 
 Para sincronizar automaticamente entre dispositivos com login e senha, será necessário adicionar um backend, como Supabase, Firebase ou outro banco com autenticação.
+
+## Reset de estatísticas
+
+Na aba **Conta**, o botão **Zerar estatísticas do site** limpa histórico de tempo, questões, relatórios e estatísticas de revisão dos flashcards.
+Ele mantém matérias, assuntos, fontes, anotações, objetivos e os flashcards cadastrados.
 
 ## Controle por período e objetivos
 

@@ -19,7 +19,10 @@ const titles = {
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+const uid = () => {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  return typeof randomUUID === "function" ? randomUUID.call(globalThis.crypto) : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 let state = loadState();
 let timer = {
@@ -615,7 +618,8 @@ function renderDashboard() {
   const wrong = state.questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const totalQuestions = correct + wrong;
   const accuracy = totalQuestions ? (correct / totalQuestions) * 100 : 0;
-  const weak = getRankedTopics().filter((item) => item.total > 0).at(-1);
+  const rankedWithQuestions = getRankedTopics().filter((item) => item.total > 0);
+  const weak = rankedWithQuestions[rankedWithQuestions.length - 1];
 
   $("#sideTodayHours").textContent = formatMinutes(todayMinutes);
   $("#sideTodayMeta").textContent = `${formatMinutes(weekMinutes)} acumulados na semana.`;

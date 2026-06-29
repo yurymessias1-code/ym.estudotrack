@@ -23,6 +23,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
    - `styles.css`
    - `app.js`
    - `netlify.toml`
+   - `CNAME` se for usar domínio personalizado no GitHub Pages
    - `README.md`
 3. Faça o commit e publique.
 

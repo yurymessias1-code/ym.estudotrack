@@ -219,6 +219,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
     },
     ui: {
       view: candidate.ui?.view || "dashboard",
+      theme: candidate.ui?.theme === "dark" ? "dark" : "light",
       caseCourt: candidate.ui?.caseCourt || "STJ",
       reportRange: candidate.ui?.reportRange || "day",
       controlRange: candidate.ui?.controlRange || "week",
@@ -258,6 +259,7 @@ function createEmptyState(profile = {}) {
     },
     ui: {
       view: "dashboard",
+      theme: "light",
       caseCourt: "STJ",
       reportRange: "day",
       controlRange: "week",
@@ -376,6 +378,7 @@ function createSeedState() {
     settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
     ui: {
       view: "dashboard",
+      theme: state?.ui?.theme === "dark" ? "dark" : "light",
       caseCourt: "STJ",
       reportRange: "day",
       controlRange: "week",
@@ -545,7 +548,13 @@ function ensureFormDefaults() {
   $("#accountEmail").value = state.account.email || "";
 }
 
+function applyTheme() {
+  const isDark = state.ui.theme === "dark";
+  document.body.classList.toggle("theme-dark", isDark);
+}
+
 function render() {
+  applyTheme();
   ensureFormDefaults();
   renderNavigation();
   renderProfilePanel();
@@ -575,6 +584,12 @@ function renderNavigation() {
     month: "short",
     year: "numeric",
   });
+  const themeToggle = $("#themeToggleBtn");
+  if (themeToggle) {
+    const isDark = state.ui.theme === "dark";
+    themeToggle.textContent = isDark ? "Modo claro" : "Modo escuro";
+    themeToggle.setAttribute("aria-pressed", String(isDark));
+  }
 }
 
 function renderProfilePanel() {
@@ -1473,7 +1488,7 @@ async function syncSourceFromUrl(sourceId, options = {}) {
     source.lastSyncError = "site bloqueou a leitura ou não retornou texto";
     saveState();
     renderNotes();
-    if (!options.silent) showToast("Não foi possível sincronizar pelo link. Use upload HTML/TXT ou cole o texto.");
+    if (!options.silent) showToast("Não foi possível sincronizar pelo link. Cole o texto manualmente no leitor.");
   } finally {
     syncingSources.delete(sourceId);
     renderNotes();
@@ -1506,28 +1521,10 @@ async function importCurrentSourceUrlToForm() {
     if (imported.title && !$("#sourceTitle").value.trim()) $("#sourceTitle").value = imported.title;
     showToast("Texto importado para o leitor da fonte.");
   } catch {
-    showToast("Este site bloqueou a importação. Use upload HTML/TXT ou cole o texto.");
+    showToast("Este site bloqueou a importação. Cole o texto manualmente no leitor.");
   } finally {
     $("#importSourceUrlBtn").disabled = false;
   }
-}
-
-function importSourceFileToForm(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const imported = parseSourceDocument(String(reader.result || ""), file.type || "", file.name.replace(/\.[^.]+$/, ""));
-    const html = sanitizeNoteHTML(imported.html || "");
-    if (!richTextHasContent(html)) {
-      showToast("Arquivo sem texto importável.");
-      return;
-    }
-    $("#sourceContentEditor").innerHTML = html;
-    if (!$("#sourceTitle").value.trim()) $("#sourceTitle").value = imported.title || file.name.replace(/\.[^.]+$/, "");
-    showToast("Arquivo carregado no leitor da fonte.");
-  };
-  reader.onerror = () => showToast("Não foi possível ler o arquivo.");
-  reader.readAsText(file, "UTF-8");
 }
 
 function renderNotes() {
@@ -1576,7 +1573,6 @@ function resetSourceForm() {
   $("#sourceForm").reset();
   $("#sourceContentEditor").innerHTML = "";
   $("#sourceAutoSync").checked = false;
-  $("#sourceFileInput").value = "";
   setCategoryFields("source", "");
 }
 
@@ -1624,8 +1620,9 @@ function renderSourceLibrary() {
           <div class="inline-actions">
             <button class="mini-button" data-action="selectSource" data-id="${source.id}" type="button">Usar</button>
             <button class="mini-button" data-action="syncSource" data-id="${source.id}" type="button">Sincronizar</button>
+            ${richTextHasContent(source.content) || source.pendingContent ? `<button class="mini-button bad" data-action="clearSourceContent" data-id="${source.id}" type="button">Limpar texto</button>` : ""}
             <button class="mini-button" data-action="editSource" data-id="${source.id}" type="button">Editar</button>
-            <button class="mini-button bad" data-action="deleteSource" data-id="${source.id}" type="button">Excluir</button>
+            <button class="mini-button bad" data-action="deleteSource" data-id="${source.id}" type="button">Excluir fonte</button>
           </div>
         </article>
       `
@@ -1653,9 +1650,10 @@ function renderSourcePreview() {
       <button class="button secondary" data-action="syncSource" data-id="${source.id}" type="button">Sincronizar agora</button>
       <button class="button ghost" data-action="useSourceInNote" data-id="${source.id}" type="button">Usar na anotação</button>
       <button class="button ghost" data-action="editSource" data-id="${source.id}" type="button">Editar fonte</button>
+      <button class="button ghost danger" data-action="deleteSource" data-id="${source.id}" type="button">Excluir fonte</button>
     </div>
     <iframe src="${escapeHTML(safeUrl)}" title="${escapeHTML(source.title)}" loading="lazy"></iframe>
-    <p class="music-note">${escapeHTML(sourceSyncSummary(source))}. Alguns sites oficiais bloqueiam visualização ou sincronização dentro do app; se isso acontecer, use upload HTML/TXT ou cole o trecho no leitor interno abaixo.</p>
+    <p class="music-note">${escapeHTML(sourceSyncSummary(source))}. Alguns sites oficiais bloqueiam visualização ou sincronização dentro do app; se isso acontecer, cole o trecho no leitor interno abaixo.</p>
     <section class="source-reader">
       <div class="source-card-top">
         <div>
@@ -1688,6 +1686,7 @@ function renderSourcePreview() {
       <p class="music-note">Edite ou cole aqui o texto da lei. Depois selecione trechos, aplique o marca-texto e salve os grifos da fonte.</p>
       <div class="inline-actions">
         <button class="button primary" data-action="saveSourceReader" data-id="${source.id}" type="button">Salvar grifos da fonte</button>
+        <button class="button ghost danger" data-action="clearSourceContent" data-id="${source.id}" type="button">Limpar texto da fonte</button>
       </div>
     </section>
   `;
@@ -2558,11 +2557,6 @@ function attachEvents() {
 
   $("#importSourceUrlBtn").addEventListener("click", importCurrentSourceUrlToForm);
 
-  $("#sourceFileInput").addEventListener("change", (event) => {
-    importSourceFileToForm(event.target.files?.[0]);
-    event.target.value = "";
-  });
-
   $("#cancelSourceEditBtn").addEventListener("click", () => {
     state.ui.activeSourceEditId = "";
     saveState();
@@ -2647,6 +2641,12 @@ function attachEvents() {
   $("#resetTimerBtn").addEventListener("click", resetTimer);
   $("#finishTimerBtn").addEventListener("click", finishTimerManually);
   $("#timerTopic").addEventListener("change", renderPomodoro);
+  $("#themeToggleBtn").addEventListener("click", () => {
+    state.ui.theme = state.ui.theme === "dark" ? "light" : "dark";
+    saveState();
+    render();
+    showToast(state.ui.theme === "dark" ? "Modo escuro ativado." : "Modo claro ativado.");
+  });
   $("#exportBtn").addEventListener("click", exportData);
   $("#importInput").addEventListener("change", importData);
   $("#resetDemoBtn").addEventListener("click", () => {
@@ -2803,6 +2803,26 @@ function handleAction(action) {
     saveState();
     renderNotes();
     showToast("Grifos salvos nesta fonte.");
+    return;
+  }
+
+  if (type === "clearSourceContent") {
+    const source = getSource(id);
+    if (!source) return;
+    if (!window.confirm("Limpar o texto colado, grifos e conteúdo sincronizado desta fonte? O cadastro da fonte será mantido.")) return;
+    source.content = "";
+    source.lastImportedContent = "";
+    source.pendingContent = "";
+    source.lastSyncHash = "";
+    source.appliedSyncHash = "";
+    source.pendingSyncHash = "";
+    source.pendingSyncedAt = "";
+    source.lastSyncStatus = "Texto removido";
+    source.lastSyncError = "";
+    source.updatedAt = new Date().toISOString();
+    saveState();
+    renderNotes();
+    showToast("Texto da fonte removido.");
     return;
   }
 

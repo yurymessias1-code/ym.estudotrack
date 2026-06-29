@@ -27,6 +27,22 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+body.theme-dark {
+  --bg: #101418;
+  --panel: #171d23;
+  --panel-soft: #13251f;
+  --ink: #ecf2f4;
+  --muted: #9aa8b4;
+  --line: #2d3944;
+  --teal: #2dd4bf;
+  --green: #4ade80;
+  --red: #fb7185;
+  --amber: #fbbf24;
+  --blue: #60a5fa;
+  --coral: #fb923c;
+  --shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
+}
+
 button,
 input,
 select,
@@ -1038,6 +1054,89 @@ td {
   border-radius: var(--radius);
   color: var(--muted);
   background: #fbfcfd;
+}
+
+.theme-dark .sidebar,
+.theme-dark .dashboard-visual,
+.theme-dark .date-pill,
+.theme-dark .cycle-pill,
+.theme-dark .tag,
+.theme-dark .button.ghost,
+.theme-dark .segmented,
+.theme-dark input,
+.theme-dark select,
+.theme-dark textarea,
+.theme-dark .note-editor,
+.theme-dark .note-content,
+.theme-dark .source-preview iframe,
+.theme-dark .mini-button {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.theme-dark .profile-panel,
+.theme-dark .topic-item,
+.theme-dark .control-row,
+.theme-dark .flashcard-review,
+.theme-dark .flashcard-library-card,
+.theme-dark .source-card,
+.theme-dark .note-card,
+.theme-dark .category-card,
+.theme-dark .goal-card,
+.theme-dark .empty-state {
+  background: #131920;
+}
+
+.theme-dark .nav-button:hover,
+.theme-dark .nav-button.active,
+.theme-dark .button.secondary {
+  background: #12342f;
+  border-color: #2a7067;
+  color: #b8fff2;
+}
+
+.theme-dark .button.primary,
+.theme-dark .segment.active {
+  background: #14b8a6;
+  color: #06201d;
+}
+
+.theme-dark .button.ghost.danger,
+.theme-dark .mini-button.bad,
+.theme-dark .button.danger {
+  color: #fda4af;
+}
+
+.theme-dark .flashcard-face {
+  border-color: #28564d;
+  background: #13251f;
+}
+
+.theme-dark .flashcard-answer {
+  border-color: #6b5425;
+  background: #2a2112;
+}
+
+.theme-dark .sync-options {
+  background: #111c19;
+}
+
+.theme-dark .sync-alert {
+  border-color: #775f23;
+  background: #2a220f;
+  color: #fde68a;
+}
+
+.theme-dark .progress-track,
+.theme-dark .horizontal-track,
+.theme-dark .music-player iframe {
+  background: #26313b;
+}
+
+.theme-dark .toast {
+  background: #12342f;
+  border-color: #2a7067;
+  color: #b8fff2;
 }
 
 @media (max-width: 1120px) {

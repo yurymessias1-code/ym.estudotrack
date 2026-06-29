@@ -11,8 +11,9 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
 - anotações com marca-texto, categorias e fonte externa vinculada;
-- fontes/sites com texto hospedado no app, grifos salvos, upload HTML/TXT, sincronização por link quando permitida e edição/exclusão;
+- fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador;
+- modo claro e modo escuro;
 - exportação, importação e backup dos dados em JSON.
 
 ## Como publicar no GitHub
@@ -90,11 +91,11 @@ Os grifos ficam salvos na própria fonte dentro do app e continuam vinculados ao
 
 O editor de fonte e o editor de anotação possuem marca-texto em amarelo, verde, azul e cor personalizada.
 Também é possível editar ou excluir fontes/sites cadastrados e criar/excluir categorias.
+Na fonte selecionada, também há botões para limpar apenas o texto/grifos salvos ou excluir a fonte inteira.
 
 Para carregar o texto de uma fonte, use uma destas opções:
 
 - **Importar texto do link**: o app tenta buscar o conteúdo do site e colocar no leitor da fonte.
-- **Upload HTML/TXT**: envie um arquivo salvo da página ou da lei.
 - **Colar manualmente**: copie o trecho do site original e cole no leitor da fonte.
 
 Ao ativar **Tentar sincronizar automaticamente pelo link**, o app verifica a fonte quando ela puder ser lida pelo navegador.
@@ -102,4 +103,4 @@ Se o texto ainda não tiver grifos, a atualização pode entrar automaticamente.
 Se já houver grifos, o app preserva sua versão marcada e mostra uma atualização disponível para aplicação manual.
 
 Alguns sites oficiais podem bloquear visualização ou sincronização dentro do app.
-Nesse caso, use o botão **Abrir site base**, copie o trecho necessário ou salve a página como HTML/TXT e envie pelo upload.
+Nesse caso, use o botão **Abrir site base**, copie o trecho necessário e cole manualmente no leitor da fonte.

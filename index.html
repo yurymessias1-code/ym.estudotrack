@@ -70,6 +70,7 @@
             <h1 id="pageTitle">Painel</h1>
           </div>
           <div class="topbar-actions">
+            <button class="button ghost" id="themeToggleBtn" type="button" aria-pressed="false">Modo escuro</button>
             <span id="currentDate" class="date-pill"></span>
             <button class="button secondary" data-view="pomodoro" type="button">Abrir Pomodoro</button>
             <button class="button primary" data-view="plano" type="button">Nova matéria</button>
@@ -702,12 +703,8 @@
                   </label>
                   <div class="inline-actions source-form-actions">
                     <button class="button secondary" id="importSourceUrlBtn" type="button">Importar texto do link</button>
-                    <label class="button ghost import-label" for="sourceFileInput">
-                      Upload HTML/TXT
-                      <input id="sourceFileInput" type="file" accept=".html,.htm,.txt,.md,text/html,text/plain,text/markdown" />
-                    </label>
                   </div>
-                  <p class="music-note">A sincronização funciona quando o site autoriza leitura pelo navegador. Se o site bloquear, envie um HTML/TXT ou cole o texto no leitor.</p>
+                  <p class="music-note">A sincronização funciona quando o site autoriza leitura pelo navegador. Se o site bloquear, copie o trecho original e cole o texto no leitor.</p>
                 </div>
                 <div class="editor-field">
                   <span class="field-title">Texto hospedado no app</span>

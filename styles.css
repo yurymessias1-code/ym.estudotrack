@@ -1139,6 +1139,23 @@ td {
   padding: 14px;
 }
 
+.case-filter-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .case-card p {
   margin: 0;
   color: #263341;
@@ -1541,7 +1558,8 @@ td {
   .flashcard-review-top,
   .source-card-top,
   .note-card-top,
-  .goal-card-top {
+  .goal-card-top,
+  .filter-footer {
     align-items: stretch;
     flex-direction: column;
   }

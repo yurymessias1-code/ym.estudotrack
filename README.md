@@ -6,7 +6,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle de questões, acertos e erros;
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
-- jurisprudências separadas por STJ e STF;
+- jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
 - Pomodoro com registro de tempo, alarme ao terminar cada etapa e animação de pausa;
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
@@ -88,6 +88,12 @@ A aba **Controle** permite selecionar:
 
 Os dados exibidos mudam de acordo com o período escolhido.
 Na mesma aba é possível cadastrar objetivos, como data de prova, revisão final ou qualquer meta pessoal, com contagem de dias restantes.
+
+## Jurisprudências
+
+A aba **Jurisprudências** separa julgados de STJ e STF.
+Os julgados cadastrados pelo usuário podem ser pesquisados por texto livre, matéria e assunto vinculado.
+O filtro funciona sobre título, tema, tese/resumo, fonte, matéria e assunto.
 
 ## Flashcards por dificuldade
 

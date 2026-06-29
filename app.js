@@ -222,11 +222,14 @@ function normalizeState(candidate, fallbackProfileId = "") {
         easy: Number(candidate.flashcardSettings?.intervals?.easy) || 12,
       },
     },
-    ui: {
-      view: candidate.ui?.view || "dashboard",
-      theme: candidate.ui?.theme === "dark" ? "dark" : "light",
-      caseCourt: candidate.ui?.caseCourt || "STJ",
-      reportRange: candidate.ui?.reportRange || "day",
+      ui: {
+        view: candidate.ui?.view || "dashboard",
+        theme: candidate.ui?.theme === "dark" ? "dark" : "light",
+        caseCourt: candidate.ui?.caseCourt || "STJ",
+        caseSearch: typeof candidate.ui?.caseSearch === "string" ? candidate.ui.caseSearch : "",
+        caseSubjectFilter: typeof candidate.ui?.caseSubjectFilter === "string" ? candidate.ui.caseSubjectFilter : "",
+        caseTopicFilter: typeof candidate.ui?.caseTopicFilter === "string" ? candidate.ui.caseTopicFilter : "",
+        reportRange: candidate.ui?.reportRange || "day",
       controlRange: candidate.ui?.controlRange || "week",
       controlDayDate: candidate.ui?.controlDayDate || todayISO(),
       controlWeekDate: candidate.ui?.controlWeekDate || todayISO(),
@@ -266,11 +269,14 @@ function createEmptyState(profile = {}) {
       reviewCounter: 0,
       intervals: { hard: 4, medium: 8, easy: 12 },
     },
-    ui: {
-      view: "dashboard",
-      theme: "light",
-      caseCourt: "STJ",
-      reportRange: "day",
+      ui: {
+        view: "dashboard",
+        theme: "light",
+        caseCourt: "STJ",
+        caseSearch: "",
+        caseSubjectFilter: "",
+        caseTopicFilter: "",
+        reportRange: "day",
       controlRange: "week",
       controlDayDate: todayISO(),
       controlWeekDate: todayISO(),
@@ -389,11 +395,14 @@ function createSeedState() {
     },
     media: { url: "" },
     settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
-    ui: {
-      view: "dashboard",
-      theme: state?.ui?.theme === "dark" ? "dark" : "light",
-      caseCourt: "STJ",
-      reportRange: "day",
+      ui: {
+        view: "dashboard",
+        theme: state?.ui?.theme === "dark" ? "dark" : "light",
+        caseCourt: "STJ",
+        caseSearch: "",
+        caseSubjectFilter: "",
+        caseTopicFilter: "",
+        reportRange: "day",
       controlRange: "week",
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
@@ -590,6 +599,39 @@ function populateFlashcardReviewSelectors() {
   topicSelect.disabled = scope !== "topic" || state.topics.length === 0;
 }
 
+function populateCaseFilterSelectors() {
+  const subjectSelect = $("#caseSubjectFilter");
+  const topicSelect = $("#caseTopicFilter");
+  const searchInput = $("#caseSearch");
+  if (!subjectSelect || !topicSelect || !searchInput) return;
+
+  if (!state.subjects.some((subject) => subject.id === state.ui.caseSubjectFilter)) state.ui.caseSubjectFilter = "";
+  if (!state.topics.some((topic) => topic.id === state.ui.caseTopicFilter)) state.ui.caseTopicFilter = "";
+  const selectedTopic = getTopic(state.ui.caseTopicFilter);
+  if (state.ui.caseSubjectFilter && selectedTopic && selectedTopic.subjectId !== state.ui.caseSubjectFilter) {
+    state.ui.caseTopicFilter = "";
+  }
+
+  const subjectOptions = state.subjects
+    .map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`)
+    .join("");
+  const topicOptions = state.topics
+    .filter((topic) => !state.ui.caseSubjectFilter || topic.subjectId === state.ui.caseSubjectFilter)
+    .map((topic) => {
+      const subject = getSubject(topic.subjectId);
+      return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
+    })
+    .join("");
+
+  if (document.activeElement !== searchInput) searchInput.value = state.ui.caseSearch || "";
+  subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
+  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
+  subjectSelect.value = state.ui.caseSubjectFilter || "";
+  topicSelect.value = state.ui.caseTopicFilter || "";
+  subjectSelect.disabled = state.subjects.length === 0;
+  topicSelect.disabled = state.topics.length === 0;
+}
+
 function ensureFormDefaults() {
   $("#questionDate").value ||= todayISO();
   $("#studyDate").value ||= todayISO();
@@ -743,6 +785,7 @@ function renderSelectors() {
   ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => populateTopicSelect($(selector)));
   populateTopicSelect($("#caseTopic"), { includeEmpty: true });
   populateFlashcardReviewSelectors();
+  populateCaseFilterSelectors();
 
   const disabled = state.topics.length === 0;
   ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => {
@@ -2002,11 +2045,52 @@ function renderCases() {
   $$(".segment[data-case-tab]").forEach((button) => button.classList.toggle("active", button.dataset.caseTab === court));
   $("#caseCourtLabel").textContent = court;
   $("#caseListTitle").textContent = court;
+  populateCaseFilterSelectors();
 
-  const items = [...state.cases[court]].sort((a, b) => b.date.localeCompare(a.date));
+  const allItems = [...state.cases[court]];
+  const items = allItems.filter(caseMatchesFilters).sort((a, b) => b.date.localeCompare(a.date));
+  const summary = $("#caseFilterSummary");
+  if (summary) {
+    summary.textContent = caseFilterSummary(items.length, allItems.length, court);
+  }
   $("#caseList").innerHTML = items.length
     ? items.map((item) => renderCaseCard(item, court)).join("")
-    : `<div class="empty-state">Nenhuma jurisprudência cadastrada nesta aba.</div>`;
+    : `<div class="empty-state">${allItems.length ? "Nenhuma jurisprudência encontrada com esses filtros." : "Nenhuma jurisprudência cadastrada nesta aba."}</div>`;
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function caseMatchesFilters(item) {
+  const topic = getTopic(item.topicId);
+  const subject = topic ? getSubject(topic.subjectId) : null;
+  const subjectFilter = state.ui.caseSubjectFilter || "";
+  const topicFilter = state.ui.caseTopicFilter || "";
+  const search = normalizeSearchText(state.ui.caseSearch);
+
+  if (subjectFilter && topic?.subjectId !== subjectFilter) return false;
+  if (topicFilter && item.topicId !== topicFilter) return false;
+  if (!search) return true;
+
+  const haystack = normalizeSearchText(
+    [item.title, item.theme, item.summary, item.source, topic?.name, subject?.name, getTopicLabel(item.topicId)].join(" ")
+  );
+  return haystack.includes(search);
+}
+
+function caseFilterSummary(resultCount, totalCount, court) {
+  const filters = [
+    state.ui.caseSearch ? "texto" : "",
+    state.ui.caseSubjectFilter ? "matéria" : "",
+    state.ui.caseTopicFilter ? "assunto" : "",
+  ].filter(Boolean);
+  const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
+  return `${resultCount} de ${totalCount} julgados em ${court}${suffix}.`;
 }
 
 function renderCaseCard(item, court) {
@@ -2528,6 +2612,38 @@ function attachEvents() {
   });
 
   $("#logoutProfileBtn").addEventListener("click", logoutProfile);
+
+  $("#caseFilterForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    renderCases();
+  });
+
+  $("#caseSearch").addEventListener("input", (event) => {
+    state.ui.caseSearch = event.target.value;
+    saveState();
+    renderCases();
+  });
+
+  $("#caseSubjectFilter").addEventListener("change", (event) => {
+    state.ui.caseSubjectFilter = event.target.value;
+    state.ui.caseTopicFilter = "";
+    saveState();
+    renderCases();
+  });
+
+  $("#caseTopicFilter").addEventListener("change", (event) => {
+    state.ui.caseTopicFilter = event.target.value;
+    saveState();
+    renderCases();
+  });
+
+  $("#clearCaseFiltersBtn").addEventListener("click", () => {
+    state.ui.caseSearch = "";
+    state.ui.caseSubjectFilter = "";
+    state.ui.caseTopicFilter = "";
+    saveState();
+    renderCases();
+  });
 
   $("#controlDayDate").addEventListener("change", (event) => {
     state.ui.controlDayDate = event.target.value || todayISO();

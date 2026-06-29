@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="estudos track">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f766e" />
+      <stop offset="1" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)" />
+  <path d="M16 18c6 0 11 2 16 6v25c-5-4-10-6-16-6V18Z" fill="#f8fafc" />
+  <path d="M48 18c-6 0-11 2-16 6v25c5-4 10-6 16-6V18Z" fill="#f8fafc" />
+  <path d="M21 27h7M21 34h7M36 27h7M36 34h7" stroke="#2563eb" stroke-width="3" stroke-linecap="round" opacity=".7" />
+  <rect x="17" y="50" width="30" height="5" rx="2.5" fill="#dbeafe" opacity=".55" />
+  <rect x="17" y="50" width="19" height="5" rx="2.5" fill="#fbbf24" />
+</svg>

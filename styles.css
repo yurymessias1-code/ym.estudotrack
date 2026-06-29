@@ -43,10 +43,11 @@ body.profile-locked .storage-actions {
 body.profile-locked .sidebar {
   min-height: 100vh;
   border-right: 0;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 body.profile-locked .profile-panel {
+  margin-top: clamp(40px, 10vh, 110px);
   background: var(--panel);
   box-shadow: var(--shadow);
 }
@@ -106,6 +107,7 @@ button:disabled {
 }
 
 .brand-mark {
+  position: relative;
   display: grid;
   place-items: center;
   width: 46px;
@@ -114,6 +116,66 @@ button:disabled {
   background: var(--teal);
   color: white;
   font-weight: 800;
+}
+
+.study-logo {
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--teal), #2563eb);
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
+}
+
+.logo-page {
+  position: absolute;
+  top: 12px;
+  width: 14px;
+  height: 18px;
+  border-radius: 3px 3px 5px 5px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.logo-page-left {
+  left: 10px;
+  transform: skewY(7deg);
+}
+
+.logo-page-right {
+  right: 10px;
+  transform: skewY(-7deg);
+}
+
+.logo-page::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.52);
+  box-shadow: 0 5px 0 rgba(15, 118, 110, 0.35);
+}
+
+.logo-progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 9px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.logo-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 35% 0 0;
+  border-radius: inherit;
+  background: #fbbf24;
+}
+
+.brand strong {
+  font-size: 1.08rem;
+  text-transform: lowercase;
 }
 
 .brand strong,

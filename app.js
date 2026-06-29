@@ -1,4 +1,3 @@
-const LEGACY_STORAGE_KEY = "concursoTrack.v1";
 const PROFILE_ROOT_KEY = "ymEstudos.profiles.v1";
 const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
 const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
@@ -95,15 +94,7 @@ function escapeHTML(value) {
 }
 
 function loadState() {
-  const root = getProfilesRoot();
-  const activeProfileId = sessionStorage.getItem(ACTIVE_SESSION_PROFILE_KEY) || "";
-
-  if (activeProfileId) {
-    const savedProfile = readJSON(profileStorageKey(activeProfileId));
-    if (savedProfile) return normalizeState(savedProfile, activeProfileId);
-    sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
-  }
-
+  sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
   return createEmptyState();
 }
 
@@ -418,14 +409,19 @@ function saveState() {
   state.profile = makeProfile(state.profile);
   const root = getProfilesRoot();
   const previousRecord = root.profiles.find((profile) => profile.id === state.profile.id) || {};
+  const login = normalizeProfileLogin(state.profile.name || previousRecord.name);
+  if (!login || !state.profile.pinHash) return;
   const profileRecord = {
     id: state.profile.id,
     name: state.profile.name || "Perfil sem nome",
-    login: normalizeProfileLogin(state.profile.name || previousRecord.name),
+    login,
     pinHash: state.profile.pinHash || previousRecord.pinHash || "",
     updatedAt: new Date().toISOString(),
   };
-  const profiles = root.profiles.filter((profile) => profile.id !== state.profile.id);
+  const profiles = root.profiles.filter((profile) => {
+    const profileLogin = profile.login || normalizeProfileLogin(profile.name);
+    return profile.id !== state.profile.id && profileLogin !== login;
+  });
   profiles.push(profileRecord);
   profiles.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
@@ -678,8 +674,8 @@ function renderProfilePanel() {
   $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : "Entrar";
   $("#logoutProfileBtn").disabled = !isAuthenticated;
   $("#profileStatus").textContent = isAuthenticated && name
-    ? `Somente este perfil está aberto nesta sessão. Use Sair ao terminar.`
-    : "Digite seu nome e PIN para entrar ou cadastrar um perfil individual neste navegador.";
+    ? `Somente os dados de ${name} estão abertos nesta sessão. Use Sair ao terminar.`
+    : "Digite nome e PIN. Se o perfil não existir, ele será criado zerado, sem dados antigos ou de outro usuário.";
 }
 
 function accessProfileByNameAndPin(name, pin) {
@@ -699,30 +695,38 @@ function accessProfileByNameAndPin(name, pin) {
   const pinHash = profilePinHash(cleanName, cleanPin);
 
   if (record) {
-    if (record.pinHash && record.pinHash !== pinHash) {
+    if (!record.pinHash) {
+      state = createEmptyState({ name: cleanName, pinHash });
+      saveState();
+      resetTimer();
+      render();
+      showToast("Perfil novo cadastrado zerado.");
+      return;
+    }
+
+    if (record.pinHash !== pinHash) {
       showToast("Nome ou PIN inválido.");
       return;
     }
 
     const savedProfile = readJSON(profileStorageKey(record.id));
-    state = normalizeState(savedProfile || createEmptyState({ id: record.id, name: record.name || cleanName, pinHash }), record.id);
+    state = savedProfile
+      ? normalizeState(savedProfile, record.id)
+      : createEmptyState({ id: record.id, name: record.name || cleanName, pinHash: record.pinHash });
     state.profile.name = record.name || cleanName;
-    state.profile.pinHash = state.profile.pinHash || record.pinHash || pinHash;
+    state.profile.pinHash = record.pinHash;
     saveState();
     resetTimer();
     render();
-    showToast(record.pinHash ? "Perfil carregado." : "PIN definido e perfil carregado.");
+    showToast("Perfil carregado.");
     return;
   }
 
-  const legacy = root.profiles.length ? null : readJSON(LEGACY_STORAGE_KEY);
-  state = legacy ? normalizeState(legacy) : createEmptyState();
-  state.profile.name = cleanName;
-  state.profile.pinHash = pinHash;
+  state = createEmptyState({ name: cleanName, pinHash });
   saveState();
   resetTimer();
   render();
-  showToast(legacy ? "Perfil cadastrado com os dados antigos deste navegador." : "Perfil individual cadastrado.");
+  showToast("Perfil novo cadastrado zerado.");
 }
 
 function logoutProfile() {
@@ -3238,7 +3242,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `concurso-track-${todayISO()}.json`;
+  anchor.download = `estudos-track-${todayISO()}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -3246,7 +3250,7 @@ function exportData() {
 function createBackupPayload() {
   return JSON.stringify(
     {
-      app: "ymcontrole-de-estudos",
+      app: "estudos-track",
       version: 2,
       exportedAt: new Date().toISOString(),
       data: state,
@@ -3263,7 +3267,7 @@ function downloadBackupFile() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `ymcontrole-backup-${todayISO()}.json`;
+  anchor.download = `estudos-track-backup-${todayISO()}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
   showToast("Arquivo de backup baixado.");
@@ -3273,8 +3277,9 @@ function restoreBackupFromText(text) {
   try {
     const parsed = JSON.parse(String(text || ""));
     const payload = parsed.data ? parsed.data : parsed;
+    const currentProfile = makeProfile(state.profile);
     const restored = normalizeState(payload);
-    restored.profile.id = restored.profile.id || `perfil-${uid()}`;
+    restored.profile = currentProfile;
     state = restored;
     saveState();
     resetTimer();
@@ -3292,8 +3297,9 @@ function importData(event) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(String(reader.result));
+      const currentProfile = makeProfile(state.profile);
       const imported = normalizeState(parsed.data ? parsed.data : parsed);
-      imported.profile.id = imported.profile.id || `perfil-${uid()}`;
+      imported.profile = currentProfile;
       state = imported;
       saveState();
       resetTimer();

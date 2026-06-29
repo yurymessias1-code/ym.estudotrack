@@ -1,4 +1,4 @@
-# ymcontrole de estudos
+# estudos track
 
 Aplicativo web estático para controle de estudos para concursos, com:
 
@@ -35,7 +35,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 ### Opção rápida
 
 1. Acesse https://app.netlify.com/drop.
-2. Arraste a pasta `ymcontrole-de-estudos` inteira para a tela.
+2. Arraste a pasta do projeto inteira para a tela.
 3. O Netlify vai gerar um link público.
 
 ### Opção com GitHub
@@ -52,11 +52,14 @@ Aplicativo web estático para controle de estudos para concursos, com:
 ## Dados de cada usuário
 
 O app é estático e salva os dados no navegador usando `localStorage`.
-Isso significa que cada pessoa que abrir o site em seu próprio navegador terá dados separados.
+Cada perfil tem seu próprio espaço de dados, identificado por **nome de perfil** e **PIN**.
 
 Se mais de uma pessoa usar o mesmo computador ou navegador, cada uma deve entrar pelo próprio **nome de perfil** e **PIN** no painel **Acesso individual**.
 O app não mostra uma lista de perfis cadastrados: o usuário digita o nome e o PIN para entrar ou criar seu próprio espaço.
-Ao abrir um novo acesso sem sessão ativa, o conteúdo fica bloqueado até alguém entrar em um perfil.
+Ao abrir o site, o conteúdo fica bloqueado e zerado até alguém entrar em um perfil.
+Perfil novo sempre começa vazio, sem importar dados antigos ou dados de outro usuário.
+Depois que o usuário usa o app, as matérias, questões, flashcards, anotações e demais dados ficam salvos apenas naquele perfil local.
+Mesmo que o usuário fique muito tempo sem usar, os dados permanecem salvos no navegador enquanto o armazenamento do site não for apagado; basta digitar o mesmo nome de perfil e PIN para reabrir.
 
 Para levar dados para outro navegador, computador ou celular, use os botões **Exportar** e **Importar** dentro do app.
 Também existe uma aba **Conta** com login local e geração/restauração de backup.

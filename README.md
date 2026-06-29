@@ -7,13 +7,13 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF;
-- Pomodoro com registro de tempo;
+- Pomodoro com registro de tempo, alarme ao terminar cada etapa e animação de pausa;
 - player de foco por link do YouTube ou Spotify;
-- flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
+- flashcards com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
 - exclusão individual de flashcards;
 - anotações em layout de caderno, com marca-texto, categorias e fonte externa vinculada;
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
-- perfis locais separados por usuário no mesmo navegador;
+- perfis locais separados por usuário no mesmo navegador, com entrada por nome e PIN sem lista pública de perfis;
 - modo claro e modo escuro;
 - exportação, importação e backup dos dados em JSON.
 - reset global de estatísticas sem apagar cadastros, fontes e anotações.
@@ -54,12 +54,20 @@ Aplicativo web estático para controle de estudos para concursos, com:
 O app é estático e salva os dados no navegador usando `localStorage`.
 Isso significa que cada pessoa que abrir o site em seu próprio navegador terá dados separados.
 
-Se mais de uma pessoa usar o mesmo computador ou navegador, use o painel **Perfil** na lateral para criar um perfil local diferente para cada pessoa.
+Se mais de uma pessoa usar o mesmo computador ou navegador, cada uma deve entrar pelo próprio **nome de perfil** e **PIN** no painel **Acesso individual**.
+O app não mostra uma lista de perfis cadastrados: o usuário digita o nome e o PIN para entrar ou criar seu próprio espaço.
+Ao abrir um novo acesso sem sessão ativa, o conteúdo fica bloqueado até alguém entrar em um perfil.
 
 Para levar dados para outro navegador, computador ou celular, use os botões **Exportar** e **Importar** dentro do app.
 Também existe uma aba **Conta** com login local e geração/restauração de backup.
 
 Para sincronizar automaticamente entre dispositivos com login e senha, será necessário adicionar um backend, como Supabase, Firebase ou outro banco com autenticação.
+
+## Pomodoro com alarme
+
+O Pomodoro toca um alarme curto quando o foco termina, quando a pausa termina e quando todos os ciclos acabam.
+Durante a pausa, o círculo do temporizador mostra uma animação de descanso.
+O som é gerado pelo navegador e começa a funcionar depois que o usuário clica em **Iniciar**.
 
 ## Reset de estatísticas
 
@@ -87,6 +95,15 @@ Cada flashcard pode ser marcado como:
 - **Fácil**: repete a cada 12 cartões revisados por padrão.
 
 Esses números podem ser alterados pelo próprio usuário na aba **Flashcards**, no painel **Intervalos por dificuldade**.
+
+Na mesma aba, o painel **Escolher revisão** permite estudar:
+
+- todos os flashcards pendentes;
+- apenas uma matéria;
+- apenas um assunto.
+
+Também é possível escolher entre **Sortear pendentes** e **Fila por vencimento**.
+Mesmo no modo aleatório, o app só sorteia cartões que já estão pendentes conforme a regra de repetição da dificuldade.
 
 ## Anotações e fontes
 

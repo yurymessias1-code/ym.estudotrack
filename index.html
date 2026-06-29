@@ -37,21 +37,21 @@
         </div>
 
         <form class="profile-panel" id="profileForm">
-          <p class="eyebrow">Perfil</p>
-          <strong id="profileLabel">Meu perfil</strong>
+          <p class="eyebrow">Acesso individual</p>
+          <strong id="profileLabel">Entrar no meu perfil</strong>
           <label>
-            Nome
-            <input id="profileName" type="text" placeholder="Ex.: Ana, João, Yury" />
+            Nome do perfil
+            <input id="profileName" type="text" autocomplete="username" placeholder="Ex.: Ana, João, Yury" />
           </label>
           <label>
-            Trocar perfil neste navegador
-            <select id="profileSelect"></select>
+            PIN do perfil
+            <input id="profilePin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Crie ou digite seu PIN" />
           </label>
           <div class="profile-actions">
-            <button class="button secondary" type="submit">Salvar</button>
-            <button class="button ghost" id="newProfileBtn" type="button">Novo</button>
+            <button class="button secondary" id="profileAccessBtn" type="submit">Entrar</button>
+            <button class="button ghost" id="logoutProfileBtn" type="button">Sair</button>
           </div>
-          <span id="profileStatus">Dados separados neste navegador.</span>
+          <span id="profileStatus">Cada usuário entra pelo próprio nome e PIN. Outros perfis não aparecem aqui.</span>
         </form>
 
         <div class="storage-actions">
@@ -336,6 +336,14 @@
 
               <div class="timer-face" aria-live="polite">
                 <span id="timerDisplay">25:00</span>
+                <div class="break-visual" aria-hidden="true">
+                  <span class="steam steam-one"></span>
+                  <span class="steam steam-two"></span>
+                  <span class="steam steam-three"></span>
+                  <span class="coffee-cup">
+                    <span class="coffee-handle"></span>
+                  </span>
+                </div>
               </div>
 
               <div class="timer-controls">
@@ -626,6 +634,40 @@
               </div>
               <div id="flashcardReview" class="flashcard-review"></div>
             </section>
+
+            <form class="panel form-panel" id="flashcardReviewForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Sessão</p>
+                  <h3>Escolher revisão</h3>
+                </div>
+              </div>
+              <label>
+                Ordem dos cartões
+                <select id="flashcardReviewOrder">
+                  <option value="random">Sortear pendentes</option>
+                  <option value="due">Fila por vencimento</option>
+                </select>
+              </label>
+              <label>
+                Estudar
+                <select id="flashcardReviewScope">
+                  <option value="all">Todos os flashcards</option>
+                  <option value="subject">Uma matéria</option>
+                  <option value="topic">Um assunto</option>
+                </select>
+              </label>
+              <label>
+                Matéria
+                <select id="flashcardReviewSubject"></select>
+              </label>
+              <label>
+                Assunto
+                <select id="flashcardReviewTopic"></select>
+              </label>
+              <p class="music-note" id="flashcardReviewSummary">0 cartões pendentes.</p>
+              <button class="button secondary" type="submit">Aplicar revisão</button>
+            </form>
 
             <form class="panel form-panel" id="flashcardSettingsForm">
               <div class="panel-header">

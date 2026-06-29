@@ -1,6 +1,7 @@
 const LEGACY_STORAGE_KEY = "concursoTrack.v1";
 const PROFILE_ROOT_KEY = "ymEstudos.profiles.v1";
 const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
+const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
 
@@ -35,6 +36,7 @@ let timer = {
   topicId: "",
 };
 const syncingSources = new Set();
+let pomodoroAudioContext = null;
 
 function todayISO() {
   return toISODate(new Date());
@@ -94,15 +96,13 @@ function escapeHTML(value) {
 
 function loadState() {
   const root = getProfilesRoot();
-  const activeProfileId = root.activeProfileId;
+  const activeProfileId = sessionStorage.getItem(ACTIVE_SESSION_PROFILE_KEY) || "";
 
   if (activeProfileId) {
     const savedProfile = readJSON(profileStorageKey(activeProfileId));
     if (savedProfile) return normalizeState(savedProfile, activeProfileId);
+    sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
   }
-
-  const legacy = readJSON(LEGACY_STORAGE_KEY);
-  if (legacy) return normalizeState(legacy);
 
   return createEmptyState();
 }
@@ -128,10 +128,24 @@ function profileStorageKey(profileId) {
   return `${PROFILE_KEY_PREFIX}${profileId}.v1`;
 }
 
+function normalizeProfileLogin(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function profilePinHash(name, pin) {
+  return simpleHash(`${normalizeProfileLogin(name)}::${String(pin || "")}`);
+}
+
+function findProfileRecordByName(root, name) {
+  const login = normalizeProfileLogin(name);
+  return root.profiles.find((profile) => (profile.login || normalizeProfileLogin(profile.name)) === login);
+}
+
 function makeProfile(profile = {}) {
   return {
     id: profile.id || `perfil-${uid()}`,
     name: typeof profile.name === "string" ? profile.name : "",
+    pinHash: typeof profile.pinHash === "string" ? profile.pinHash : "",
     createdAt: profile.createdAt || todayISO(),
   };
 }
@@ -229,6 +243,10 @@ function normalizeState(candidate, fallbackProfileId = "") {
       controlYear: Number(candidate.ui?.controlYear) || new Date().getFullYear(),
       activeFlashcardId: candidate.ui?.activeFlashcardId || "",
       flashcardAnswerOpen: Boolean(candidate.ui?.flashcardAnswerOpen),
+      flashcardReviewOrder: candidate.ui?.flashcardReviewOrder === "due" ? "due" : "random",
+      flashcardReviewScope: ["all", "subject", "topic"].includes(candidate.ui?.flashcardReviewScope) ? candidate.ui.flashcardReviewScope : "all",
+      flashcardReviewSubjectId: candidate.ui?.flashcardReviewSubjectId || "",
+      flashcardReviewTopicId: candidate.ui?.flashcardReviewTopicId || "",
       activeSourceId: candidate.ui?.activeSourceId || "",
       activeSourceEditId: candidate.ui?.activeSourceEditId || "",
       activeNoteId: candidate.ui?.activeNoteId || "",
@@ -269,6 +287,10 @@ function createEmptyState(profile = {}) {
       controlYear: new Date().getFullYear(),
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
+      flashcardReviewOrder: "random",
+      flashcardReviewScope: "all",
+      flashcardReviewSubjectId: "",
+      flashcardReviewTopicId: "",
       activeSourceId: "",
       activeSourceEditId: "",
       activeNoteId: "",
@@ -384,6 +406,10 @@ function createSeedState() {
       controlRange: "week",
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
+      flashcardReviewOrder: "random",
+      flashcardReviewScope: "all",
+      flashcardReviewSubjectId: "",
+      flashcardReviewTopicId: "",
     },
   };
 }
@@ -391,17 +417,21 @@ function createSeedState() {
 function saveState() {
   state.profile = makeProfile(state.profile);
   const root = getProfilesRoot();
+  const previousRecord = root.profiles.find((profile) => profile.id === state.profile.id) || {};
   const profileRecord = {
     id: state.profile.id,
     name: state.profile.name || "Perfil sem nome",
+    login: normalizeProfileLogin(state.profile.name || previousRecord.name),
+    pinHash: state.profile.pinHash || previousRecord.pinHash || "",
     updatedAt: new Date().toISOString(),
   };
   const profiles = root.profiles.filter((profile) => profile.id !== state.profile.id);
   profiles.push(profileRecord);
   profiles.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
+  sessionStorage.setItem(ACTIVE_SESSION_PROFILE_KEY, state.profile.id);
   localStorage.setItem(profileStorageKey(state.profile.id), JSON.stringify(state));
-  localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: state.profile.id, profiles }));
+  localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: "", profiles }));
 }
 
 function getSubject(id) {
@@ -528,6 +558,42 @@ function populateSubjectSelect(select) {
   }
 }
 
+function populateFlashcardReviewSelectors() {
+  const orderSelect = $("#flashcardReviewOrder");
+  const scopeSelect = $("#flashcardReviewScope");
+  const subjectSelect = $("#flashcardReviewSubject");
+  const topicSelect = $("#flashcardReviewTopic");
+  if (!orderSelect || !scopeSelect || !subjectSelect || !topicSelect) return;
+
+  state.ui.flashcardReviewOrder = state.ui.flashcardReviewOrder === "due" ? "due" : "random";
+  state.ui.flashcardReviewScope = ["all", "subject", "topic"].includes(state.ui.flashcardReviewScope) ? state.ui.flashcardReviewScope : "all";
+
+  if (!state.subjects.some((subject) => subject.id === state.ui.flashcardReviewSubjectId)) {
+    state.ui.flashcardReviewSubjectId = state.subjects[0]?.id || "";
+  }
+  if (!state.topics.some((topic) => topic.id === state.ui.flashcardReviewTopicId)) {
+    state.ui.flashcardReviewTopicId = state.topics[0]?.id || "";
+  }
+
+  orderSelect.value = state.ui.flashcardReviewOrder;
+  scopeSelect.value = state.ui.flashcardReviewScope;
+  subjectSelect.innerHTML = state.subjects.map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`).join("");
+  topicSelect.innerHTML = state.topics
+    .map((topic) => {
+      const subject = getSubject(topic.subjectId);
+      return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
+    })
+    .join("");
+  subjectSelect.value = state.ui.flashcardReviewSubjectId;
+  topicSelect.value = state.ui.flashcardReviewTopicId;
+
+  const scope = state.ui.flashcardReviewScope;
+  subjectSelect.closest("label").hidden = scope !== "subject";
+  topicSelect.closest("label").hidden = scope !== "topic";
+  subjectSelect.disabled = scope !== "subject" || state.subjects.length === 0;
+  topicSelect.disabled = scope !== "topic" || state.topics.length === 0;
+}
+
 function ensureFormDefaults() {
   $("#questionDate").value ||= todayISO();
   $("#studyDate").value ||= todayISO();
@@ -553,8 +619,17 @@ function applyTheme() {
   document.body.classList.toggle("theme-dark", isDark);
 }
 
+function isProfileAuthenticated() {
+  return Boolean(sessionStorage.getItem(ACTIVE_SESSION_PROFILE_KEY));
+}
+
+function applyProfileLock() {
+  document.body.classList.toggle("profile-locked", !isProfileAuthenticated());
+}
+
 function render() {
   applyTheme();
+  applyProfileLock();
   ensureFormDefaults();
   renderNavigation();
   renderProfilePanel();
@@ -593,29 +668,77 @@ function renderNavigation() {
 }
 
 function renderProfilePanel() {
-  const root = getProfilesRoot();
+  const isAuthenticated = isProfileAuthenticated();
   const name = state.profile?.name?.trim();
-  $("#profileLabel").textContent = name || "Perfil local";
+  $("#profileLabel").textContent = isAuthenticated && name ? `Perfil: ${name}` : "Entrar no meu perfil";
   if (document.activeElement !== $("#profileName")) {
-    $("#profileName").value = name || "";
+    $("#profileName").value = isAuthenticated ? name || "" : "";
+  }
+  if (document.activeElement !== $("#profilePin")) $("#profilePin").value = "";
+  $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : "Entrar";
+  $("#logoutProfileBtn").disabled = !isAuthenticated;
+  $("#profileStatus").textContent = isAuthenticated && name
+    ? `Somente este perfil está aberto nesta sessão. Use Sair ao terminar.`
+    : "Digite seu nome e PIN para entrar ou cadastrar um perfil individual neste navegador.";
+}
+
+function accessProfileByNameAndPin(name, pin) {
+  const cleanName = String(name || "").trim().replace(/\s+/g, " ");
+  const cleanPin = String(pin || "").trim();
+  if (!cleanName) {
+    showToast("Informe o nome do perfil.");
+    return;
+  }
+  if (cleanPin.length < 4) {
+    showToast("Use um PIN com pelo menos 4 números ou caracteres.");
+    return;
   }
 
-  const profiles = root.profiles.length
-    ? root.profiles
-    : [{ id: state.profile.id, name: state.profile.name || "Perfil local" }];
-  $("#profileSelect").innerHTML = profiles
-    .map((profile) => `<option value="${profile.id}">${escapeHTML(profile.name || "Perfil sem nome")}</option>`)
-    .join("");
-  $("#profileSelect").value = state.profile.id;
-  $("#profileStatus").textContent = name
-    ? `Dados de ${name} salvos separadamente neste navegador.`
-    : "Cada pessoa pode criar um perfil local próprio neste navegador.";
+  const root = getProfilesRoot();
+  const record = findProfileRecordByName(root, cleanName);
+  const pinHash = profilePinHash(cleanName, cleanPin);
+
+  if (record) {
+    if (record.pinHash && record.pinHash !== pinHash) {
+      showToast("Nome ou PIN inválido.");
+      return;
+    }
+
+    const savedProfile = readJSON(profileStorageKey(record.id));
+    state = normalizeState(savedProfile || createEmptyState({ id: record.id, name: record.name || cleanName, pinHash }), record.id);
+    state.profile.name = record.name || cleanName;
+    state.profile.pinHash = state.profile.pinHash || record.pinHash || pinHash;
+    saveState();
+    resetTimer();
+    render();
+    showToast(record.pinHash ? "Perfil carregado." : "PIN definido e perfil carregado.");
+    return;
+  }
+
+  const legacy = root.profiles.length ? null : readJSON(LEGACY_STORAGE_KEY);
+  state = legacy ? normalizeState(legacy) : createEmptyState();
+  state.profile.name = cleanName;
+  state.profile.pinHash = pinHash;
+  saveState();
+  resetTimer();
+  render();
+  showToast(legacy ? "Perfil cadastrado com os dados antigos deste navegador." : "Perfil individual cadastrado.");
+}
+
+function logoutProfile() {
+  sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
+  pauseTimer();
+  state = createEmptyState();
+  resetTimer();
+  render();
+  showToast("Perfil fechado nesta sessão.");
 }
 
 function renderSelectors() {
   populateSubjectSelect($("#topicSubject"));
   ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => populateTopicSelect($(selector)));
   populateTopicSelect($("#caseTopic"), { includeEmpty: true });
+  populateFlashcardReviewSelectors();
 
   const disabled = state.topics.length === 0;
   ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => {
@@ -1139,8 +1262,15 @@ function renderQuestions() {
 }
 
 function renderFlashcards() {
+  populateFlashcardReviewSelectors();
+  const scopedCards = getScopedFlashcards();
   const dueCards = getDueFlashcards();
   $("#flashcardDueCount").textContent = `${dueCards.length} pendentes`;
+  const summary = $("#flashcardReviewSummary");
+  if (summary) {
+    const orderLabel = state.ui.flashcardReviewOrder === "random" ? "sorteio aleatório" : "fila por vencimento";
+    summary.textContent = `${dueCards.length} de ${scopedCards.length} cartões pendentes em ${getFlashcardScopeLabel()} - ${orderLabel}.`;
+  }
 
   if (!state.flashcards.length) {
     $("#flashcardReview").innerHTML = `<div class="empty-state">Cadastre flashcards para iniciar suas revisões.</div>`;
@@ -1149,35 +1279,83 @@ function renderFlashcards() {
   }
 
   const activeCard = getActiveFlashcard(dueCards);
-  renderFlashcardReview(activeCard, dueCards.length);
+  renderFlashcardReview(activeCard, dueCards.length, scopedCards.length);
   renderFlashcardLibrary();
 }
 
-function getDueFlashcards() {
+function flashcardRuleSort(a, b) {
+  const priorityWeight = { Alta: 3, Média: 2, Baixa: 1 };
+  const difficultyWeight = { hard: 3, medium: 2, easy: 1 };
+  return (
+    Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0) ||
+    (difficultyWeight[b.difficulty] || 0) - (difficultyWeight[a.difficulty] || 0) ||
+    (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0) ||
+    String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
+  );
+}
+
+function shuffleFlashcards(cards) {
+  const shuffled = [...cards];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function flashcardMatchesReviewScope(card) {
+  const scope = state.ui.flashcardReviewScope || "all";
+  if (scope === "subject") {
+    const subjectId = state.ui.flashcardReviewSubjectId;
+    return Boolean(subjectId) && getTopic(card.topicId)?.subjectId === subjectId;
+  }
+  if (scope === "topic") {
+    const topicId = state.ui.flashcardReviewTopicId;
+    return Boolean(topicId) && card.topicId === topicId;
+  }
+  return true;
+}
+
+function getScopedFlashcards() {
+  return state.flashcards.filter(flashcardMatchesReviewScope);
+}
+
+function getDueFlashcards(cards = getScopedFlashcards()) {
   const counter = Number(state.flashcardSettings.reviewCounter || 0);
-  return [...state.flashcards]
+  return [...cards]
     .filter((card) => Number(card.nextDueReviewNumber || 0) <= counter)
-    .sort((a, b) => {
-      const priorityWeight = { Alta: 3, Média: 2, Baixa: 1 };
-      const difficultyWeight = { hard: 3, medium: 2, easy: 1 };
-      return (
-        Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0) ||
-        (difficultyWeight[b.difficulty] || 0) - (difficultyWeight[a.difficulty] || 0) ||
-        (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0) ||
-        String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
-      );
-    });
+    .sort(flashcardRuleSort);
+}
+
+function getFlashcardReviewQueue(cards = getDueFlashcards(), excludeId = "") {
+  const queue = cards.filter((card) => card.id !== excludeId);
+  return state.ui.flashcardReviewOrder === "random" ? shuffleFlashcards(queue) : queue.sort(flashcardRuleSort);
 }
 
 function getActiveFlashcard(dueCards) {
-  const active = state.flashcards.find((card) => card.id === state.ui.activeFlashcardId);
+  const active = dueCards.find((card) => card.id === state.ui.activeFlashcardId);
   if (active) return active;
 
-  const next = dueCards[0] || [...state.flashcards].sort((a, b) => Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0))[0];
-  state.ui.activeFlashcardId = next?.id || "";
-  state.ui.flashcardAnswerOpen = false;
-  saveState();
+  const next = getFlashcardReviewQueue(dueCards)[0];
+  const nextId = next?.id || "";
+  if (state.ui.activeFlashcardId !== nextId || state.ui.flashcardAnswerOpen) {
+    state.ui.activeFlashcardId = nextId;
+    state.ui.flashcardAnswerOpen = false;
+    saveState();
+  }
   return next;
+}
+
+function getFlashcardScopeLabel() {
+  const scope = state.ui.flashcardReviewScope || "all";
+  if (scope === "subject") {
+    const subject = getSubject(state.ui.flashcardReviewSubjectId);
+    return subject ? `matéria ${subject.name}` : "matéria selecionada";
+  }
+  if (scope === "topic") {
+    return `assunto ${getTopicLabel(state.ui.flashcardReviewTopicId)}`;
+  }
+  return "todos os flashcards";
 }
 
 function difficultyLabel(value) {
@@ -1188,9 +1366,11 @@ function getDifficultyInterval(value) {
   return Number(state.flashcardSettings.intervals?.[value] || state.flashcardSettings.intervals?.medium || 8);
 }
 
-function renderFlashcardReview(card, dueCount) {
+function renderFlashcardReview(card, dueCount, scopeCount = 0) {
   if (!card) {
-    $("#flashcardReview").innerHTML = `<div class="empty-state">Nenhum flashcard cadastrado.</div>`;
+    $("#flashcardReview").innerHTML = scopeCount
+      ? `<div class="empty-state">Nenhum flashcard pendente em ${escapeHTML(getFlashcardScopeLabel())}. As regras de dificuldade foram preservadas.</div>`
+      : `<div class="empty-state">Nenhum flashcard encontrado em ${escapeHTML(getFlashcardScopeLabel())}.</div>`;
     return;
   }
 
@@ -1210,7 +1390,7 @@ function renderFlashcardReview(card, dueCount) {
         <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
         <strong>${escapeHTML(getTopicLabel(card.topicId))}</strong>
       </div>
-      <span class="tag">${dueCount ? "Pendente" : `Volta após ${Math.max(0, Number(card.nextDueReviewNumber || 0) - Number(state.flashcardSettings.reviewCounter || 0))} cartões`}</span>
+      <span class="tag">${dueCount > 1 ? `${dueCount} pendentes no filtro` : "Pendente no filtro"}</span>
     </div>
     <div class="flashcard-face">
       <strong>Frente</strong>
@@ -1240,11 +1420,12 @@ function renderFlashcardReview(card, dueCount) {
 
 function renderFlashcardLibrary() {
   const counter = Number(state.flashcardSettings.reviewCounter || 0);
-  const sorted = [...state.flashcards].sort((a, b) => Number(a.nextDueReviewNumber || 0) - Number(b.nextDueReviewNumber || 0));
+  const sorted = [...state.flashcards].sort(flashcardRuleSort);
   $("#flashcardLibrary").innerHTML = sorted.length
     ? sorted
-        .map(
-          (card) => `
+        .map((card) => {
+          const isDue = Number(card.nextDueReviewNumber || 0) <= counter;
+          return `
         <article class="flashcard-library-card">
           <div class="flashcard-card-top">
             <div>
@@ -1252,7 +1433,7 @@ function renderFlashcardLibrary() {
               <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
               <strong>${escapeHTML(card.front)}</strong>
             </div>
-            <span class="tag">${Number(card.nextDueReviewNumber || 0) <= counter ? "Pendente" : `Faltam ${Number(card.nextDueReviewNumber || 0) - counter}`}</span>
+            <span class="tag">${isDue ? "Pendente" : `Faltam ${Number(card.nextDueReviewNumber || 0) - counter}`}</span>
           </div>
           <p class="music-note">${escapeHTML(card.back)}</p>
           <div class="flashcard-metrics">
@@ -1263,14 +1444,40 @@ function renderFlashcardLibrary() {
             <span>Repetição: ${getDifficultyInterval(card.difficulty)} cartões</span>
           </div>
           <div class="inline-actions">
-            <button class="mini-button" data-action="studyFlashcard" data-id="${card.id}" type="button">Revisar</button>
+            <button class="mini-button" data-action="studyFlashcard" data-id="${card.id}" type="button" ${isDue ? "" : "disabled"}>${isDue ? "Revisar" : "Aguardando"}</button>
             <button class="mini-button bad" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir flashcard</button>
           </div>
         </article>
-      `
-        )
+      `;
+        })
         .join("")
     : `<div class="empty-state">Sua biblioteca de flashcards aparecerá aqui.</div>`;
+}
+
+function updateFlashcardReviewSettings({ silent = false } = {}) {
+  const nextOrder = $("#flashcardReviewOrder")?.value === "due" ? "due" : "random";
+  const nextScope = ["all", "subject", "topic"].includes($("#flashcardReviewScope")?.value) ? $("#flashcardReviewScope").value : "all";
+  const nextSubjectId = $("#flashcardReviewSubject")?.value || state.ui.flashcardReviewSubjectId || "";
+  const nextTopicId = $("#flashcardReviewTopic")?.value || state.ui.flashcardReviewTopicId || "";
+  const changed =
+    state.ui.flashcardReviewOrder !== nextOrder ||
+    state.ui.flashcardReviewScope !== nextScope ||
+    state.ui.flashcardReviewSubjectId !== nextSubjectId ||
+    state.ui.flashcardReviewTopicId !== nextTopicId;
+
+  state.ui.flashcardReviewOrder = nextOrder;
+  state.ui.flashcardReviewScope = nextScope;
+  state.ui.flashcardReviewSubjectId = nextSubjectId;
+  state.ui.flashcardReviewTopicId = nextTopicId;
+
+  if (changed) {
+    state.ui.activeFlashcardId = "";
+    state.ui.flashcardAnswerOpen = false;
+  }
+
+  saveState();
+  renderFlashcards();
+  if (!silent) showToast("Sessão de flashcards atualizada.");
 }
 
 function reviewFlashcard(cardId, isCorrect) {
@@ -1286,7 +1493,7 @@ function reviewFlashcard(cardId, isCorrect) {
   card.dueDate = todayISO();
 
   state.ui.flashcardAnswerOpen = false;
-  state.ui.activeFlashcardId = getDueFlashcards().filter((item) => item.id !== card.id)[0]?.id || "";
+  state.ui.activeFlashcardId = getFlashcardReviewQueue(getDueFlashcards(), card.id)[0]?.id || "";
   saveState();
   renderFlashcards();
 }
@@ -1305,7 +1512,7 @@ function resetAllStats() {
     lastReviewed: "",
   }));
   state.ui.flashcardAnswerOpen = false;
-  state.ui.activeFlashcardId = state.flashcards[0]?.id || "";
+  state.ui.activeFlashcardId = "";
   pauseTimer();
   resetTimer();
 }
@@ -1826,10 +2033,13 @@ function renderPomodoro() {
   const activeTopicId = timer.topicId || $("#timerTopic").value;
   const topic = getTopic(activeTopicId);
   const subject = topic ? getSubject(topic.subjectId) : null;
+  const timerFace = $(".timer-face");
   $("#timerTopicLabel").textContent = topic ? `${subject?.name || "Sem matéria"}: ${topic.name}` : "Selecione um assunto";
   $("#timerMode").textContent = timer.mode === "focus" ? "Foco" : "Pausa";
   $("#cycleCounter").textContent = `Ciclo ${timer.cycle} de ${state.settings.cycles}`;
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
+  timerFace?.classList.toggle("break-mode", timer.mode === "break");
+  timerFace?.classList.toggle("timer-running", timer.running);
   renderMusicPlayer();
 
   const recent = [...state.studyLogs]
@@ -2129,6 +2339,60 @@ function resetTimer() {
   renderPomodoro();
 }
 
+function getPomodoroAudioContext() {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) return null;
+  if (!pomodoroAudioContext) pomodoroAudioContext = new AudioContextConstructor();
+  return pomodoroAudioContext;
+}
+
+function unlockPomodoroAlarm() {
+  const context = getPomodoroAudioContext();
+  if (context?.state === "suspended") context.resume().catch(() => {});
+}
+
+function playPomodoroAlarm(type = "cycle") {
+  const context = getPomodoroAudioContext();
+  if (!context) return;
+
+  const schedule = () => {
+    const patterns = {
+      break: [660, 880],
+      focus: [880, 660],
+      complete: [660, 880, 990],
+      cycle: [740, 880],
+    };
+    const frequencies = patterns[type] || patterns.cycle;
+
+    frequencies.forEach((frequency, index) => {
+      const start = context.currentTime + index * 0.18;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.15);
+
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 0.17);
+    });
+
+    if (navigator.vibrate) {
+      navigator.vibrate(type === "complete" ? [160, 70, 160, 70, 220] : [140, 60, 140]);
+    }
+  };
+
+  if (context.state === "suspended") {
+    context.resume().then(schedule).catch(() => {});
+    return;
+  }
+
+  schedule();
+}
+
 function startTimer() {
   if (timer.running) return;
   const topicId = $("#timerTopic").value;
@@ -2136,6 +2400,7 @@ function startTimer() {
     showToast("Cadastre e selecione um assunto para usar o Pomodoro.");
     return;
   }
+  unlockPomodoroAlarm();
   if (!timer.topicId) timer.topicId = topicId;
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
@@ -2158,13 +2423,16 @@ function tickTimer() {
       logPomodoroFocus();
       timer.mode = "break";
       timer.remaining = state.settings.breakMinutes * 60;
+      playPomodoroAlarm("break");
       showToast("Foco registrado. Pausa iniciada.");
     } else if (timer.cycle < state.settings.cycles) {
       timer.cycle += 1;
       timer.mode = "focus";
       timer.remaining = state.settings.focusMinutes * 60;
+      playPomodoroAlarm("focus");
       showToast("Novo ciclo de foco.");
     } else {
+      playPomodoroAlarm("complete");
       pauseTimer();
       timer.mode = "focus";
       timer.remaining = state.settings.focusMinutes * 60;
@@ -2252,30 +2520,10 @@ function attachEvents() {
 
   $("#profileForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    state.profile.name = $("#profileName").value.trim();
-    saveState();
-    renderProfilePanel();
-    showToast("Perfil salvo.");
+    accessProfileByNameAndPin($("#profileName").value, $("#profilePin").value);
   });
 
-  $("#profileSelect").addEventListener("change", (event) => {
-    const selectedId = event.target.value;
-    const savedProfile = readJSON(profileStorageKey(selectedId));
-    if (!savedProfile) return;
-    state = normalizeState(savedProfile, selectedId);
-    saveState();
-    resetTimer();
-    render();
-    showToast("Perfil carregado.");
-  });
-
-  $("#newProfileBtn").addEventListener("click", () => {
-    state = createEmptyState();
-    saveState();
-    resetTimer();
-    render();
-    showToast("Novo perfil criado. Seus dados começam em branco.");
-  });
+  $("#logoutProfileBtn").addEventListener("click", logoutProfile);
 
   $("#controlDayDate").addEventListener("change", (event) => {
     state.ui.controlDayDate = event.target.value || todayISO();
@@ -2522,6 +2770,15 @@ function attachEvents() {
     showToast("Intervalos dos flashcards salvos.");
   });
 
+  $("#flashcardReviewForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateFlashcardReviewSettings();
+  });
+
+  ["#flashcardReviewOrder", "#flashcardReviewScope", "#flashcardReviewSubject", "#flashcardReviewTopic"].forEach((selector) => {
+    $(selector).addEventListener("change", () => updateFlashcardReviewSettings());
+  });
+
   $("#categoryForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const category = ensureCategory($("#categoryName").value);
@@ -2740,9 +2997,7 @@ function handleAction(action) {
   }
 
   if (type === "nextFlashcard") {
-    const cards = getDueFlashcards();
-    const currentIndex = cards.findIndex((card) => card.id === state.ui.activeFlashcardId);
-    const next = cards[currentIndex + 1] || cards[0] || state.flashcards.find((card) => card.id !== state.ui.activeFlashcardId);
+    const next = getFlashcardReviewQueue(getDueFlashcards(), state.ui.activeFlashcardId)[0];
     state.ui.activeFlashcardId = next?.id || "";
     state.ui.flashcardAnswerOpen = false;
     saveState();
@@ -2751,6 +3006,17 @@ function handleAction(action) {
   }
 
   if (type === "studyFlashcard") {
+    const card = state.flashcards.find((item) => item.id === id);
+    if (!card) return;
+    const counter = Number(state.flashcardSettings.reviewCounter || 0);
+    if (Number(card.nextDueReviewNumber || 0) > counter) {
+      showToast("Este flashcard ainda não está pendente pela regra de dificuldade.");
+      return;
+    }
+    const topic = getTopic(card.topicId);
+    state.ui.flashcardReviewScope = "topic";
+    state.ui.flashcardReviewTopicId = card.topicId;
+    state.ui.flashcardReviewSubjectId = topic?.subjectId || state.ui.flashcardReviewSubjectId || "";
     state.ui.activeFlashcardId = id;
     state.ui.flashcardAnswerOpen = false;
     state.ui.view = "flashcards";

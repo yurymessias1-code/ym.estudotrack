@@ -7,7 +7,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
-- Pomodoro com registro de tempo, alarme ao terminar cada etapa e animação de pausa;
+- Pomodoro com registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
 - exclusão individual de flashcards;
@@ -68,9 +68,13 @@ Para sincronizar automaticamente entre dispositivos com login e senha, será nec
 
 ## Pomodoro com alarme
 
-O Pomodoro toca um alarme curto quando o foco termina, quando a pausa termina e quando todos os ciclos acabam.
-Durante a pausa, o círculo do temporizador mostra uma animação de descanso.
-O som é gerado pelo navegador e começa a funcionar depois que o usuário clica em **Iniciar**.
+O Pomodoro toca um alarme curto quando cada bloco termina: foco, pausa curta ou descanso longo.
+Também há um lofi de tic-tac opcional, gerado pelo navegador, com botão para ligar ou desligar.
+Durante o descanso, o círculo do temporizador mostra uma animação.
+
+Por padrão, o app usa 25 minutos de foco, 5 minutos de pausa curta e 30 minutos de descanso longo a cada 120 minutos ou rodada configurada.
+Na própria aba **Pomodoro**, o usuário pode alterar foco, pausa curta, descanso longo, intervalo do descanso longo e ciclos por rodada.
+O botão **Pular etapa** permite avançar manualmente do foco para o descanso ou do descanso para o próximo foco.
 
 ## Reset de estatísticas
 

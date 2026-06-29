@@ -31,11 +31,14 @@ let timer = {
   mode: "focus",
   remaining: state.settings.focusMinutes * 60,
   elapsedFocusSeconds: 0,
+  elapsedSinceLongBreakSeconds: 0,
   cycle: 1,
   topicId: "",
 };
 const syncingSources = new Set();
 let pomodoroAudioContext = null;
+let lofiTickInterval = null;
+let lofiTickStep = 0;
 
 function todayISO() {
   return toISODate(new Date());
@@ -212,7 +215,10 @@ function normalizeState(candidate, fallbackProfileId = "") {
     settings: {
       focusMinutes: Number(candidate.settings?.focusMinutes) || 25,
       breakMinutes: Number(candidate.settings?.breakMinutes) || 5,
+      longBreakMinutes: Number(candidate.settings?.longBreakMinutes) || 30,
+      longBreakEveryMinutes: Number(candidate.settings?.longBreakEveryMinutes) || 120,
       cycles: Number(candidate.settings?.cycles) || 4,
+      tickLofiEnabled: candidate.settings?.tickLofiEnabled !== false,
     },
     flashcardSettings: {
       reviewCounter: Number(candidate.flashcardSettings?.reviewCounter || 0),
@@ -264,7 +270,7 @@ function createEmptyState(profile = {}) {
     cases: { STJ: [], STF: [] },
     media: { url: "" },
     account: { name: "", email: "" },
-    settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
+    settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 30, longBreakEveryMinutes: 120, cycles: 4, tickLofiEnabled: true },
     flashcardSettings: {
       reviewCounter: 0,
       intervals: { hard: 4, medium: 8, easy: 12 },
@@ -394,7 +400,7 @@ function createSeedState() {
       ],
     },
     media: { url: "" },
-    settings: { focusMinutes: 25, breakMinutes: 5, cycles: 4 },
+    settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 30, longBreakEveryMinutes: 120, cycles: 4, tickLofiEnabled: true },
       ui: {
         view: "dashboard",
         theme: state?.ui?.theme === "dark" ? "dark" : "light",
@@ -638,6 +644,8 @@ function ensureFormDefaults() {
   $("#caseDate").value ||= todayISO();
   $("#focusMinutes").value = state.settings.focusMinutes;
   $("#breakMinutes").value = state.settings.breakMinutes;
+  $("#longBreakMinutes").value = state.settings.longBreakMinutes || 30;
+  $("#longBreakEveryMinutes").value = state.settings.longBreakEveryMinutes || 120;
   $("#cycleTotal").value = state.settings.cycles;
   $("#musicUrl").value = state.media.url;
   $("#hardInterval").value = state.flashcardSettings.intervals.hard;
@@ -2122,12 +2130,16 @@ function renderPomodoro() {
   const topic = getTopic(activeTopicId);
   const subject = topic ? getSubject(topic.subjectId) : null;
   const timerFace = $(".timer-face");
+  const modeLabel = timer.mode === "focus" ? "Foco" : timer.mode === "longBreak" ? "Descanso longo" : "Pausa curta";
   $("#timerTopicLabel").textContent = topic ? `${subject?.name || "Sem matéria"}: ${topic.name}` : "Selecione um assunto";
-  $("#timerMode").textContent = timer.mode === "focus" ? "Foco" : "Pausa";
+  $("#timerMode").textContent = modeLabel;
   $("#cycleCounter").textContent = `Ciclo ${timer.cycle} de ${state.settings.cycles}`;
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
-  timerFace?.classList.toggle("break-mode", timer.mode === "break");
+  timerFace?.classList.toggle("break-mode", timer.mode === "break" || timer.mode === "longBreak");
+  timerFace?.classList.toggle("long-break-mode", timer.mode === "longBreak");
   timerFace?.classList.toggle("timer-running", timer.running);
+  $("#skipTimerBtn").textContent = timer.mode === "focus" ? "Pular foco" : "Pular descanso";
+  $("#tickLofiToggleBtn").textContent = state.settings.tickLofiEnabled ? "Desligar lofi" : "Ligar lofi";
   renderMusicPlayer();
 
   const recent = [...state.studyLogs]
@@ -2417,11 +2429,13 @@ function roundRect(ctx, x, y, width, height, radius) {
 
 function resetTimer() {
   window.clearInterval(timer.interval);
+  stopLofiTick();
   timer.interval = null;
   timer.running = false;
   timer.mode = "focus";
   timer.remaining = state.settings.focusMinutes * 60;
   timer.elapsedFocusSeconds = 0;
+  timer.elapsedSinceLongBreakSeconds = 0;
   timer.cycle = 1;
   timer.topicId = "";
   renderPomodoro();
@@ -2481,6 +2495,55 @@ function playPomodoroAlarm(type = "cycle") {
   schedule();
 }
 
+function playLofiTickPulse() {
+  const context = getPomodoroAudioContext();
+  if (!context || context.state === "suspended") return;
+
+  const start = context.currentTime;
+  const oscillator = context.createOscillator();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  const isAccent = lofiTickStep % 2 === 0;
+
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(isAccent ? 860 : 620, start);
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(isAccent ? 1200 : 900, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(isAccent ? 0.055 : 0.038, start + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.085);
+
+  oscillator.connect(filter).connect(gain).connect(context.destination);
+  oscillator.start(start);
+  oscillator.stop(start + 0.1);
+  lofiTickStep += 1;
+}
+
+function startLofiTick() {
+  stopLofiTick();
+  if (!state.settings.tickLofiEnabled || !timer.running) return;
+  unlockPomodoroAlarm();
+  playLofiTickPulse();
+  lofiTickInterval = window.setInterval(playLofiTickPulse, 1000);
+}
+
+function stopLofiTick() {
+  window.clearInterval(lofiTickInterval);
+  lofiTickInterval = null;
+}
+
+function toggleLofiTick() {
+  state.settings.tickLofiEnabled = !state.settings.tickLofiEnabled;
+  saveState();
+  if (state.settings.tickLofiEnabled && timer.running) {
+    startLofiTick();
+  } else {
+    stopLofiTick();
+  }
+  renderPomodoro();
+  showToast(state.settings.tickLofiEnabled ? "Lofi tic-tac ligado." : "Lofi tic-tac desligado.");
+}
+
 function startTimer() {
   if (timer.running) return;
   const topicId = $("#timerTopic").value;
@@ -2492,11 +2555,13 @@ function startTimer() {
   if (!timer.topicId) timer.topicId = topicId;
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
+  startLofiTick();
   renderPomodoro();
 }
 
 function pauseTimer() {
   window.clearInterval(timer.interval);
+  stopLofiTick();
   timer.interval = null;
   timer.running = false;
   renderPomodoro();
@@ -2505,31 +2570,77 @@ function pauseTimer() {
 function tickTimer() {
   timer.remaining -= 1;
   if (timer.mode === "focus") timer.elapsedFocusSeconds += 1;
+  if (timer.mode !== "longBreak") timer.elapsedSinceLongBreakSeconds += 1;
 
   if (timer.remaining <= 0) {
-    if (timer.mode === "focus") {
-      logPomodoroFocus();
-      timer.mode = "break";
-      timer.remaining = state.settings.breakMinutes * 60;
-      playPomodoroAlarm("break");
-      showToast("Foco registrado. Pausa iniciada.");
-    } else if (timer.cycle < state.settings.cycles) {
-      timer.cycle += 1;
-      timer.mode = "focus";
-      timer.remaining = state.settings.focusMinutes * 60;
-      playPomodoroAlarm("focus");
-      showToast("Novo ciclo de foco.");
-    } else {
-      playPomodoroAlarm("complete");
-      pauseTimer();
-      timer.mode = "focus";
-      timer.remaining = state.settings.focusMinutes * 60;
-      timer.cycle = 1;
-      timer.topicId = "";
-      showToast("Pomodoro completo.");
-    }
+    completeTimerBlock();
   }
 
+  renderPomodoro();
+  renderDashboard();
+  renderReports();
+}
+
+function longBreakIsDue() {
+  const everySeconds = Math.max(1, Number(state.settings.longBreakEveryMinutes || 120)) * 60;
+  return timer.elapsedSinceLongBreakSeconds >= everySeconds || Number(timer.cycle || 1) >= Number(state.settings.cycles || 4);
+}
+
+function startBreakBlock(isLongBreak, skipped = false) {
+  timer.mode = isLongBreak ? "longBreak" : "break";
+  timer.remaining = (isLongBreak ? state.settings.longBreakMinutes : state.settings.breakMinutes) * 60;
+  if (isLongBreak) timer.elapsedSinceLongBreakSeconds = 0;
+  playPomodoroAlarm(isLongBreak ? "complete" : "break");
+  showToast(
+    isLongBreak
+      ? `${skipped ? "Foco pulado." : "Bloco de foco encerrado."} Descanso longo iniciado.`
+      : `${skipped ? "Foco pulado." : "Bloco de foco encerrado."} Pausa curta iniciada.`
+  );
+}
+
+function startFocusBlock(skipped = false) {
+  if (timer.mode === "longBreak") {
+    timer.cycle = 1;
+  } else {
+    timer.cycle += 1;
+  }
+  timer.mode = "focus";
+  timer.remaining = state.settings.focusMinutes * 60;
+  playPomodoroAlarm("focus");
+  showToast(skipped ? "Descanso pulado. Novo foco iniciado." : "Novo bloco de foco iniciado.");
+}
+
+function completeTimerBlock(options = {}) {
+  const skipped = Boolean(options.skipped);
+
+  if (timer.mode === "focus") {
+    if (timer.elapsedFocusSeconds >= 60 || !skipped) {
+      logPomodoroFocus();
+    } else {
+      timer.elapsedFocusSeconds = 0;
+    }
+    startBreakBlock(longBreakIsDue(), skipped);
+    return;
+  }
+
+  if (timer.mode === "break" && timer.elapsedSinceLongBreakSeconds >= Math.max(1, Number(state.settings.longBreakEveryMinutes || 120)) * 60) {
+    startBreakBlock(true, skipped);
+    return;
+  }
+
+  startFocusBlock(skipped);
+}
+
+function skipTimerStep() {
+  if (!timer.topicId && timer.mode === "focus") {
+    const topicId = $("#timerTopic").value;
+    if (!topicId) {
+      showToast("Selecione um assunto antes de pular a etapa.");
+      return;
+    }
+    timer.topicId = topicId;
+  }
+  completeTimerBlock({ skipped: true });
   renderPomodoro();
   renderDashboard();
   renderReports();
@@ -2808,8 +2919,10 @@ function attachEvents() {
 
   $("#timerSettingsForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    state.settings.focusMinutes = clamp(Number($("#focusMinutes").value), 5, 120);
-    state.settings.breakMinutes = clamp(Number($("#breakMinutes").value), 1, 30);
+    state.settings.focusMinutes = clamp(Number($("#focusMinutes").value), 1, 240);
+    state.settings.breakMinutes = clamp(Number($("#breakMinutes").value), 1, 120);
+    state.settings.longBreakMinutes = clamp(Number($("#longBreakMinutes").value), 1, 180);
+    state.settings.longBreakEveryMinutes = clamp(Number($("#longBreakEveryMinutes").value), 15, 480);
     state.settings.cycles = clamp(Number($("#cycleTotal").value), 1, 8);
     saveState();
     resetTimer();
@@ -3043,6 +3156,8 @@ function attachEvents() {
 
   $("#startTimerBtn").addEventListener("click", startTimer);
   $("#pauseTimerBtn").addEventListener("click", pauseTimer);
+  $("#skipTimerBtn").addEventListener("click", skipTimerStep);
+  $("#tickLofiToggleBtn").addEventListener("click", toggleLofiTick);
   $("#resetTimerBtn").addEventListener("click", resetTimer);
   $("#finishTimerBtn").addEventListener("click", finishTimerManually);
   $("#timerTopic").addEventListener("change", renderPomodoro);

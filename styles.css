@@ -1174,6 +1174,10 @@ td {
   gap: 18px;
 }
 
+.timer-controls .button {
+  flex: 1 1 118px;
+}
+
 .timer-face {
   position: relative;
   display: grid;
@@ -1206,9 +1210,19 @@ td {
   animation: restGlow 2.8s ease-in-out infinite;
 }
 
+.timer-face.long-break-mode {
+  border-color: #bfdbfe;
+  border-top-color: var(--blue);
+  background: linear-gradient(180deg, #eff6ff 0%, #f4fbf8 100%);
+}
+
 .timer-face.break-mode #timerDisplay {
   color: var(--amber);
   transform: translateY(-34px);
+}
+
+.timer-face.long-break-mode #timerDisplay {
+  color: var(--blue);
 }
 
 .break-visual {
@@ -1452,6 +1466,12 @@ td {
   border-color: #6b5425;
   border-top-color: var(--amber);
   background: linear-gradient(180deg, #2a220f 0%, #13251f 100%);
+}
+
+.theme-dark .timer-face.long-break-mode {
+  border-color: #1d4e89;
+  border-top-color: var(--blue);
+  background: linear-gradient(180deg, #10233f 0%, #13251f 100%);
 }
 
 .theme-dark .coffee-cup {

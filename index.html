@@ -375,6 +375,8 @@
               <div class="timer-controls">
                 <button class="button primary" id="startTimerBtn" type="button">Iniciar</button>
                 <button class="button secondary" id="pauseTimerBtn" type="button">Pausar</button>
+                <button class="button secondary" id="skipTimerBtn" type="button">Pular etapa</button>
+                <button class="button ghost" id="tickLofiToggleBtn" type="button">Desligar lofi</button>
                 <button class="button ghost" id="resetTimerBtn" type="button">Zerar</button>
                 <button class="button ghost" id="finishTimerBtn" type="button">Registrar</button>
               </div>
@@ -394,15 +396,25 @@
               <div class="split-inputs">
                 <label>
                   Foco
-                  <input id="focusMinutes" type="number" min="5" max="120" value="25" required />
+                  <input id="focusMinutes" type="number" min="1" max="240" value="25" required />
                 </label>
                 <label>
-                  Pausa
-                  <input id="breakMinutes" type="number" min="1" max="30" value="5" required />
+                  Pausa curta
+                  <input id="breakMinutes" type="number" min="1" max="120" value="5" required />
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Descanso longo
+                  <input id="longBreakMinutes" type="number" min="1" max="180" value="30" required />
+                </label>
+                <label>
+                  A cada (min)
+                  <input id="longBreakEveryMinutes" type="number" min="15" max="480" value="120" required />
                 </label>
               </div>
               <label>
-                Ciclos
+                Ciclos por rodada
                 <input id="cycleTotal" type="number" min="1" max="8" value="4" required />
               </label>
               <button class="button secondary" type="submit">Aplicar ajustes</button>

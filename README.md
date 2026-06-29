@@ -11,6 +11,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - player de foco por link do YouTube ou Spotify;
 - flashcards com revisão por dificuldade, acertos, erros e repetição por contagem de cartões;
 - anotações com marca-texto, categorias e fonte externa vinculada;
+- fontes/sites com texto hospedado no app, grifos salvos, upload HTML/TXT, sincronização por link quando permitida e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador;
 - exportação, importação e backup dos dados em JSON.
 
@@ -83,5 +84,21 @@ Esses números podem ser alterados pelo próprio usuário na aba **Flashcards**,
 A aba **Anotações** permite cadastrar sites usados como base, como Planalto, tribunais, PDFs hospedados ou páginas de lei.
 As fontes podem ser divididas por categoria e vinculadas às anotações.
 
-O editor de anotação possui marca-texto em amarelo, verde e azul.
-Alguns sites oficiais podem bloquear a visualização dentro do app; nesse caso, use o botão **Abrir site base** e atualize a anotação manualmente com base na fonte original.
+Cada fonte possui um campo de texto hospedado no app: cole ali o trecho da lei ou do site, selecione a parte desejada e aplique marca-texto.
+Os grifos ficam salvos na própria fonte dentro do app e continuam vinculados ao link original cadastrado.
+
+O editor de fonte e o editor de anotação possuem marca-texto em amarelo, verde, azul e cor personalizada.
+Também é possível editar ou excluir fontes/sites cadastrados e criar/excluir categorias.
+
+Para carregar o texto de uma fonte, use uma destas opções:
+
+- **Importar texto do link**: o app tenta buscar o conteúdo do site e colocar no leitor da fonte.
+- **Upload HTML/TXT**: envie um arquivo salvo da página ou da lei.
+- **Colar manualmente**: copie o trecho do site original e cole no leitor da fonte.
+
+Ao ativar **Tentar sincronizar automaticamente pelo link**, o app verifica a fonte quando ela puder ser lida pelo navegador.
+Se o texto ainda não tiver grifos, a atualização pode entrar automaticamente.
+Se já houver grifos, o app preserva sua versão marcada e mostra uma atualização disponível para aplicação manual.
+
+Alguns sites oficiais podem bloquear visualização ou sincronização dentro do app.
+Nesse caso, use o botão **Abrir site base**, copie o trecho necessário ou salve a página como HTML/TXT e envie pelo upload.

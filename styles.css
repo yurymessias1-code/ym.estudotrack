@@ -399,6 +399,10 @@ button {
   gap: 14px;
 }
 
+.hidden {
+  display: none !important;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -473,6 +477,7 @@ button:focus-visible {
 .flashcard-library,
 .source-library,
 .note-library,
+.category-list,
 .goal-list {
   display: grid;
   gap: 12px;
@@ -505,6 +510,7 @@ button:focus-visible {
 .flashcard-library-card,
 .source-card,
 .note-card,
+.category-card,
 .goal-card {
   display: grid;
   gap: 12px;
@@ -576,8 +582,62 @@ button:focus-visible {
 
 .highlight-toolbar {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.editor-field {
+  display: grid;
+  gap: 10px;
+}
+
+.sync-options {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f7faf9;
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+}
+
+.checkbox-line input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
+.field-title {
+  color: var(--muted);
+  font-weight: 900;
+  font-size: 0.9rem;
+}
+
+.color-control {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.color-control input {
+  width: 34px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .marker-yellow {
@@ -611,6 +671,10 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.law-editor:empty::before {
+  content: "Cole o texto da lei ou do site aqui para grifar e salvar nesta fonte.";
+}
+
 .note-content {
   padding: 12px;
   border: 1px solid var(--line);
@@ -637,6 +701,35 @@ button:focus-visible {
 .source-preview-actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 10px;
+}
+
+.source-reader,
+.category-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.sync-alert {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #f2d08a;
+  border-radius: var(--radius);
+  background: #fff8e6;
+  color: #684500;
+}
+
+.category-panel {
+  margin-bottom: 18px;
+}
+
+.source-form-actions,
+.category-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
 }
 

@@ -1,6 +1,8 @@
 const LEGACY_STORAGE_KEY = "concursoTrack.v1";
 const PROFILE_ROOT_KEY = "ymEstudos.profiles.v1";
 const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
+const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const SOURCE_TEXT_LIMIT = 180000;
 
 const titles = {
   dashboard: "Painel",
@@ -29,6 +31,7 @@ let timer = {
   cycle: 1,
   topicId: "",
 };
+const syncingSources = new Set();
 
 function todayISO() {
   return toISODate(new Date());
@@ -150,6 +153,29 @@ function normalizeFlashcard(card = {}) {
   };
 }
 
+function normalizeSource(source = {}) {
+  return {
+    id: source.id || uid(),
+    category: normalizeCategoryName(source.category) || "Sem categoria",
+    title: source.title || "Fonte sem nome",
+    url: source.url || "",
+    content: sanitizeNoteHTML(source.content || ""),
+    lastImportedContent: sanitizeNoteHTML(source.lastImportedContent || ""),
+    pendingContent: sanitizeNoteHTML(source.pendingContent || ""),
+    autoSync: Boolean(source.autoSync),
+    lastSyncAttemptAt: source.lastSyncAttemptAt || "",
+    lastSyncedAt: source.lastSyncedAt || "",
+    lastSyncStatus: source.lastSyncStatus || "",
+    lastSyncError: source.lastSyncError || "",
+    lastSyncHash: source.lastSyncHash || "",
+    appliedSyncHash: source.appliedSyncHash || "",
+    pendingSyncHash: source.pendingSyncHash || "",
+    pendingSyncedAt: source.pendingSyncedAt || "",
+    createdAt: source.createdAt || todayISO(),
+    updatedAt: source.updatedAt || new Date().toISOString(),
+  };
+}
+
 function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
   return {
@@ -160,8 +186,9 @@ function normalizeState(candidate, fallbackProfileId = "") {
     questionLogs: Array.isArray(candidate.questionLogs) ? candidate.questionLogs : empty.questionLogs,
     studyLogs: Array.isArray(candidate.studyLogs) ? candidate.studyLogs : empty.studyLogs,
     flashcards: Array.isArray(candidate.flashcards) ? candidate.flashcards.map(normalizeFlashcard) : empty.flashcards,
-    sources: Array.isArray(candidate.sources) ? candidate.sources : empty.sources,
+    sources: Array.isArray(candidate.sources) ? candidate.sources.map(normalizeSource) : empty.sources,
     notes: Array.isArray(candidate.notes) ? candidate.notes : empty.notes,
+    categories: Array.isArray(candidate.categories) ? candidate.categories.map(normalizeCategoryName).filter(Boolean) : empty.categories,
     goals: Array.isArray(candidate.goals) ? candidate.goals : empty.goals,
     cases: {
       STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ : [],
@@ -199,6 +226,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeFlashcardId: candidate.ui?.activeFlashcardId || "",
       flashcardAnswerOpen: Boolean(candidate.ui?.flashcardAnswerOpen),
       activeSourceId: candidate.ui?.activeSourceId || "",
+      activeSourceEditId: candidate.ui?.activeSourceEditId || "",
       activeNoteId: candidate.ui?.activeNoteId || "",
     },
   };
@@ -215,6 +243,7 @@ function createEmptyState(profile = {}) {
     flashcards: [],
     sources: [],
     notes: [],
+    categories: [],
     goals: [],
     cases: { STJ: [], STF: [] },
     media: { url: "" },
@@ -236,6 +265,7 @@ function createEmptyState(profile = {}) {
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
       activeSourceId: "",
+      activeSourceEditId: "",
       activeNoteId: "",
     },
   };
@@ -1245,16 +1275,320 @@ function getSource(sourceId) {
   return state.sources.find((source) => source.id === sourceId);
 }
 
+function normalizeCategoryName(value) {
+  return String(value || "").trim();
+}
+
+function getAllCategories() {
+  const categories = [
+    ...(Array.isArray(state.categories) ? state.categories : []),
+    ...state.sources.map((source) => source.category),
+    ...state.notes.map((note) => note.category),
+  ]
+    .map(normalizeCategoryName)
+    .filter(Boolean);
+  return [...new Set(categories)].sort((a, b) => a.localeCompare(b));
+}
+
+function ensureCategory(category) {
+  const name = normalizeCategoryName(category);
+  if (!name) return "";
+  state.categories = Array.isArray(state.categories) ? state.categories : [];
+  if (!state.categories.some((item) => item.toLowerCase() === name.toLowerCase())) {
+    state.categories.push(name);
+    state.categories.sort((a, b) => a.localeCompare(b));
+  }
+  return name;
+}
+
+function resolveCategory(selectSelector, inputSelector) {
+  const typed = normalizeCategoryName($(inputSelector)?.value);
+  const selected = normalizeCategoryName($(selectSelector)?.value);
+  return ensureCategory(typed || selected);
+}
+
+function setCategoryFields(prefix, category) {
+  const select = $(`#${prefix}CategorySelect`);
+  const input = $(`#${prefix}CategoryNew`);
+  if (!select || !input) return;
+  const value = normalizeCategoryName(category);
+  const hasOption = [...select.options].some((option) => option.value === value);
+  select.value = hasOption ? value : "";
+  input.value = hasOption ? "" : value;
+}
+
+function richTextHasContent(html) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html || "";
+  return wrapper.textContent.trim().length > 0;
+}
+
+function hasHighlightMarkup(html) {
+  return /background(?:-color)?\s*:/i.test(String(html || ""));
+}
+
+function plainTextFromHTML(html) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html || "";
+  return wrapper.textContent.replace(/\s+/g, " ").trim();
+}
+
+function simpleHash(value) {
+  let hash = 0;
+  const text = String(value || "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(16);
+}
+
+function sourceContentHash(html) {
+  return simpleHash(plainTextFromHTML(html));
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function sourceSyncSummary(source) {
+  if (syncingSources.has(source.id)) return "Sincronizando agora";
+  if (source.pendingContent) return `Atualização detectada${source.pendingSyncedAt ? ` em ${formatDateTime(source.pendingSyncedAt)}` : ""}`;
+  if (source.lastSyncError) return `Falha na sincronização: ${source.lastSyncError}`;
+  if (source.lastSyncedAt) return `Sincronizado em ${formatDateTime(source.lastSyncedAt)}`;
+  return source.autoSync ? "Sincronização automática ativada" : "Sincronização manual";
+}
+
+function clipSourceText(text) {
+  const clean = String(text || "").replace(/\r/g, "").trim();
+  return clean.length > SOURCE_TEXT_LIMIT ? `${clean.slice(0, SOURCE_TEXT_LIMIT)}\n\n[Texto reduzido pelo limite de armazenamento do navegador.]` : clean;
+}
+
+function textToRichHTML(text) {
+  return clipSourceText(text)
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHTML(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function parseSourceDocument(rawText, contentType = "", fallbackTitle = "") {
+  const text = String(rawText || "");
+  const looksLikeHTML = /html/i.test(contentType) || /<\/?[a-z][\s\S]*>/i.test(text);
+  if (!looksLikeHTML) {
+    return { title: fallbackTitle, html: textToRichHTML(text) };
+  }
+
+  const documentHTML = new DOMParser().parseFromString(text, "text/html");
+  documentHTML.querySelectorAll("script, style, noscript, svg, form, nav, header, footer").forEach((element) => element.remove());
+  const title = documentHTML.querySelector("title")?.textContent.trim() || fallbackTitle;
+  const container = documentHTML.querySelector("main, article, [role='main']") || documentHTML.body;
+  return { title, html: textToRichHTML(container?.textContent || "") };
+}
+
+async function fetchSourceDocument(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const rawText = await response.text();
+  return parseSourceDocument(rawText, response.headers.get("content-type") || "", url);
+}
+
+function sourceCanApplySync(source) {
+  if (!richTextHasContent(source.content)) return true;
+  if (hasHighlightMarkup(source.content)) return false;
+  const currentHash = sourceContentHash(source.content);
+  return !source.lastSyncHash || currentHash === source.lastSyncHash || currentHash === source.appliedSyncHash;
+}
+
+function applySyncedContent(source, html, hash) {
+  source.content = sanitizeNoteHTML(html);
+  source.appliedSyncHash = hash;
+  source.pendingContent = "";
+  source.pendingSyncHash = "";
+  source.pendingSyncedAt = "";
+}
+
+async function syncSourceFromUrl(sourceId, options = {}) {
+  const source = getSource(sourceId);
+  if (!source || syncingSources.has(sourceId)) return;
+  const safeUrl = getSafeExternalUrl(source.url);
+  if (!safeUrl) {
+    source.lastSyncError = "link inválido";
+    source.lastSyncStatus = "Falha";
+    saveState();
+    renderNotes();
+    return;
+  }
+
+  syncingSources.add(sourceId);
+  source.lastSyncAttemptAt = new Date().toISOString();
+  source.lastSyncStatus = "Sincronizando";
+  source.lastSyncError = "";
+  saveState();
+  if (!options.silent) showToast("Tentando sincronizar a fonte pelo link.");
+
+  try {
+    const imported = await fetchSourceDocument(safeUrl);
+    const html = sanitizeNoteHTML(imported.html || "");
+    if (!richTextHasContent(html)) throw new Error("conteúdo vazio");
+    const hash = sourceContentHash(html);
+    const previousHash = source.lastSyncHash || "";
+    const canApplyNow = sourceCanApplySync(source);
+    source.lastImportedContent = html;
+    source.lastSyncHash = hash;
+    source.lastSyncedAt = new Date().toISOString();
+    source.lastSyncError = "";
+    source.updatedAt = new Date().toISOString();
+
+    if (canApplyNow) {
+      applySyncedContent(source, html, hash);
+      source.lastSyncStatus = previousHash && previousHash !== hash ? "Atualizado automaticamente" : "Sincronizado";
+    } else if (previousHash && previousHash !== hash) {
+      source.pendingContent = html;
+      source.pendingSyncHash = hash;
+      source.pendingSyncedAt = new Date().toISOString();
+      source.lastSyncStatus = "Atualização disponível";
+    } else {
+      source.lastSyncStatus = "Sincronizado";
+    }
+
+    if (imported.title && (!source.title || source.title === "Fonte sem nome")) {
+      source.title = imported.title;
+    }
+
+    saveState();
+    renderNotes();
+    if (!options.silent) {
+      showToast(source.pendingContent ? "Mudança detectada. Aplique quando quiser preservar ou refazer os grifos." : "Fonte sincronizada.");
+    }
+  } catch (error) {
+    source.lastSyncStatus = "Falha";
+    source.lastSyncError = "site bloqueou a leitura ou não retornou texto";
+    saveState();
+    renderNotes();
+    if (!options.silent) showToast("Não foi possível sincronizar pelo link. Use upload HTML/TXT ou cole o texto.");
+  } finally {
+    syncingSources.delete(sourceId);
+    renderNotes();
+  }
+}
+
+function queueAutoSyncSources() {
+  state.sources.forEach((source) => {
+    if (!source.autoSync || syncingSources.has(source.id)) return;
+    const lastAttempt = Date.parse(source.lastSyncAttemptAt || source.lastSyncedAt || "") || 0;
+    if (Date.now() - lastAttempt < SOURCE_SYNC_INTERVAL_MS) return;
+    window.setTimeout(() => syncSourceFromUrl(source.id, { silent: true }), 0);
+  });
+}
+
+async function importCurrentSourceUrlToForm() {
+  const safeUrl = getSafeExternalUrl($("#sourceUrl").value.trim());
+  if (!safeUrl) {
+    showToast("Informe um link válido para importar.");
+    return;
+  }
+
+  $("#importSourceUrlBtn").disabled = true;
+  showToast("Importando texto do link.");
+  try {
+    const imported = await fetchSourceDocument(safeUrl);
+    const html = sanitizeNoteHTML(imported.html || "");
+    if (!richTextHasContent(html)) throw new Error("conteúdo vazio");
+    $("#sourceContentEditor").innerHTML = html;
+    if (imported.title && !$("#sourceTitle").value.trim()) $("#sourceTitle").value = imported.title;
+    showToast("Texto importado para o leitor da fonte.");
+  } catch {
+    showToast("Este site bloqueou a importação. Use upload HTML/TXT ou cole o texto.");
+  } finally {
+    $("#importSourceUrlBtn").disabled = false;
+  }
+}
+
+function importSourceFileToForm(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const imported = parseSourceDocument(String(reader.result || ""), file.type || "", file.name.replace(/\.[^.]+$/, ""));
+    const html = sanitizeNoteHTML(imported.html || "");
+    if (!richTextHasContent(html)) {
+      showToast("Arquivo sem texto importável.");
+      return;
+    }
+    $("#sourceContentEditor").innerHTML = html;
+    if (!$("#sourceTitle").value.trim()) $("#sourceTitle").value = imported.title || file.name.replace(/\.[^.]+$/, "");
+    showToast("Arquivo carregado no leitor da fonte.");
+  };
+  reader.onerror = () => showToast("Não foi possível ler o arquivo.");
+  reader.readAsText(file, "UTF-8");
+}
+
 function renderNotes() {
+  renderCategorySelectors();
+  renderCategoryList();
+  renderSourceFormState();
   renderSourceSelectors();
   renderSourceLibrary();
   renderSourcePreview();
   renderNoteLibrary();
+  queueAutoSyncSources();
+}
+
+function renderCategorySelectors() {
+  const options = getAllCategories()
+    .map((category) => `<option value="${escapeHTML(category)}">${escapeHTML(category)}</option>`)
+    .join("");
+  const emptyOption = `<option value="">Escolher categoria</option>`;
+  $("#sourceCategorySelect").innerHTML = emptyOption + options;
+  $("#noteCategorySelect").innerHTML = emptyOption + options;
+}
+
+function renderCategoryList() {
+  const categories = getAllCategories();
+  $("#categoryList").innerHTML = categories.length
+    ? categories
+        .map(
+          (category) => `
+        <article class="category-card">
+          <span class="tag">${escapeHTML(category)}</span>
+          <button class="mini-button bad" data-action="deleteCategory" data-category="${escapeHTML(category)}" type="button">Excluir</button>
+        </article>
+      `
+        )
+        .join("")
+    : `<div class="empty-state">Crie categorias para organizar fontes, leis e anotações.</div>`;
+}
+
+function renderSourceFormState() {
+  const editing = Boolean(state.ui.activeSourceEditId);
+  $("#sourceSubmitBtn").textContent = editing ? "Salvar alterações da fonte" : "Salvar fonte";
+  $("#cancelSourceEditBtn").classList.toggle("hidden", !editing);
+}
+
+function resetSourceForm() {
+  $("#sourceForm").reset();
+  $("#sourceContentEditor").innerHTML = "";
+  $("#sourceAutoSync").checked = false;
+  $("#sourceFileInput").value = "";
+  setCategoryFields("source", "");
+}
+
+function fillSourceForm(source) {
+  if (!source) return;
+  $("#sourceTitle").value = source.title || "";
+  $("#sourceUrl").value = source.url || "";
+  $("#sourceAutoSync").checked = Boolean(source.autoSync);
+  $("#sourceContentEditor").innerHTML = sanitizeNoteHTML(source.content || "");
+  setCategoryFields("source", source.category || "");
+  renderSourceFormState();
 }
 
 function renderSourceSelectors() {
   const options = state.sources
-    .map((source) => `<option value="${source.id}">${escapeHTML(source.category)} - ${escapeHTML(source.title)}</option>`)
+    .map((source) => `<option value="${source.id}">${escapeHTML(source.category || "Sem categoria")} - ${escapeHTML(source.title)}</option>`)
     .join("");
   const emptyOption = `<option value="">Sem fonte vinculada</option>`;
   $("#activeSourceSelect").innerHTML = emptyOption + options;
@@ -1273,13 +1607,20 @@ function renderSourceLibrary() {
         <article class="source-card">
           <div class="source-card-top">
             <div>
-              <span class="tag">${escapeHTML(source.category)}</span>
+              <span class="tag">${escapeHTML(source.category || "Sem categoria")}</span>
               <strong>${escapeHTML(source.title)}</strong>
             </div>
+            <span class="tag">${richTextHasContent(source.content) ? "Com grifos" : "Sem texto"}</span>
           </div>
           <p class="music-note">${escapeHTML(source.url)}</p>
+          <div class="flashcard-metrics">
+            <span>${source.autoSync ? "Sync automática" : "Sync manual"}</span>
+            <span>${escapeHTML(sourceSyncSummary(source))}</span>
+          </div>
           <div class="inline-actions">
             <button class="mini-button" data-action="selectSource" data-id="${source.id}" type="button">Usar</button>
+            <button class="mini-button" data-action="syncSource" data-id="${source.id}" type="button">Sincronizar</button>
+            <button class="mini-button" data-action="editSource" data-id="${source.id}" type="button">Editar</button>
             <button class="mini-button bad" data-action="deleteSource" data-id="${source.id}" type="button">Excluir</button>
           </div>
         </article>
@@ -1305,10 +1646,46 @@ function renderSourcePreview() {
   $("#sourcePreview").innerHTML = `
     <div class="source-preview-actions">
       <a class="button secondary" href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer">Abrir site base</a>
+      <button class="button secondary" data-action="syncSource" data-id="${source.id}" type="button">Sincronizar agora</button>
       <button class="button ghost" data-action="useSourceInNote" data-id="${source.id}" type="button">Usar na anotação</button>
+      <button class="button ghost" data-action="editSource" data-id="${source.id}" type="button">Editar fonte</button>
     </div>
     <iframe src="${escapeHTML(safeUrl)}" title="${escapeHTML(source.title)}" loading="lazy"></iframe>
-    <p class="music-note">Alguns sites oficiais bloqueiam visualização dentro do app. Se isso acontecer, use o botão para abrir o site base e atualize sua anotação manualmente.</p>
+    <p class="music-note">${escapeHTML(sourceSyncSummary(source))}. Alguns sites oficiais bloqueiam visualização ou sincronização dentro do app; se isso acontecer, use upload HTML/TXT ou cole o trecho no leitor interno abaixo.</p>
+    <section class="source-reader">
+      <div class="source-card-top">
+        <div>
+          <span class="tag">${escapeHTML(source.category || "Sem categoria")}</span>
+          <strong>Texto e grifos salvos nesta fonte</strong>
+        </div>
+        <span class="tag">${source.pendingContent ? "Atualização disponível" : "Vinculado ao link"}</span>
+      </div>
+      ${
+        source.pendingContent
+          ? `<div class="sync-alert">
+              <strong>O site parece ter mudado.</strong>
+              <span>A versão nova foi importada, mas seus grifos atuais foram preservados. Aplique a atualização quando quiser substituir o texto do leitor.</span>
+              <button class="mini-button" data-action="applySourceSync" data-id="${source.id}" type="button">Aplicar texto atualizado</button>
+            </div>`
+          : ""
+      }
+      <div class="highlight-toolbar" aria-label="Marca-texto do leitor da fonte">
+        <button class="mini-button marker-yellow" data-reader-highlight="yellow" type="button">Amarelo</button>
+        <button class="mini-button marker-green" data-reader-highlight="green" type="button">Verde</button>
+        <button class="mini-button marker-blue" data-reader-highlight="blue" type="button">Azul</button>
+        <label class="color-control">
+          Cor
+          <input id="readerHighlightColor" type="color" value="#fff59d" />
+        </label>
+        <button class="mini-button" data-reader-highlight="custom" type="button">Cor escolhida</button>
+        <button class="mini-button marker-clear" data-reader-highlight="clear" type="button">Limpar</button>
+      </div>
+      <div id="activeSourceReader" class="note-editor law-editor" contenteditable="true" role="textbox" aria-multiline="true">${sanitizeNoteHTML(source.content || "")}</div>
+      <p class="music-note">Edite ou cole aqui o texto da lei. Depois selecione trechos, aplique o marca-texto e salve os grifos da fonte.</p>
+      <div class="inline-actions">
+        <button class="button primary" data-action="saveSourceReader" data-id="${source.id}" type="button">Salvar grifos da fonte</button>
+      </div>
+    </section>
   `;
 }
 
@@ -1344,13 +1721,20 @@ function renderNoteLibrary() {
 }
 
 function applyHighlight(kind) {
+  applyHighlightToEditor("#noteEditor", kind, "#noteHighlightColor");
+}
+
+function applyHighlightToEditor(editorSelector, kind, colorSelector) {
   const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
-  $("#noteEditor").focus();
+  const editor = $(editorSelector);
+  if (!editor) return;
+  editor.focus();
   if (kind === "clear") {
     document.execCommand("removeFormat", false, null);
     return;
   }
-  document.execCommand("backColor", false, colors[kind] || colors.yellow);
+  const customColor = $(colorSelector)?.value;
+  document.execCommand("backColor", false, kind === "custom" && customColor ? customColor : colors[kind] || colors.yellow);
 }
 
 function sanitizeNoteHTML(html) {
@@ -1362,8 +1746,17 @@ function sanitizeNoteHTML(html) {
       const name = attribute.name.toLowerCase();
       if (name.startsWith("on")) element.removeAttribute(attribute.name);
       if (name === "href" || name === "src") element.removeAttribute(attribute.name);
-      if (name === "style" && !/background|color|font-weight|text-decoration/i.test(attribute.value)) {
-        element.removeAttribute(attribute.name);
+      if (name === "style") {
+        const safeStyle = attribute.value
+          .split(";")
+          .map((part) => part.trim())
+          .filter((part) => /^(background|background-color|color|font-weight|text-decoration)\s*:/i.test(part))
+          .join("; ");
+        if (safeStyle) {
+          element.setAttribute("style", safeStyle);
+        } else {
+          element.removeAttribute(attribute.name);
+        }
       }
     });
   });
@@ -1824,6 +2217,12 @@ function attachEvents() {
       return;
     }
 
+    const readerHighlight = event.target.closest("[data-reader-highlight]");
+    if (readerHighlight) {
+      applyHighlightToEditor("#activeSourceReader", readerHighlight.dataset.readerHighlight, "#readerHighlightColor");
+      return;
+    }
+
     const action = event.target.closest("[data-action]");
     if (action) handleAction(action);
   });
@@ -2092,27 +2491,80 @@ function attachEvents() {
     showToast("Intervalos dos flashcards salvos.");
   });
 
+  $("#categoryForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const category = ensureCategory($("#categoryName").value);
+    if (!category) {
+      showToast("Informe o nome da categoria.");
+      return;
+    }
+    saveState();
+    event.target.reset();
+    renderNotes();
+    showToast("Categoria adicionada.");
+  });
+
   $("#sourceForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const url = getSafeExternalUrl($("#sourceUrl").value.trim());
+    const category = resolveCategory("#sourceCategorySelect", "#sourceCategoryNew");
+    const autoSync = $("#sourceAutoSync").checked;
     if (!url) {
       showToast("Informe um link válido para a fonte.");
       return;
     }
-    const source = {
-      id: uid(),
-      category: $("#sourceCategory").value.trim(),
-      title: $("#sourceTitle").value.trim(),
-      url,
-      createdAt: todayISO(),
-      updatedAt: new Date().toISOString(),
-    };
-    state.sources.push(source);
-    state.ui.activeSourceId = source.id;
+    if (!category) {
+      showToast("Escolha ou crie uma categoria para a fonte.");
+      return;
+    }
+
+    const content = sanitizeNoteHTML($("#sourceContentEditor").innerHTML.trim());
+    const existing = state.sources.find((source) => source.id === state.ui.activeSourceEditId);
+    if (existing) {
+      existing.category = category;
+      existing.title = $("#sourceTitle").value.trim();
+      existing.url = url;
+      existing.content = content;
+      existing.autoSync = autoSync;
+      existing.updatedAt = new Date().toISOString();
+      state.ui.activeSourceId = existing.id;
+    } else {
+      const source = {
+        id: uid(),
+        category,
+        title: $("#sourceTitle").value.trim(),
+        url,
+        content,
+        autoSync,
+        createdAt: todayISO(),
+        updatedAt: new Date().toISOString(),
+      };
+      state.sources.push(source);
+      state.ui.activeSourceId = source.id;
+    }
+    state.ui.activeSourceEditId = "";
     saveState();
-    event.target.reset();
+    resetSourceForm();
     renderNotes();
-    showToast("Fonte salva.");
+    showToast(existing ? "Fonte atualizada." : "Fonte salva.");
+    if (autoSync && !richTextHasContent(content)) {
+      syncSourceFromUrl(state.ui.activeSourceId, { silent: false });
+    }
+  });
+
+  $("#importSourceUrlBtn").addEventListener("click", importCurrentSourceUrlToForm);
+
+  $("#sourceFileInput").addEventListener("change", (event) => {
+    importSourceFileToForm(event.target.files?.[0]);
+    event.target.value = "";
+  });
+
+  $("#cancelSourceEditBtn").addEventListener("click", () => {
+    state.ui.activeSourceEditId = "";
+    saveState();
+    resetSourceForm();
+    renderNotes();
+    showToast("Edição da fonte cancelada.");
   });
 
   $("#activeSourceSelect").addEventListener("change", (event) => {
@@ -2130,10 +2582,14 @@ function attachEvents() {
     button.addEventListener("click", () => applyHighlight(button.dataset.highlight));
   });
 
+  $$(".highlight-toolbar [data-source-highlight]").forEach((button) => {
+    button.addEventListener("click", () => applyHighlightToEditor("#sourceContentEditor", button.dataset.sourceHighlight, "#sourceHighlightColor"));
+  });
+
   $("#noteForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const title = $("#noteTitle").value.trim();
-    const category = $("#noteCategory").value.trim();
+    const category = resolveCategory("#noteCategorySelect", "#noteCategoryNew");
     const content = sanitizeNoteHTML($("#noteEditor").innerHTML.trim());
     if (!title || !category || !content) {
       showToast("Preencha título, categoria e anotação.");
@@ -2283,6 +2739,19 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "deleteCategory") {
+    const category = action.dataset.category;
+    if (!category) return;
+    if (!window.confirm("Excluir esta categoria? As fontes e anotações dela ficarão como Sem categoria.")) return;
+    state.categories = (state.categories || []).filter((item) => item !== category);
+    state.sources = state.sources.map((source) => (source.category === category ? { ...source, category: "Sem categoria" } : source));
+    state.notes = state.notes.map((note) => (note.category === category ? { ...note, category: "Sem categoria" } : note));
+    saveState();
+    renderNotes();
+    showToast("Categoria excluída.");
+    return;
+  }
+
   if (type === "selectSource") {
     state.ui.activeSourceId = id;
     saveState();
@@ -2291,11 +2760,53 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "editSource") {
+    const source = getSource(id);
+    if (!source) return;
+    state.ui.activeSourceId = id;
+    state.ui.activeSourceEditId = id;
+    saveState();
+    renderNotes();
+    fillSourceForm(source);
+    $("#sourceForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Fonte carregada para edição.");
+    return;
+  }
+
+  if (type === "syncSource") {
+    syncSourceFromUrl(id, { silent: false });
+    return;
+  }
+
+  if (type === "applySourceSync") {
+    const source = getSource(id);
+    if (!source || !source.pendingContent) return;
+    if (!window.confirm("Aplicar o texto atualizado? Isso substitui o texto atual do leitor e pode remover grifos existentes.")) return;
+    applySyncedContent(source, source.pendingContent, source.pendingSyncHash || sourceContentHash(source.pendingContent));
+    source.lastSyncStatus = "Atualização aplicada";
+    source.updatedAt = new Date().toISOString();
+    saveState();
+    renderNotes();
+    showToast("Texto atualizado aplicado à fonte.");
+    return;
+  }
+
+  if (type === "saveSourceReader") {
+    const source = getSource(id);
+    if (!source) return;
+    source.content = sanitizeNoteHTML($("#activeSourceReader")?.innerHTML.trim() || "");
+    source.updatedAt = new Date().toISOString();
+    saveState();
+    renderNotes();
+    showToast("Grifos salvos nesta fonte.");
+    return;
+  }
+
   if (type === "useSourceInNote") {
     state.ui.activeSourceId = id;
     $("#noteSource").value = id;
     const source = getSource(id);
-    if (source && !$("#noteCategory").value.trim()) $("#noteCategory").value = source.category;
+    if (source && !resolveCategory("#noteCategorySelect", "#noteCategoryNew")) setCategoryFields("note", source.category);
     saveState();
     renderSourcePreview();
     showToast("Fonte vinculada à anotação.");
@@ -2303,10 +2814,13 @@ function handleAction(action) {
   }
 
   if (type === "deleteSource") {
+    if (!window.confirm("Excluir esta fonte/site e os grifos salvos nela? As anotações vinculadas serão mantidas sem fonte.")) return;
     state.sources = state.sources.filter((source) => source.id !== id);
     state.notes = state.notes.map((note) => (note.sourceId === id ? { ...note, sourceId: "" } : note));
     if (state.ui.activeSourceId === id) state.ui.activeSourceId = "";
+    if (state.ui.activeSourceEditId === id) state.ui.activeSourceEditId = "";
     saveState();
+    resetSourceForm();
     renderNotes();
     showToast("Fonte removida.");
     return;
@@ -2317,7 +2831,7 @@ function handleAction(action) {
     if (!note) return;
     state.ui.activeNoteId = id;
     $("#noteTitle").value = note.title;
-    $("#noteCategory").value = note.category;
+    setCategoryFields("note", note.category);
     $("#noteSource").value = note.sourceId || "";
     $("#noteEditor").innerHTML = sanitizeNoteHTML(note.content || "");
     saveState();

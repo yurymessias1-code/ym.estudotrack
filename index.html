@@ -680,8 +680,12 @@
               </div>
               <form class="form-panel" id="sourceForm">
                 <label>
-                  Categoria
-                  <input id="sourceCategory" type="text" placeholder="Ex.: Constitucional, Leis, Planalto" required />
+                  Categoria salva
+                  <select id="sourceCategorySelect"></select>
+                </label>
+                <label>
+                  Nova categoria
+                  <input id="sourceCategoryNew" type="text" placeholder="Ex.: Constitucional, Leis, Planalto" />
                 </label>
                 <label>
                   Nome da fonte
@@ -691,7 +695,40 @@
                   Link
                   <input id="sourceUrl" type="url" placeholder="https://www.planalto.gov.br/..." required />
                 </label>
-                <button class="button primary" type="submit">Salvar fonte</button>
+                <div class="sync-options">
+                  <label class="checkbox-line">
+                    <input id="sourceAutoSync" type="checkbox" />
+                    Tentar sincronizar automaticamente pelo link quando o site permitir
+                  </label>
+                  <div class="inline-actions source-form-actions">
+                    <button class="button secondary" id="importSourceUrlBtn" type="button">Importar texto do link</button>
+                    <label class="button ghost import-label" for="sourceFileInput">
+                      Upload HTML/TXT
+                      <input id="sourceFileInput" type="file" accept=".html,.htm,.txt,.md,text/html,text/plain,text/markdown" />
+                    </label>
+                  </div>
+                  <p class="music-note">A sincronização funciona quando o site autoriza leitura pelo navegador. Se o site bloquear, envie um HTML/TXT ou cole o texto no leitor.</p>
+                </div>
+                <div class="editor-field">
+                  <span class="field-title">Texto hospedado no app</span>
+                  <div class="highlight-toolbar" aria-label="Marca-texto da fonte">
+                    <button class="mini-button marker-yellow" data-source-highlight="yellow" type="button">Amarelo</button>
+                    <button class="mini-button marker-green" data-source-highlight="green" type="button">Verde</button>
+                    <button class="mini-button marker-blue" data-source-highlight="blue" type="button">Azul</button>
+                    <label class="color-control">
+                      Cor
+                      <input id="sourceHighlightColor" type="color" value="#fff59d" />
+                    </label>
+                    <button class="mini-button" data-source-highlight="custom" type="button">Cor escolhida</button>
+                    <button class="mini-button marker-clear" data-source-highlight="clear" type="button">Limpar</button>
+                  </div>
+                  <div id="sourceContentEditor" class="note-editor law-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+                  <p class="music-note">Cole aqui o texto da lei ou do site base. Os grifos ficam salvos nesta fonte e vinculados ao link original.</p>
+                </div>
+                <div class="inline-actions source-form-actions">
+                  <button class="button primary" id="sourceSubmitBtn" type="submit">Salvar fonte</button>
+                  <button class="button ghost hidden" id="cancelSourceEditBtn" type="button">Cancelar edição</button>
+                </div>
               </form>
               <div class="source-library" id="sourceLibrary"></div>
             </section>
@@ -712,6 +749,23 @@
             </section>
           </div>
 
+          <section class="panel category-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Categorias</p>
+                <h3>Organizar fontes e anotações</h3>
+              </div>
+            </div>
+            <form class="split-inputs" id="categoryForm">
+              <label>
+                Nova categoria
+                <input id="categoryName" type="text" placeholder="Ex.: Direito Constitucional" />
+              </label>
+              <button class="button secondary" type="submit">Adicionar categoria</button>
+            </form>
+            <div class="category-list" id="categoryList"></div>
+          </section>
+
           <div class="content-grid form-and-list">
             <form class="panel form-panel" id="noteForm">
               <div class="panel-header">
@@ -726,7 +780,11 @@
               </label>
               <label>
                 Categoria
-                <input id="noteCategory" type="text" placeholder="Ex.: Administrativo" required />
+                <select id="noteCategorySelect"></select>
+              </label>
+              <label>
+                Nova categoria
+                <input id="noteCategoryNew" type="text" placeholder="Ex.: Administrativo" />
               </label>
               <label>
                 Fonte usada como base
@@ -736,6 +794,11 @@
                 <button class="mini-button marker-yellow" data-highlight="yellow" type="button">Amarelo</button>
                 <button class="mini-button marker-green" data-highlight="green" type="button">Verde</button>
                 <button class="mini-button marker-blue" data-highlight="blue" type="button">Azul</button>
+                <label class="color-control">
+                  Cor
+                  <input id="noteHighlightColor" type="color" value="#fff59d" />
+                </label>
+                <button class="mini-button" data-highlight="custom" type="button">Cor escolhida</button>
                 <button class="mini-button marker-clear" data-highlight="clear" type="button">Limpar</button>
               </div>
               <div id="noteEditor" class="note-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>

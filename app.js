@@ -16,6 +16,7 @@ const titles = {
   relatorios: "Relatórios",
   conta: "Conta",
 };
+const APP_TITLE = "estudos track";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -2135,6 +2136,7 @@ function renderPomodoro() {
   $("#timerMode").textContent = modeLabel;
   $("#cycleCounter").textContent = `Ciclo ${timer.cycle} de ${state.settings.cycles}`;
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
+  updatePomodoroPageTitle(modeLabel);
   timerFace?.classList.toggle("break-mode", timer.mode === "break" || timer.mode === "longBreak");
   timerFace?.classList.toggle("long-break-mode", timer.mode === "longBreak");
   timerFace?.classList.toggle("timer-running", timer.running);
@@ -2160,6 +2162,16 @@ function renderPomodoro() {
         )
         .join("")
     : `<tr><td colspan="5">Nenhuma sessão registrada.</td></tr>`;
+}
+
+function updatePomodoroPageTitle(modeLabel = "") {
+  if (!timer.running && timer.mode === "focus" && timer.remaining === state.settings.focusMinutes * 60) {
+    document.title = APP_TITLE;
+    return;
+  }
+
+  const label = modeLabel || (timer.mode === "focus" ? "Foco" : timer.mode === "longBreak" ? "Descanso longo" : "Pausa curta");
+  document.title = `${secondsToClock(timer.remaining)} - ${label} | ${APP_TITLE}`;
 }
 
 function renderMusicPlayer() {

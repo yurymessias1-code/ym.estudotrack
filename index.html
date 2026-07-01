@@ -391,6 +391,7 @@
                     <select id="legalMaterialType">
                       <option value="law">Lei</option>
                       <option value="table">Tabela</option>
+                      <option value="image">Imagem/foto</option>
                     </select>
                   </label>
                   <label>
@@ -412,8 +413,13 @@
                 </label>
                 <label>
                   Texto ou tabela
-                  <textarea id="legalMaterialContent" rows="7" placeholder="Coluna 1 | Coluna 2&#10;Item A | Item B"></textarea>
+                  <textarea id="legalMaterialContent" rows="7" placeholder="Cole texto, tabela do Word/Excel ou use linhas assim: Coluna 1 | Coluna 2&#10;Item A | Item B"></textarea>
                 </label>
+                <label>
+                  Foto ou imagem
+                  <input id="legalMaterialImage" type="file" accept="image/*" />
+                </label>
+                <p class="music-note">Para tabelas, cole direto do Word, Excel ou editor de texto. Para fotos, escolha um arquivo ou cole a imagem copiada no campo acima.</p>
                 <label>
                   Fonte
                   <input id="legalMaterialSource" type="url" placeholder="https://..." />

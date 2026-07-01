@@ -3,6 +3,7 @@ const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
 const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
+const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
 
 const titles = {
   dashboard: "Painel",
@@ -242,7 +243,7 @@ function normalizeSource(source = {}) {
 }
 
 function normalizeLegalMaterial(item = {}) {
-  const validTypes = ["law", "table"];
+  const validTypes = ["law", "table", "image"];
   const title = typeof item.title === "string" ? item.title.trim() : "";
   return {
     id: item.id || uid(),
@@ -2368,7 +2369,270 @@ function renderCaseCard(item, court) {
 }
 
 function legalMaterialTypeLabel(type) {
-  return type === "table" ? "Tabela" : "Lei";
+  if (type === "table") return "Tabela";
+  if (type === "image") return "Imagem/foto";
+  return "Lei";
+}
+
+function slugifyFileName(value, fallback = "material") {
+  const clean = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return clean || fallback;
+}
+
+function parseLegalMaterialTable(content) {
+  return String(content || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(splitLegalMaterialRow)
+    .filter((row) => row.length > 1);
+}
+
+function legalMaterialTableToPlainText(content) {
+  return parseLegalMaterialTable(content)
+    .map((row) => row.join("\t"))
+    .join("\n");
+}
+
+function legalMaterialTableToHTML(item) {
+  const rows = parseLegalMaterialTable(item.content);
+  if (!rows.length) return `<p>${escapeHTML(item.content || "")}</p>`;
+  const [header, ...body] = rows;
+  const bodyRows = body.length ? body : [header.map(() => "")];
+  return `
+    <table>
+      <thead>
+        <tr>${header.map((cell) => `<th>${escapeHTML(cell)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${bodyRows
+          .map((row) => `<tr>${header.map((_, index) => `<td>${escapeHTML(row[index] || "")}</td>`).join("")}</tr>`)
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function escapeCSVCell(value) {
+  const text = String(value ?? "");
+  return /[",;\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function legalMaterialTableToCSV(content) {
+  return parseLegalMaterialTable(content)
+    .map((row) => row.map(escapeCSVCell).join(";"))
+    .join("\n");
+}
+
+function htmlTableToPlainText(html) {
+  const documentHTML = new DOMParser().parseFromString(String(html || ""), "text/html");
+  const table = documentHTML.querySelector("table");
+  if (!table) return "";
+  return Array.from(table.rows)
+    .map((row) =>
+      Array.from(row.cells)
+        .map((cell) => cell.textContent.replace(/\s+/g, " ").trim())
+        .join("\t")
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getLegalMaterial(id) {
+  return state.legalMaterials.find((item) => item.id === id);
+}
+
+function getLegalImageSource(item) {
+  const content = String(item?.content || "").trim();
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(content)) return content;
+  return getSafeExternalUrl(content);
+}
+
+function getLegalImageExtension(src) {
+  const type = /^data:image\/([^;]+)/i.exec(String(src || ""))?.[1] || "png";
+  if (type === "jpeg") return "jpg";
+  return type.replace(/[^a-z0-9]/gi, "") || "png";
+}
+
+function dataURLToBlob(dataUrl) {
+  const [header, payload = ""] = String(dataUrl || "").split(",");
+  const mime = /data:([^;]+)/i.exec(header)?.[1] || "application/octet-stream";
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function readImageFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type?.startsWith("image/")) {
+      reject(new Error("Arquivo de imagem inválido."));
+      return;
+    }
+    if (file.size > LEGAL_IMAGE_MAX_BYTES) {
+      reject(new Error("Imagem muito grande. Use uma imagem de até 2,5 MB."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(new Error("Não foi possível ler a imagem.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function setLegalMaterialImageFromFile(file) {
+  try {
+    const dataUrl = await readImageFileAsDataURL(file);
+    $("#legalMaterialType").value = "image";
+    if (!$("#legalMaterialTitle").value.trim()) {
+      $("#legalMaterialTitle").value = file.name?.replace(/\.[^.]+$/, "") || "Imagem";
+    }
+    $("#legalMaterialContent").value = dataUrl;
+    showToast("Imagem carregada. Salve o material para guardar.");
+  } catch (error) {
+    showToast(error.message || "Não foi possível carregar a imagem.");
+  }
+}
+
+function insertTextIntoTextarea(textarea, text) {
+  const start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+  const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : textarea.value.length;
+  textarea.value = `${textarea.value.slice(0, start)}${text}${textarea.value.slice(end)}`;
+  const nextPosition = start + text.length;
+  textarea.selectionStart = nextPosition;
+  textarea.selectionEnd = nextPosition;
+}
+
+async function handleLegalMaterialContentPaste(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const imageItem = Array.from(clipboard.items || []).find((item) => item.kind === "file" && item.type.startsWith("image/"));
+  if (imageItem) {
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    await setLegalMaterialImageFromFile(file);
+    return;
+  }
+
+  const html = clipboard.getData("text/html");
+  const tableText = htmlTableToPlainText(html);
+  if (tableText) {
+    event.preventDefault();
+    $("#legalMaterialType").value = "table";
+    insertTextIntoTextarea(event.target, tableText);
+    showToast("Tabela colada e preparada para salvar.");
+    return;
+  }
+
+  const plainText = clipboard.getData("text/plain");
+  const looksLikeTable = plainText.split(/\r?\n/).some((line) => line.split("\t").length > 1);
+  if (looksLikeTable) {
+    $("#legalMaterialType").value = "table";
+  }
+}
+
+async function writeClipboardWithHTML(html, text) {
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      }),
+    ]);
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+}
+
+function downloadBlobFile(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function copyLegalMaterial(id, mode = "rich") {
+  const item = getLegalMaterial(id);
+  if (!item) return;
+  try {
+    if (item.type === "table") {
+      const text = legalMaterialTableToPlainText(item.content) || item.content;
+      const html = legalMaterialTableToHTML(item);
+      if (mode === "text") {
+        await navigator.clipboard.writeText(text);
+        showToast("Tabela copiada como texto.");
+      } else {
+        await writeClipboardWithHTML(html, text);
+        showToast("Tabela copiada para colar no Word ou editor.");
+      }
+      return;
+    }
+
+    if (item.type === "image") {
+      const src = getLegalImageSource(item);
+      if (!src) {
+        showToast("Imagem sem arquivo válido.");
+        return;
+      }
+      const html = `<img src="${escapeHTML(src)}" alt="${escapeHTML(item.title)}">`;
+      await writeClipboardWithHTML(html, item.title || "Imagem");
+      showToast("Imagem copiada para colar no Word ou editor.");
+      return;
+    }
+
+    await navigator.clipboard.writeText(item.content || "");
+    showToast("Texto copiado.");
+  } catch {
+    showToast("Não foi possível copiar. Selecione o conteúdo manualmente.");
+  }
+}
+
+function downloadLegalMaterial(id) {
+  const item = getLegalMaterial(id);
+  if (!item) return;
+  const baseName = slugifyFileName(item.title, "material");
+
+  if (item.type === "table") {
+    const csv = legalMaterialTableToCSV(item.content) || item.content || "";
+    downloadBlobFile(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }), `${baseName}.csv`);
+    showToast("Tabela exportada em CSV.");
+    return;
+  }
+
+  if (item.type === "image") {
+    const src = getLegalImageSource(item);
+    if (!src) {
+      showToast("Imagem sem arquivo válido.");
+      return;
+    }
+    if (src.startsWith("data:image/")) {
+      const blob = dataURLToBlob(src);
+      downloadBlobFile(blob, `${baseName}.${getLegalImageExtension(src)}`);
+      showToast("Imagem baixada.");
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = src;
+    anchor.download = `${baseName}.${getLegalImageExtension(src)}`;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.click();
+    showToast("Imagem aberta para download.");
+    return;
+  }
+
+  downloadBlobFile(new Blob([item.content || ""], { type: "text/plain;charset=utf-8" }), `${baseName}.txt`);
+  showToast("Texto exportado.");
 }
 
 function legalMaterialMatchesFilters(item) {
@@ -2388,7 +2652,7 @@ function legalMaterialMatchesFilters(item) {
       legalMaterialTypeLabel(item.type),
       item.title,
       item.reference,
-      item.content,
+      item.type === "image" ? "" : item.content,
       item.source,
       topic?.name,
       subject?.name,
@@ -2425,6 +2689,8 @@ function renderLegalMaterials() {
 function renderLegalMaterialCard(item) {
   const safeSource = getSafeExternalUrl(item.source);
   const topicLabel = getEntrySubjectId(item) || item.topicId ? getEntryScopeLabel(item) : "";
+  const copyLabel = item.type === "table" ? "Copiar tabela" : item.type === "image" ? "Copiar foto" : "Copiar texto";
+  const downloadLabel = item.type === "table" ? "Baixar CSV" : item.type === "image" ? "Baixar foto" : "Baixar TXT";
   return `
     <article class="legal-material-card">
       <div class="legal-material-card-top">
@@ -2435,7 +2701,12 @@ function renderLegalMaterialCard(item) {
           </div>
           <h3>${escapeHTML(item.title)}</h3>
         </div>
-        <button class="mini-button bad" data-action="deleteLegalMaterial" data-id="${item.id}" type="button">Excluir</button>
+        <div class="inline-actions">
+          <button class="mini-button" data-action="copyLegalMaterial" data-id="${item.id}" type="button">${copyLabel}</button>
+          ${item.type === "table" ? `<button class="mini-button" data-action="copyLegalMaterialText" data-id="${item.id}" type="button">Copiar texto</button>` : ""}
+          <button class="mini-button" data-action="downloadLegalMaterial" data-id="${item.id}" type="button">${downloadLabel}</button>
+          <button class="mini-button bad" data-action="deleteLegalMaterial" data-id="${item.id}" type="button">Excluir</button>
+        </div>
       </div>
       ${renderLegalMaterialBody(item)}
       <div class="case-meta">
@@ -2450,6 +2721,7 @@ function renderLegalMaterialBody(item) {
   const content = String(item.content || "").trim();
   if (!content) return `<p class="legal-material-content">Sem conteúdo registrado.</p>`;
   if (item.type === "table") return renderLegalMaterialTable(content);
+  if (item.type === "image") return renderLegalMaterialImage(item);
   return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
 }
 
@@ -2459,30 +2731,25 @@ function splitLegalMaterialRow(line) {
 }
 
 function renderLegalMaterialTable(content) {
-  const rows = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(splitLegalMaterialRow)
-    .filter((row) => row.length > 1);
+  const rows = parseLegalMaterialTable(content);
 
   if (!rows.length) return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
 
-  const [header, ...body] = rows;
-  const bodyRows = body.length ? body : [header.map(() => "")];
   return `
     <div class="legal-material-table">
-      <table>
-        <thead>
-          <tr>${header.map((cell) => `<th>${escapeHTML(cell)}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          ${bodyRows
-            .map((row) => `<tr>${header.map((_, index) => `<td>${escapeHTML(row[index] || "")}</td>`).join("")}</tr>`)
-            .join("")}
-        </tbody>
-      </table>
+      ${legalMaterialTableToHTML({ content })}
     </div>
+  `;
+}
+
+function renderLegalMaterialImage(item) {
+  const src = getLegalImageSource(item);
+  if (!src) return `<p class="legal-material-content">Imagem sem arquivo válido.</p>`;
+  return `
+    <figure class="legal-material-image">
+      <img src="${escapeHTML(src)}" alt="${escapeHTML(item.title || "Imagem")}" loading="lazy" />
+      ${item.reference ? `<figcaption>${escapeHTML(item.reference)}</figcaption>` : ""}
+    </figure>
   `;
 }
 
@@ -3359,6 +3626,16 @@ function attachEvents() {
     showToast(`${legalMaterialTypeLabel(material.type)} salva.`);
   });
 
+  $("#legalMaterialImage").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (file) await setLegalMaterialImageFromFile(file);
+    event.target.value = "";
+  });
+
+  $("#legalMaterialContent").addEventListener("paste", (event) => {
+    handleLegalMaterialContentPaste(event);
+  });
+
   $("#timerSettingsForm").addEventListener("submit", (event) => {
     event.preventDefault();
     state.settings.focusMinutes = clamp(Number($("#focusMinutes").value), 1, 240);
@@ -3989,12 +4266,28 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "copyLegalMaterial") {
+    copyLegalMaterial(id, "rich");
+    return;
+  }
+
+  if (type === "copyLegalMaterialText") {
+    copyLegalMaterial(id, "text");
+    return;
+  }
+
+  if (type === "downloadLegalMaterial") {
+    downloadLegalMaterial(id);
+    return;
+  }
+
   if (type === "deleteLegalMaterial") {
     if (!window.confirm("Excluir esta lei ou tabela?")) return;
     state.legalMaterials = state.legalMaterials.filter((item) => item.id !== id);
     saveState();
     renderCases();
     showToast("Material removido.");
+    return;
   }
 }
 

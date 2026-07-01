@@ -1289,6 +1289,26 @@ td {
   padding: 9px 10px;
 }
 
+.legal-material-image {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.legal-material-image img {
+  max-width: 100%;
+  max-height: 460px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.legal-material-image figcaption {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .timer-panel {
   display: grid;
   align-content: space-between;
@@ -1568,6 +1588,10 @@ td {
 }
 
 .theme-dark .legal-material-table {
+  background: #111820;
+}
+
+.theme-dark .legal-material-image img {
   background: #111820;
 }
 

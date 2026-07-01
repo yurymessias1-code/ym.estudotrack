@@ -10,6 +10,8 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - editor simples em jurisprudências e flashcards, com negrito, itálico, sublinhado, cores, marca-texto, alinhamento e parágrafos;
 - edição e exclusão individual de julgados e flashcards cadastrados;
 - leis e tabelas de apoio cadastradas pelo usuário na aba Jurisprudências;
+- colagem de tabelas vindas do Word, Excel ou editores de texto, com cópia para colar de volta no Word e exportação CSV;
+- cadastro de imagens/fotos em Jurisprudências, com cópia e download;
 - Pomodoro por matéria, com assunto opcional, registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
 - player de foco por link do YouTube ou Spotify;
 - flashcards por matéria ou por assunto, com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
@@ -104,9 +106,12 @@ O filtro funciona sobre título, tema, tese/resumo, fonte, matéria e assunto.
 Cada julgado pode receber hashtags, como `#tema1199` ou `#improbidade`, e essas tags também entram na pesquisa.
 Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores, marca-texto, alinhamento e parágrafos.
 Ao cadastrar jurisprudência, lei ou tabela, é possível escolher apenas a matéria e deixar o assunto em branco.
-Na mesma aba, o usuário também pode cadastrar leis e tabelas de apoio, vinculando cada item a uma matéria/assunto quando quiser.
+Na mesma aba, o usuário também pode cadastrar leis, tabelas de apoio e imagens/fotos, vinculando cada item a uma matéria/assunto quando quiser.
 Esses materiais entram na mesma busca por texto, matéria e assunto e podem ser excluídos individualmente.
 Para tabelas, cada linha pode usar colunas separadas por `|`, `;` ou tabulação.
+Também é possível colar tabela diretamente do Word, Excel ou editor de texto; o app converte para uma tabela interna.
+Cada tabela salva possui botões para copiar como tabela compatível com Word, copiar como texto e baixar em CSV.
+Imagens/fotos podem ser escolhidas por arquivo ou coladas no campo do material, e depois copiadas ou baixadas pelo card.
 
 ## Flashcards por dificuldade
 

@@ -34,6 +34,7 @@ let timer = {
   elapsedFocusSeconds: 0,
   elapsedSinceLongBreakSeconds: 0,
   cycle: 1,
+  subjectId: "",
   topicId: "",
 };
 const syncingSources = new Set();
@@ -145,14 +146,51 @@ function makeProfile(profile = {}) {
   };
 }
 
+function looksLikeHTML(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
+}
+
+function normalizeRichText(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return sanitizeNoteHTML(looksLikeHTML(raw) ? raw : textToRichHTML(raw));
+}
+
+function renderRichText(value) {
+  return sanitizeNoteHTML(looksLikeHTML(value) ? value : textToRichHTML(value || ""));
+}
+
+function richTextToPlain(value) {
+  const raw = String(value || "");
+  return (looksLikeHTML(raw) ? plainTextFromHTML(raw) : raw).replace(/\s+/g, " ").trim();
+}
+
+function normalizeHashtags(value) {
+  const raw = Array.isArray(value) ? value.join(" ") : String(value || "");
+  const tags = raw
+    .split(/[\s,;]+/)
+    .map((tag) => tag.trim().replace(/^#+/, ""))
+    .filter(Boolean)
+    .map((tag) => tag.replace(/[^\p{L}\p{N}_-]/gu, ""))
+    .filter(Boolean);
+  return [...new Set(tags.map((tag) => tag.toLowerCase()))];
+}
+
+function hashtagsToInput(tags = []) {
+  return normalizeHashtags(tags)
+    .map((tag) => `#${tag}`)
+    .join(" ");
+}
+
 function normalizeFlashcard(card = {}) {
   const validDifficulties = ["hard", "medium", "easy"];
   const difficulty = validDifficulties.includes(card.difficulty) ? card.difficulty : "medium";
   return {
     id: card.id || uid(),
+    subjectId: typeof card.subjectId === "string" ? card.subjectId : "",
     topicId: card.topicId || "",
-    front: typeof card.front === "string" ? card.front : "",
-    back: typeof card.back === "string" ? card.back : "",
+    front: normalizeRichText(card.front),
+    back: normalizeRichText(card.back),
     priority: card.priority || "Média",
     difficulty,
     createdAt: card.createdAt || todayISO(),
@@ -162,6 +200,21 @@ function normalizeFlashcard(card = {}) {
     correct: Number(card.correct || 0),
     wrong: Number(card.wrong || 0),
     lastReviewed: card.lastReviewed || "",
+    updatedAt: card.updatedAt || "",
+  };
+}
+
+function normalizeCaseItem(item = {}) {
+  return {
+    id: item.id || uid(),
+    subjectId: typeof item.subjectId === "string" ? item.subjectId : "",
+    topicId: typeof item.topicId === "string" ? item.topicId : "",
+    title: typeof item.title === "string" ? item.title : "Jurisprudência sem título",
+    date: item.date || todayISO(),
+    theme: typeof item.theme === "string" ? item.theme : "",
+    summary: normalizeRichText(item.summary),
+    tags: normalizeHashtags(item.tags || item.hashtags || ""),
+    source: typeof item.source === "string" ? item.source : "",
   };
 }
 
@@ -188,6 +241,23 @@ function normalizeSource(source = {}) {
   };
 }
 
+function normalizeLegalMaterial(item = {}) {
+  const validTypes = ["law", "table"];
+  const title = typeof item.title === "string" ? item.title.trim() : "";
+  return {
+    id: item.id || uid(),
+    type: validTypes.includes(item.type) ? item.type : "law",
+    subjectId: typeof item.subjectId === "string" ? item.subjectId : "",
+    topicId: typeof item.topicId === "string" ? item.topicId : "",
+    title: title || "Material sem título",
+    reference: typeof item.reference === "string" ? item.reference.trim() : "",
+    content: typeof item.content === "string" ? item.content.trim() : "",
+    source: typeof item.source === "string" ? item.source.trim() : "",
+    createdAt: item.createdAt || todayISO(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
+  };
+}
+
 function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
   return {
@@ -203,9 +273,10 @@ function normalizeState(candidate, fallbackProfileId = "") {
     categories: Array.isArray(candidate.categories) ? candidate.categories.map(normalizeCategoryName).filter(Boolean) : empty.categories,
     goals: Array.isArray(candidate.goals) ? candidate.goals : empty.goals,
     cases: {
-      STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ : [],
-      STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF : [],
+      STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ.map(normalizeCaseItem) : [],
+      STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF.map(normalizeCaseItem) : [],
     },
+    legalMaterials: Array.isArray(candidate.legalMaterials) ? candidate.legalMaterials.map(normalizeLegalMaterial) : empty.legalMaterials,
     media: {
       url: typeof candidate.media?.url === "string" ? candidate.media.url : "",
     },
@@ -251,6 +322,8 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeSourceId: candidate.ui?.activeSourceId || "",
       activeSourceEditId: candidate.ui?.activeSourceEditId || "",
       activeNoteId: candidate.ui?.activeNoteId || "",
+      activeCaseEditId: candidate.ui?.activeCaseEditId || "",
+      activeFlashcardEditId: candidate.ui?.activeFlashcardEditId || "",
     },
   };
 }
@@ -269,6 +342,7 @@ function createEmptyState(profile = {}) {
     categories: [],
     goals: [],
     cases: { STJ: [], STF: [] },
+    legalMaterials: [],
     media: { url: "" },
     account: { name: "", email: "" },
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 30, longBreakEveryMinutes: 120, cycles: 4, tickLofiEnabled: true },
@@ -298,6 +372,8 @@ function createEmptyState(profile = {}) {
       activeSourceId: "",
       activeSourceEditId: "",
       activeNoteId: "",
+      activeCaseEditId: "",
+      activeFlashcardEditId: "",
     },
   };
 }
@@ -461,6 +537,25 @@ function getTopicLabel(topicId) {
   return `${subject?.name || "Sem matéria"}: ${topic.name}`;
 }
 
+function getEntrySubjectId(entry = {}) {
+  return entry.subjectId || getTopic(entry.topicId)?.subjectId || "";
+}
+
+function getEntryScopeLabel(entry = {}) {
+  if (entry.topicId && getTopic(entry.topicId)) return getTopicLabel(entry.topicId);
+  const subject = getSubject(getEntrySubjectId(entry));
+  return subject ? subject.name : "Sem vínculo";
+}
+
+function resolveSubjectTopic(subjectSelector, topicSelector) {
+  const topicId = $(topicSelector)?.value || "";
+  const topic = getTopic(topicId);
+  return {
+    subjectId: topic?.subjectId || $(subjectSelector)?.value || "",
+    topicId,
+  };
+}
+
 function getTopicColor(topicId) {
   const topic = getTopic(topicId);
   const subject = topic ? getSubject(topic.subjectId) : null;
@@ -481,9 +576,8 @@ function getTopicStats(topicId) {
 }
 
 function getSubjectStats(subjectId) {
-  const topicIds = state.topics.filter((topic) => topic.subjectId === subjectId).map((topic) => topic.id);
-  const questionLogs = state.questionLogs.filter((log) => topicIds.includes(log.topicId));
-  const studyLogs = state.studyLogs.filter((log) => topicIds.includes(log.topicId));
+  const questionLogs = state.questionLogs.filter((log) => getEntrySubjectId(log) === subjectId);
+  const studyLogs = state.studyLogs.filter((log) => getEntrySubjectId(log) === subjectId);
   const correct = questionLogs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
   const wrong = questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const minutes = studyLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
@@ -546,27 +640,32 @@ function showToast(message) {
   showToast.timeout = window.setTimeout(() => toast.classList.remove("show"), 2600);
 }
 
-function populateTopicSelect(select, { includeEmpty = false } = {}) {
+function populateTopicSelect(select, { includeEmpty = false, subjectId = "", emptyLabel = "Sem vínculo" } = {}) {
+  if (!select) return;
   const current = select.value;
   const options = state.topics
+    .filter((topic) => !subjectId || topic.subjectId === subjectId)
     .map((topic) => {
       const subject = getSubject(topic.subjectId);
       return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
     })
     .join("");
-  select.innerHTML = `${includeEmpty ? '<option value="">Sem vínculo</option>' : ""}${options}`;
-  if (state.topics.some((topic) => topic.id === current) || (includeEmpty && current === "")) {
+  const topicIsAvailable = state.topics.some((topic) => topic.id === current && (!subjectId || topic.subjectId === subjectId));
+  select.innerHTML = `${includeEmpty ? `<option value="">${escapeHTML(emptyLabel)}</option>` : ""}${options}`;
+  if (topicIsAvailable || (includeEmpty && current === "")) {
     select.value = current;
   }
 }
 
-function populateSubjectSelect(select) {
+function populateSubjectSelect(select, { includeEmpty = false, emptyLabel = "Sem matéria" } = {}) {
+  if (!select) return;
   const current = select.value;
-  select.innerHTML = state.subjects
-    .map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`)
-    .join("");
+  const options = state.subjects.map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`).join("");
+  select.innerHTML = `${includeEmpty ? `<option value="">${escapeHTML(emptyLabel)}</option>` : ""}${options}`;
   if (state.subjects.some((subject) => subject.id === current)) {
     select.value = current;
+  } else if (includeEmpty) {
+    select.value = "";
   }
 }
 
@@ -791,17 +890,38 @@ function logoutProfile() {
 
 function renderSelectors() {
   populateSubjectSelect($("#topicSubject"));
-  ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => populateTopicSelect($(selector)));
-  populateTopicSelect($("#caseTopic"), { includeEmpty: true });
+  populateSubjectSelect($("#timerSubject"));
+  populateSubjectSelect($("#studySubject"));
+  populateSubjectSelect($("#flashcardSubject"));
+  populateSubjectSelect($("#caseSubject"), { includeEmpty: true, emptyLabel: "Sem matéria" });
+  populateSubjectSelect($("#legalMaterialSubject"), { includeEmpty: true, emptyLabel: "Sem matéria" });
+
+  populateTopicSelect($("#questionTopic"));
+  populateTopicSelect($("#timerTopic"), { includeEmpty: true, subjectId: $("#timerSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  populateTopicSelect($("#studyTopic"), { includeEmpty: true, subjectId: $("#studySubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  populateTopicSelect($("#flashcardTopic"), { includeEmpty: true, subjectId: $("#flashcardSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  populateTopicSelect($("#caseTopic"), { includeEmpty: true, subjectId: $("#caseSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  populateTopicSelect($("#legalMaterialTopic"), { includeEmpty: true, subjectId: $("#legalMaterialSubject")?.value || "", emptyLabel: "Sem assunto específico" });
   populateFlashcardReviewSelectors();
   populateCaseFilterSelectors();
 
-  const disabled = state.topics.length === 0;
-  ["#questionTopic", "#timerTopic", "#studyTopic", "#flashcardTopic"].forEach((selector) => {
-    $(selector).disabled = disabled;
+  const subjectsDisabled = state.subjects.length === 0;
+  const topicsDisabled = state.topics.length === 0;
+  $("#questionTopic").disabled = topicsDisabled;
+  ["#timerSubject", "#studySubject", "#flashcardSubject"].forEach((selector) => {
+    $(selector).disabled = subjectsDisabled;
   });
-  $("#caseTopic").disabled = disabled;
+  ["#timerTopic", "#studyTopic", "#flashcardTopic", "#caseTopic", "#legalMaterialTopic"].forEach((selector) => {
+    $(selector).disabled = topicsDisabled;
+  });
+  $("#caseSubject").disabled = subjectsDisabled;
+  $("#legalMaterialSubject").disabled = subjectsDisabled;
   $("#topicSubject").disabled = state.subjects.length === 0;
+}
+
+function syncScopedTopicSelect(subjectSelector, topicSelector) {
+  const subjectId = $(subjectSelector)?.value || "";
+  populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto específico" });
 }
 
 function renderDashboard() {
@@ -1017,9 +1137,8 @@ function buildControlTimelineRow(label, studies, questions) {
 function renderControlGoals(range, studyLogs) {
   const multiplier = { day: 1 / 7, week: 1, month: 4, year: 52 }[range] || 1;
   const rows = state.subjects.map((subject) => {
-    const topicIds = state.topics.filter((topic) => topic.subjectId === subject.id).map((topic) => topic.id);
     const minutes = studyLogs
-      .filter((log) => topicIds.includes(log.topicId))
+      .filter((log) => getEntrySubjectId(log) === subject.id)
       .reduce((sum, log) => sum + Number(log.minutes || 0), 0);
     const goalMinutes = Math.max(1, Math.round(Number(subject.goalHours || 0) * 60 * multiplier));
     return { subject, minutes, goalMinutes, progress: clamp((minutes / goalMinutes) * 100, 0, 100) };
@@ -1085,12 +1204,14 @@ function renderControlHistory(studyLogs, questionLogs) {
     ...studyLogs.map((log) => ({
       date: log.date,
       type: "Tempo",
+      subjectId: log.subjectId || "",
       topicId: log.topicId,
       result: `${formatMinutes(log.minutes)} (${log.source || "Manual"})`,
     })),
     ...questionLogs.map((log) => ({
       date: log.date,
       type: "Questões",
+      subjectId: log.subjectId || "",
       topicId: log.topicId,
       result: `${Number(log.correct || 0)} acertos, ${Number(log.wrong || 0)} erros`,
     })),
@@ -1103,7 +1224,7 @@ function renderControlHistory(studyLogs, questionLogs) {
         <tr>
           <td>${formatDate(item.date)}</td>
           <td>${escapeHTML(item.type)}</td>
-          <td>${escapeHTML(getTopicLabel(item.topicId))}</td>
+          <td>${escapeHTML(getEntryScopeLabel(item))}</td>
           <td>${escapeHTML(item.result)}</td>
         </tr>
       `
@@ -1203,7 +1324,7 @@ function renderSubjectCard(subject) {
   const stats = getSubjectStats(subject.id);
   const weekMinutes = state.studyLogs
     .filter(getRangePredicate("week"))
-    .filter((log) => topics.some((topic) => topic.id === log.topicId))
+    .filter((log) => getEntrySubjectId(log) === subject.id)
     .reduce((sum, log) => sum + Number(log.minutes || 0), 0);
   const goalMinutes = Number(subject.goalHours || 0) * 60;
   const goalProgress = goalMinutes ? clamp((weekMinutes / goalMinutes) * 100, 0, 100) : 0;
@@ -1278,7 +1399,7 @@ function renderQuestions() {
           return `
             <tr>
               <td>${formatDate(log.date)}</td>
-              <td>${escapeHTML(getTopicLabel(log.topicId))}</td>
+              <td>${escapeHTML(getEntryScopeLabel(log))}</td>
               <td>${Number(log.correct || 0)}</td>
               <td>${Number(log.wrong || 0)}</td>
               <td>${percent(accuracy)}</td>
@@ -1319,6 +1440,7 @@ function renderQuestions() {
 
 function renderFlashcards() {
   populateFlashcardReviewSelectors();
+  updateFlashcardFormMode();
   const scopedCards = getScopedFlashcards();
   const dueCards = getDueFlashcards();
   $("#flashcardDueCount").textContent = `${dueCards.length} pendentes`;
@@ -1363,7 +1485,7 @@ function flashcardMatchesReviewScope(card) {
   const scope = state.ui.flashcardReviewScope || "all";
   if (scope === "subject") {
     const subjectId = state.ui.flashcardReviewSubjectId;
-    return Boolean(subjectId) && getTopic(card.topicId)?.subjectId === subjectId;
+    return Boolean(subjectId) && getEntrySubjectId(card) === subjectId;
   }
   if (scope === "topic") {
     const topicId = state.ui.flashcardReviewTopicId;
@@ -1418,6 +1540,34 @@ function difficultyLabel(value) {
   return { hard: "Difícil", medium: "Média", easy: "Fácil" }[value] || "Média";
 }
 
+function updateFlashcardFormMode() {
+  const editing = Boolean(state.ui.activeFlashcardEditId);
+  const submit = $("#flashcardSubmitBtn");
+  const cancel = $("#flashcardCancelEditBtn");
+  if (submit) submit.textContent = editing ? "Salvar alterações" : "Salvar flashcard";
+  if (cancel) cancel.classList.toggle("hidden", !editing);
+}
+
+function resetFlashcardForm() {
+  $("#flashcardForm").reset();
+  $("#flashcardFrontEditor").innerHTML = "";
+  $("#flashcardBackEditor").innerHTML = "";
+  state.ui.activeFlashcardEditId = "";
+  updateFlashcardFormMode();
+}
+
+function fillFlashcardForm(card) {
+  state.ui.activeFlashcardEditId = card.id;
+  $("#flashcardSubject").value = getEntrySubjectId(card);
+  syncScopedTopicSelect("#flashcardSubject", "#flashcardTopic");
+  $("#flashcardTopic").value = card.topicId || "";
+  $("#flashcardFrontEditor").innerHTML = renderRichText(card.front || "");
+  $("#flashcardBackEditor").innerHTML = renderRichText(card.back || "");
+  $("#flashcardPriority").value = card.priority || "Média";
+  $("#flashcardDifficulty").value = card.difficulty || "medium";
+  updateFlashcardFormMode();
+}
+
 function getDifficultyInterval(value) {
   return Number(state.flashcardSettings.intervals?.[value] || state.flashcardSettings.intervals?.medium || 8);
 }
@@ -1434,7 +1584,7 @@ function renderFlashcardReview(card, dueCount, scopeCount = 0) {
     ? `
       <div class="flashcard-face flashcard-answer">
         <strong>Resposta</strong>
-        <p>${escapeHTML(card.back)}</p>
+        <div class="rich-card-content">${renderRichText(card.back)}</div>
       </div>
     `
     : "";
@@ -1444,13 +1594,13 @@ function renderFlashcardReview(card, dueCount, scopeCount = 0) {
       <div>
         <span class="tag">${escapeHTML(card.priority || "Média")}</span>
         <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
-        <strong>${escapeHTML(getTopicLabel(card.topicId))}</strong>
+        <strong>${escapeHTML(getEntryScopeLabel(card))}</strong>
       </div>
       <span class="tag">${dueCount > 1 ? `${dueCount} pendentes no filtro` : "Pendente no filtro"}</span>
     </div>
     <div class="flashcard-face">
       <strong>Frente</strong>
-      <p>${escapeHTML(card.front)}</p>
+      <div class="rich-card-content">${renderRichText(card.front)}</div>
     </div>
     ${answer}
     <div class="flashcard-metrics">
@@ -1464,6 +1614,7 @@ function renderFlashcardReview(card, dueCount, scopeCount = 0) {
       <button class="button primary" data-action="reviewFlashcard" data-result="correct" data-id="${card.id}" type="button">Acertei</button>
       <button class="button ghost danger" data-action="reviewFlashcard" data-result="wrong" data-id="${card.id}" type="button">Errei</button>
       <button class="button ghost" data-action="nextFlashcard" type="button">Próximo</button>
+      <button class="button ghost" data-action="editFlashcard" data-id="${card.id}" type="button">Editar</button>
       <button class="button ghost danger" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir flashcard</button>
     </div>
     <div class="flashcard-actions">
@@ -1487,13 +1638,13 @@ function renderFlashcardLibrary() {
             <div>
               <span class="tag">${escapeHTML(card.priority || "Média")}</span>
               <span class="tag">${escapeHTML(difficultyLabel(card.difficulty))}</span>
-              <strong>${escapeHTML(card.front)}</strong>
+              <strong>${escapeHTML(richTextToPlain(card.front))}</strong>
             </div>
             <span class="tag">${isDue ? "Pendente" : `Faltam ${Number(card.nextDueReviewNumber || 0) - counter}`}</span>
           </div>
-          <p class="music-note">${escapeHTML(card.back)}</p>
+          <div class="music-note rich-card-content">${renderRichText(card.back)}</div>
           <div class="flashcard-metrics">
-            <span>${escapeHTML(getTopicLabel(card.topicId))}</span>
+            <span>${escapeHTML(getEntryScopeLabel(card))}</span>
             <span>${Number(card.reviews || 0)} revisões</span>
             <span>${Number(card.correct || 0)} acertos</span>
             <span>${Number(card.wrong || 0)} erros</span>
@@ -1501,6 +1652,7 @@ function renderFlashcardLibrary() {
           </div>
           <div class="inline-actions">
             <button class="mini-button" data-action="studyFlashcard" data-id="${card.id}" type="button" ${isDue ? "" : "disabled"}>${isDue ? "Revisar" : "Aguardando"}</button>
+            <button class="mini-button" data-action="editFlashcard" data-id="${card.id}" type="button">Editar</button>
             <button class="mini-button bad" data-action="deleteFlashcard" data-id="${card.id}" type="button">Excluir flashcard</button>
           </div>
         </article>
@@ -2010,6 +2162,42 @@ function applyHighlight(kind) {
   applyHighlightToEditor("#noteEditor", kind, "#noteHighlightColor");
 }
 
+function getRichEditorFromControl(control) {
+  const selector = control.closest("[data-editor]")?.dataset.editor;
+  const editor = selector ? $(selector) : null;
+  if (editor) editor.focus();
+  return editor;
+}
+
+function applyRichEditorCommand(control) {
+  const editor = getRichEditorFromControl(control);
+  if (!editor) return;
+  const command = control.dataset.richCommand;
+  if (command === "spacer") {
+    document.execCommand("insertHTML", false, '<p style="margin-top: 0.85em; margin-bottom: 0.85em;"><br></p>');
+    return;
+  }
+  if (command === "insertParagraph") {
+    document.execCommand("formatBlock", false, "p");
+    return;
+  }
+  document.execCommand(command, false, null);
+}
+
+function applyRichEditorHighlight(control) {
+  const editor = getRichEditorFromControl(control);
+  if (!editor) return;
+  const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
+  document.execCommand("backColor", false, colors[control.dataset.richHighlight] || colors.yellow);
+}
+
+function applyRichEditorColor(control) {
+  const editor = getRichEditorFromControl(control);
+  if (!editor) return;
+  const color = $(control.dataset.richColor)?.value || "#0f172a";
+  document.execCommand("foreColor", false, color);
+}
+
 function applyHighlightToEditor(editorSelector, kind, colorSelector) {
   const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
   const editor = $(editorSelector);
@@ -2036,7 +2224,7 @@ function sanitizeNoteHTML(html) {
         const safeStyle = attribute.value
           .split(";")
           .map((part) => part.trim())
-          .filter((part) => /^(background|background-color|color|font-weight|text-decoration)\s*:/i.test(part))
+          .filter((part) => /^(background|background-color|color|font-weight|font-style|text-decoration|text-align|line-height|margin-top|margin-bottom)\s*:/i.test(part))
           .join("; ");
         if (safeStyle) {
           element.setAttribute("style", safeStyle);
@@ -2062,9 +2250,11 @@ function renderCases() {
   if (summary) {
     summary.textContent = caseFilterSummary(items.length, allItems.length, court);
   }
+  updateCaseFormMode();
   $("#caseList").innerHTML = items.length
     ? items.map((item) => renderCaseCard(item, court)).join("")
     : `<div class="empty-state">${allItems.length ? "Nenhuma jurisprudência encontrada com esses filtros." : "Nenhuma jurisprudência cadastrada nesta aba."}</div>`;
+  renderLegalMaterials();
 }
 
 function normalizeSearchText(value) {
@@ -2077,17 +2267,27 @@ function normalizeSearchText(value) {
 
 function caseMatchesFilters(item) {
   const topic = getTopic(item.topicId);
-  const subject = topic ? getSubject(topic.subjectId) : null;
+  const subjectId = getEntrySubjectId(item);
+  const subject = getSubject(subjectId);
   const subjectFilter = state.ui.caseSubjectFilter || "";
   const topicFilter = state.ui.caseTopicFilter || "";
   const search = normalizeSearchText(state.ui.caseSearch);
 
-  if (subjectFilter && topic?.subjectId !== subjectFilter) return false;
+  if (subjectFilter && subjectId !== subjectFilter) return false;
   if (topicFilter && item.topicId !== topicFilter) return false;
   if (!search) return true;
 
   const haystack = normalizeSearchText(
-    [item.title, item.theme, item.summary, item.source, topic?.name, subject?.name, getTopicLabel(item.topicId)].join(" ")
+    [
+      item.title,
+      item.theme,
+      richTextToPlain(item.summary),
+      item.source,
+      topic?.name,
+      subject?.name,
+      getEntryScopeLabel(item),
+      normalizeHashtags(item.tags).map((tag) => `#${tag}`).join(" "),
+    ].join(" ")
   );
   return haystack.includes(search);
 }
@@ -2102,6 +2302,45 @@ function caseFilterSummary(resultCount, totalCount, court) {
   return `${resultCount} de ${totalCount} julgados em ${court}${suffix}.`;
 }
 
+function renderCaseTags(tags = []) {
+  const normalized = normalizeHashtags(tags);
+  return normalized.length
+    ? `<div class="case-tags">${normalized.map((tag) => `<span class="hashtag">#${escapeHTML(tag)}</span>`).join("")}</div>`
+    : "";
+}
+
+function updateCaseFormMode() {
+  const editing = Boolean(state.ui.activeCaseEditId);
+  const submit = $("#caseSubmitBtn");
+  const cancel = $("#caseCancelEditBtn");
+  if (submit) submit.textContent = editing ? "Salvar alterações" : "Salvar jurisprudência";
+  if (cancel) cancel.classList.toggle("hidden", !editing);
+}
+
+function resetCaseForm() {
+  $("#caseForm").reset();
+  $("#caseSummaryEditor").innerHTML = "";
+  $("#caseTags").value = "";
+  $("#caseDate").value = todayISO();
+  state.ui.activeCaseEditId = "";
+  updateCaseFormMode();
+}
+
+function fillCaseForm(item, court) {
+  state.ui.caseCourt = court;
+  state.ui.activeCaseEditId = item.id;
+  $("#caseTitle").value = item.title || "";
+  $("#caseSubject").value = getEntrySubjectId(item);
+  syncScopedTopicSelect("#caseSubject", "#caseTopic");
+  $("#caseTopic").value = item.topicId || "";
+  $("#caseDate").value = item.date || todayISO();
+  $("#caseTheme").value = item.theme || "";
+  $("#caseSummaryEditor").innerHTML = renderRichText(item.summary || "");
+  $("#caseTags").value = hashtagsToInput(item.tags || []);
+  $("#caseSource").value = item.source || "";
+  updateCaseFormMode();
+}
+
 function renderCaseCard(item, court) {
   const link = item.source
     ? `<a href="${escapeHTML(item.source)}" target="_blank" rel="noopener noreferrer">Fonte</a>`
@@ -2114,25 +2353,145 @@ function renderCaseCard(item, court) {
         ${item.theme ? `<span class="tag">${escapeHTML(item.theme)}</span>` : ""}
       </div>
       <h3>${escapeHTML(item.title)}</h3>
-      <p>${escapeHTML(item.summary)}</p>
+      <div class="case-content rich-card-content">${renderRichText(item.summary)}</div>
       <div class="case-meta">
-        ${item.topicId ? `<span>${escapeHTML(getTopicLabel(item.topicId))}</span>` : ""}
+        ${getEntrySubjectId(item) || item.topicId ? `<span>${escapeHTML(getEntryScopeLabel(item))}</span>` : ""}
         ${link}
       </div>
+      ${renderCaseTags(item.tags)}
       <div class="inline-actions">
+        <button class="mini-button" data-action="editCase" data-court="${court}" data-id="${item.id}" type="button">Editar</button>
         <button class="mini-button bad" data-action="deleteCase" data-court="${court}" data-id="${item.id}" type="button">Excluir</button>
       </div>
     </article>
   `;
 }
 
+function legalMaterialTypeLabel(type) {
+  return type === "table" ? "Tabela" : "Lei";
+}
+
+function legalMaterialMatchesFilters(item) {
+  const topic = getTopic(item.topicId);
+  const subjectId = getEntrySubjectId(item);
+  const subject = getSubject(subjectId);
+  const subjectFilter = state.ui.caseSubjectFilter || "";
+  const topicFilter = state.ui.caseTopicFilter || "";
+  const search = normalizeSearchText(state.ui.caseSearch);
+
+  if (subjectFilter && subjectId !== subjectFilter) return false;
+  if (topicFilter && item.topicId !== topicFilter) return false;
+  if (!search) return true;
+
+  const haystack = normalizeSearchText(
+    [
+      legalMaterialTypeLabel(item.type),
+      item.title,
+      item.reference,
+      item.content,
+      item.source,
+      topic?.name,
+      subject?.name,
+      getEntryScopeLabel(item),
+    ].join(" ")
+  );
+  return haystack.includes(search);
+}
+
+function renderLegalMaterials() {
+  const list = $("#legalMaterialList");
+  if (!list) return;
+
+  const allItems = Array.isArray(state.legalMaterials) ? [...state.legalMaterials] : [];
+  const items = allItems
+    .filter(legalMaterialMatchesFilters)
+    .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  const summary = $("#legalMaterialSummary");
+  if (summary) {
+    const filters = [
+      state.ui.caseSearch ? "texto" : "",
+      state.ui.caseSubjectFilter ? "matéria" : "",
+      state.ui.caseTopicFilter ? "assunto" : "",
+    ].filter(Boolean);
+    const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
+    summary.textContent = `${items.length} de ${allItems.length} materiais${suffix}.`;
+  }
+
+  list.innerHTML = items.length
+    ? items.map(renderLegalMaterialCard).join("")
+    : `<div class="empty-state">${allItems.length ? "Nenhuma lei ou tabela encontrada com esses filtros." : "Nenhuma lei ou tabela cadastrada."}</div>`;
+}
+
+function renderLegalMaterialCard(item) {
+  const safeSource = getSafeExternalUrl(item.source);
+  const topicLabel = getEntrySubjectId(item) || item.topicId ? getEntryScopeLabel(item) : "";
+  return `
+    <article class="legal-material-card">
+      <div class="legal-material-card-top">
+        <div>
+          <div class="case-meta">
+            <span class="tag">${legalMaterialTypeLabel(item.type)}</span>
+            ${item.reference ? `<span class="tag">${escapeHTML(item.reference)}</span>` : ""}
+          </div>
+          <h3>${escapeHTML(item.title)}</h3>
+        </div>
+        <button class="mini-button bad" data-action="deleteLegalMaterial" data-id="${item.id}" type="button">Excluir</button>
+      </div>
+      ${renderLegalMaterialBody(item)}
+      <div class="case-meta">
+        ${topicLabel ? `<span>${escapeHTML(topicLabel)}</span>` : ""}
+        ${safeSource ? `<a href="${escapeHTML(safeSource)}" target="_blank" rel="noopener noreferrer">Fonte</a>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderLegalMaterialBody(item) {
+  const content = String(item.content || "").trim();
+  if (!content) return `<p class="legal-material-content">Sem conteúdo registrado.</p>`;
+  if (item.type === "table") return renderLegalMaterialTable(content);
+  return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
+}
+
+function splitLegalMaterialRow(line) {
+  const separator = line.includes("|") ? "|" : line.includes(";") ? ";" : "\t";
+  return line.split(separator).map((cell) => cell.trim());
+}
+
+function renderLegalMaterialTable(content) {
+  const rows = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(splitLegalMaterialRow)
+    .filter((row) => row.length > 1);
+
+  if (!rows.length) return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
+
+  const [header, ...body] = rows;
+  const bodyRows = body.length ? body : [header.map(() => "")];
+  return `
+    <div class="legal-material-table">
+      <table>
+        <thead>
+          <tr>${header.map((cell) => `<th>${escapeHTML(cell)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${bodyRows
+            .map((row) => `<tr>${header.map((_, index) => `<td>${escapeHTML(row[index] || "")}</td>`).join("")}</tr>`)
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderPomodoro() {
   const activeTopicId = timer.topicId || $("#timerTopic").value;
-  const topic = getTopic(activeTopicId);
-  const subject = topic ? getSubject(topic.subjectId) : null;
+  const activeSubjectId = timer.subjectId || getTopic(activeTopicId)?.subjectId || $("#timerSubject").value;
   const timerFace = $(".timer-face");
   const modeLabel = timer.mode === "focus" ? "Foco" : timer.mode === "longBreak" ? "Descanso longo" : "Pausa curta";
-  $("#timerTopicLabel").textContent = topic ? `${subject?.name || "Sem matéria"}: ${topic.name}` : "Selecione um assunto";
+  $("#timerTopicLabel").textContent = activeSubjectId ? getEntryScopeLabel({ subjectId: activeSubjectId, topicId: activeTopicId }) : "Selecione uma matéria";
   $("#timerMode").textContent = modeLabel;
   $("#cycleCounter").textContent = `Ciclo ${timer.cycle} de ${state.settings.cycles}`;
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
@@ -2153,7 +2512,7 @@ function renderPomodoro() {
           (log) => `
         <tr>
           <td>${formatDate(log.date)}</td>
-          <td>${escapeHTML(getTopicLabel(log.topicId))}</td>
+          <td>${escapeHTML(getEntryScopeLabel(log))}</td>
           <td>${formatMinutes(log.minutes)}</td>
           <td>${escapeHTML(log.source || "Manual")}</td>
           <td><button class="mini-button bad" data-action="deleteStudy" data-id="${log.id}" type="button">Excluir</button></td>
@@ -2302,9 +2661,8 @@ function renderReports() {
 
 function renderSubjectTimeChart(studyLogs) {
   const data = state.subjects.map((subject) => {
-    const topicIds = state.topics.filter((topic) => topic.subjectId === subject.id).map((topic) => topic.id);
     const minutes = studyLogs
-      .filter((log) => topicIds.includes(log.topicId))
+      .filter((log) => getEntrySubjectId(log) === subject.id)
       .reduce((sum, log) => sum + Number(log.minutes || 0), 0);
     return { ...subject, minutes };
   });
@@ -2328,8 +2686,7 @@ function renderSubjectTimeChart(studyLogs) {
 
 function renderSubjectAccuracyList(questionLogs) {
   const data = state.subjects.map((subject) => {
-    const topicIds = state.topics.filter((topic) => topic.subjectId === subject.id).map((topic) => topic.id);
-    const logs = questionLogs.filter((log) => topicIds.includes(log.topicId));
+    const logs = questionLogs.filter((log) => getEntrySubjectId(log) === subject.id);
     const correct = logs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
     const wrong = logs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
     const total = correct + wrong;
@@ -2449,6 +2806,7 @@ function resetTimer() {
   timer.elapsedFocusSeconds = 0;
   timer.elapsedSinceLongBreakSeconds = 0;
   timer.cycle = 1;
+  timer.subjectId = "";
   timer.topicId = "";
   renderPomodoro();
 }
@@ -2558,12 +2916,13 @@ function toggleLofiTick() {
 
 function startTimer() {
   if (timer.running) return;
-  const topicId = $("#timerTopic").value;
-  if (!topicId) {
-    showToast("Cadastre e selecione um assunto para usar o Pomodoro.");
+  const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
+  if (!subjectId) {
+    showToast("Cadastre e selecione uma matéria para usar o Pomodoro.");
     return;
   }
   unlockPomodoroAlarm();
+  if (!timer.subjectId) timer.subjectId = subjectId;
   if (!timer.topicId) timer.topicId = topicId;
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
@@ -2644,12 +3003,13 @@ function completeTimerBlock(options = {}) {
 }
 
 function skipTimerStep() {
-  if (!timer.topicId && timer.mode === "focus") {
-    const topicId = $("#timerTopic").value;
-    if (!topicId) {
-      showToast("Selecione um assunto antes de pular a etapa.");
+  if (!timer.subjectId && timer.mode === "focus") {
+    const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
+    if (!subjectId) {
+      showToast("Selecione uma matéria antes de pular a etapa.");
       return;
     }
+    timer.subjectId = subjectId;
     timer.topicId = topicId;
   }
   completeTimerBlock({ skipped: true });
@@ -2659,11 +3019,14 @@ function skipTimerStep() {
 }
 
 function logPomodoroFocus() {
-  const topicId = timer.topicId || $("#timerTopic").value;
+  const selected = resolveSubjectTopic("#timerSubject", "#timerTopic");
+  const subjectId = timer.subjectId || selected.subjectId;
+  const topicId = timer.topicId || selected.topicId;
   const minutes = Math.max(1, Math.round(timer.elapsedFocusSeconds / 60));
-  if (!topicId || !minutes) return;
+  if (!subjectId || !minutes) return;
   state.studyLogs.push({
     id: uid(),
+    subjectId,
     topicId,
     minutes,
     date: todayISO(),
@@ -2687,6 +3050,11 @@ function finishTimerManually() {
 }
 
 function attachEvents() {
+  document.addEventListener("mousedown", (event) => {
+    const editorButton = event.target.closest("[data-rich-command], [data-rich-highlight], [data-rich-color], [data-highlight], [data-source-highlight], [data-reader-highlight]");
+    if (editorButton) event.preventDefault();
+  });
+
   document.addEventListener("click", (event) => {
     const viewButton = event.target.closest("[data-view]");
     if (viewButton) {
@@ -2722,6 +3090,24 @@ function attachEvents() {
     const readerHighlight = event.target.closest("[data-reader-highlight]");
     if (readerHighlight) {
       applyHighlightToEditor("#activeSourceReader", readerHighlight.dataset.readerHighlight, "#readerHighlightColor");
+      return;
+    }
+
+    const richCommand = event.target.closest("[data-rich-command]");
+    if (richCommand) {
+      applyRichEditorCommand(richCommand);
+      return;
+    }
+
+    const richHighlight = event.target.closest("[data-rich-highlight]");
+    if (richHighlight) {
+      applyRichEditorHighlight(richHighlight);
+      return;
+    }
+
+    const richColor = event.target.closest("[data-rich-color]");
+    if (richColor) {
+      applyRichEditorColor(richColor);
       return;
     }
 
@@ -2766,6 +3152,13 @@ function attachEvents() {
     state.ui.caseTopicFilter = "";
     saveState();
     renderCases();
+  });
+
+  $("#caseCancelEditBtn").addEventListener("click", () => {
+    resetCaseForm();
+    saveState();
+    renderCases();
+    showToast("Edição da jurisprudência cancelada.");
   });
 
   $("#controlDayDate").addEventListener("change", (event) => {
@@ -2913,20 +3306,57 @@ function attachEvents() {
   $("#caseForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const court = state.ui.caseCourt;
-    state.cases[court].push({
+    const { subjectId, topicId } = resolveSubjectTopic("#caseSubject", "#caseTopic");
+    const summary = sanitizeNoteHTML($("#caseSummaryEditor").innerHTML.trim());
+    const title = $("#caseTitle").value.trim();
+    if (!title || !richTextHasContent(summary)) {
+      showToast("Preencha título e tese/resumo.");
+      return;
+    }
+    const payload = normalizeCaseItem({
       id: uid(),
-      topicId: $("#caseTopic").value,
-      title: $("#caseTitle").value.trim(),
+      subjectId,
+      topicId,
+      title,
       date: $("#caseDate").value || todayISO(),
       theme: $("#caseTheme").value.trim(),
-      summary: $("#caseSummary").value.trim(),
+      summary,
+      tags: $("#caseTags").value,
       source: $("#caseSource").value.trim(),
     });
+    const existing = state.cases[court].find((item) => item.id === state.ui.activeCaseEditId);
+    if (existing) {
+      payload.id = existing.id;
+      Object.assign(existing, payload);
+    } else {
+      state.cases[court].push(payload);
+    }
+    resetCaseForm();
+    saveState();
+    render();
+    showToast(existing ? "Jurisprudência atualizada." : `Jurisprudência do ${court} salva.`);
+  });
+
+  $("#legalMaterialForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const { subjectId, topicId } = resolveSubjectTopic("#legalMaterialSubject", "#legalMaterialTopic");
+    const material = normalizeLegalMaterial({
+      id: uid(),
+      type: $("#legalMaterialType").value,
+      subjectId,
+      topicId,
+      title: $("#legalMaterialTitle").value,
+      reference: $("#legalMaterialReference").value,
+      content: $("#legalMaterialContent").value,
+      source: $("#legalMaterialSource").value,
+      createdAt: todayISO(),
+      updatedAt: new Date().toISOString(),
+    });
+    state.legalMaterials.push(material);
     saveState();
     event.target.reset();
-    $("#caseDate").value = todayISO();
     render();
-    showToast(`Jurisprudência do ${court} salva.`);
+    showToast(`${legalMaterialTypeLabel(material.type)} salva.`);
   });
 
   $("#timerSettingsForm").addEventListener("submit", (event) => {
@@ -2944,10 +3374,10 @@ function attachEvents() {
 
   $("#studyLogForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const topicId = $("#studyTopic").value;
+    const { subjectId, topicId } = resolveSubjectTopic("#studySubject", "#studyTopic");
     const minutes = Number($("#studyMinutes").value);
-    if (!topicId) {
-      showToast("Cadastre e selecione um assunto para registrar tempo.");
+    if (!subjectId) {
+      showToast("Cadastre e selecione uma matéria para registrar tempo.");
       return;
     }
     if (!Number.isFinite(minutes) || minutes <= 0) {
@@ -2958,6 +3388,7 @@ function attachEvents() {
     const selectedNote = $("#studyNote").value.trim();
     state.studyLogs.push({
       id: uid(),
+      subjectId,
       topicId,
       minutes: Math.round(minutes),
       date: selectedDate,
@@ -2966,6 +3397,7 @@ function attachEvents() {
       createdAt: new Date().toISOString(),
     });
     saveState();
+    $("#studySubject").value = subjectId;
     $("#studyTopic").value = topicId;
     $("#studyMinutes").value = 30;
     $("#studyDate").value = selectedDate;
@@ -2976,13 +3408,17 @@ function attachEvents() {
 
   $("#flashcardForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const topicId = $("#flashcardTopic").value;
-    const front = $("#flashcardFront").value.trim();
-    const back = $("#flashcardBack").value.trim();
-    if (!topicId || !front || !back) return;
+    const { subjectId, topicId } = resolveSubjectTopic("#flashcardSubject", "#flashcardTopic");
+    const front = sanitizeNoteHTML($("#flashcardFrontEditor").innerHTML.trim());
+    const back = sanitizeNoteHTML($("#flashcardBackEditor").innerHTML.trim());
+    if (!subjectId || !richTextHasContent(front) || !richTextHasContent(back)) {
+      showToast("Preencha matéria, frente e verso do flashcard.");
+      return;
+    }
 
-    const card = {
-      id: uid(),
+    const card = normalizeFlashcard({
+      id: state.ui.activeFlashcardEditId || uid(),
+      subjectId,
       topicId,
       front,
       back,
@@ -2995,14 +3431,29 @@ function attachEvents() {
       correct: 0,
       wrong: 0,
       lastReviewed: "",
-    };
-    state.flashcards.push(card);
+      updatedAt: new Date().toISOString(),
+    });
+    const existing = state.flashcards.find((item) => item.id === state.ui.activeFlashcardEditId);
+    if (existing) {
+      Object.assign(existing, {
+        ...card,
+        id: existing.id,
+        reviews: existing.reviews,
+        correct: existing.correct,
+        wrong: existing.wrong,
+        lastReviewed: existing.lastReviewed,
+        nextDueReviewNumber: existing.nextDueReviewNumber,
+        dueDate: existing.dueDate,
+      });
+    } else {
+      state.flashcards.push(card);
+    }
     state.ui.activeFlashcardId = card.id;
     state.ui.flashcardAnswerOpen = false;
+    resetFlashcardForm();
     saveState();
-    event.target.reset();
     render();
-    showToast("Flashcard salvo.");
+    showToast(existing ? "Flashcard atualizado." : "Flashcard salvo.");
   });
 
   $("#flashcardSettingsForm").addEventListener("submit", (event) => {
@@ -3018,6 +3469,13 @@ function attachEvents() {
   $("#flashcardReviewForm").addEventListener("submit", (event) => {
     event.preventDefault();
     updateFlashcardReviewSettings();
+  });
+
+  $("#flashcardCancelEditBtn").addEventListener("click", () => {
+    resetFlashcardForm();
+    saveState();
+    renderFlashcards();
+    showToast("Edição do flashcard cancelada.");
   });
 
   ["#flashcardReviewOrder", "#flashcardReviewScope", "#flashcardReviewSubject", "#flashcardReviewTopic"].forEach((selector) => {
@@ -3172,6 +3630,18 @@ function attachEvents() {
   $("#tickLofiToggleBtn").addEventListener("click", toggleLofiTick);
   $("#resetTimerBtn").addEventListener("click", resetTimer);
   $("#finishTimerBtn").addEventListener("click", finishTimerManually);
+  [
+    ["#timerSubject", "#timerTopic", renderPomodoro],
+    ["#studySubject", "#studyTopic"],
+    ["#flashcardSubject", "#flashcardTopic"],
+    ["#caseSubject", "#caseTopic"],
+    ["#legalMaterialSubject", "#legalMaterialTopic"],
+  ].forEach(([subjectSelector, topicSelector, afterSync]) => {
+    $(subjectSelector).addEventListener("change", () => {
+      syncScopedTopicSelect(subjectSelector, topicSelector);
+      if (afterSync) afterSync();
+    });
+  });
   $("#timerTopic").addEventListener("change", renderPomodoro);
   $("#themeToggleBtn").addEventListener("click", () => {
     state.ui.theme = state.ui.theme === "dark" ? "light" : "dark";
@@ -3260,10 +3730,10 @@ function handleAction(action) {
       showToast("Este flashcard ainda não está pendente pela regra de dificuldade.");
       return;
     }
-    const topic = getTopic(card.topicId);
-    state.ui.flashcardReviewScope = "topic";
-    state.ui.flashcardReviewTopicId = card.topicId;
-    state.ui.flashcardReviewSubjectId = topic?.subjectId || state.ui.flashcardReviewSubjectId || "";
+    const subjectId = getEntrySubjectId(card);
+    state.ui.flashcardReviewScope = card.topicId ? "topic" : "subject";
+    state.ui.flashcardReviewTopicId = card.topicId || state.ui.flashcardReviewTopicId || "";
+    state.ui.flashcardReviewSubjectId = subjectId || state.ui.flashcardReviewSubjectId || "";
     state.ui.activeFlashcardId = id;
     state.ui.flashcardAnswerOpen = false;
     state.ui.view = "flashcards";
@@ -3272,11 +3742,30 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "editFlashcard") {
+    const card = state.flashcards.find((item) => item.id === id);
+    if (!card) return;
+    state.ui.view = "flashcards";
+    state.ui.activeFlashcardId = id;
+    state.ui.activeFlashcardEditId = id;
+    state.ui.flashcardAnswerOpen = false;
+    saveState();
+    render();
+    fillFlashcardForm(card);
+    saveState();
+    $("#flashcardForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Flashcard carregado para edição.");
+    return;
+  }
+
   if (type === "deleteFlashcard") {
     state.flashcards = state.flashcards.filter((card) => card.id !== id);
     if (state.ui.activeFlashcardId === id) {
       state.ui.activeFlashcardId = "";
       state.ui.flashcardAnswerOpen = false;
+    }
+    if (state.ui.activeFlashcardEditId === id) {
+      resetFlashcardForm();
     }
     saveState();
     render();
@@ -3423,15 +3912,15 @@ function handleAction(action) {
 
   if (type === "deleteSubject") {
     if (!window.confirm("Excluir esta matéria e seus assuntos?")) return;
-    const topicIds = state.topics.filter((topic) => topic.subjectId === id).map((topic) => topic.id);
     state.subjects = state.subjects.filter((subject) => subject.id !== id);
     state.topics = state.topics.filter((topic) => topic.subjectId !== id);
-    state.questionLogs = state.questionLogs.filter((log) => !topicIds.includes(log.topicId));
-    state.studyLogs = state.studyLogs.filter((log) => !topicIds.includes(log.topicId));
-    state.flashcards = state.flashcards.filter((card) => !topicIds.includes(card.topicId));
+    state.questionLogs = state.questionLogs.filter((log) => getEntrySubjectId(log) !== id);
+    state.studyLogs = state.studyLogs.filter((log) => getEntrySubjectId(log) !== id);
+    state.flashcards = state.flashcards.filter((card) => getEntrySubjectId(card) !== id);
+    state.legalMaterials = state.legalMaterials.map((item) => (getEntrySubjectId(item) === id ? { ...item, subjectId: "", topicId: "" } : item));
     if (state.flashcards.every((card) => card.id !== state.ui.activeFlashcardId)) state.ui.activeFlashcardId = "";
     Object.keys(state.cases).forEach((court) => {
-      state.cases[court] = state.cases[court].map((item) => (topicIds.includes(item.topicId) ? { ...item, topicId: "" } : item));
+      state.cases[court] = state.cases[court].map((item) => (getEntrySubjectId(item) === id ? { ...item, subjectId: "", topicId: "" } : item));
     });
     saveState();
     render();
@@ -3445,6 +3934,7 @@ function handleAction(action) {
     state.questionLogs = state.questionLogs.filter((log) => log.topicId !== id);
     state.studyLogs = state.studyLogs.filter((log) => log.topicId !== id);
     state.flashcards = state.flashcards.filter((card) => card.topicId !== id);
+    state.legalMaterials = state.legalMaterials.map((item) => (item.topicId === id ? { ...item, topicId: "" } : item));
     if (state.flashcards.every((card) => card.id !== state.ui.activeFlashcardId)) state.ui.activeFlashcardId = "";
     Object.keys(state.cases).forEach((court) => {
       state.cases[court] = state.cases[court].map((item) => (item.topicId === id ? { ...item, topicId: "" } : item));
@@ -3471,12 +3961,40 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "editCase") {
+    const court = action.dataset.court;
+    const item = state.cases[court]?.find((caseItem) => caseItem.id === id);
+    if (!item) return;
+    state.ui.view = "jurisprudencias";
+    state.ui.caseCourt = court;
+    state.ui.activeCaseEditId = id;
+    saveState();
+    render();
+    fillCaseForm(item, court);
+    saveState();
+    $("#caseForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Jurisprudência carregada para edição.");
+    return;
+  }
+
   if (type === "deleteCase") {
     const court = action.dataset.court;
     state.cases[court] = state.cases[court].filter((item) => item.id !== id);
+    if (state.ui.activeCaseEditId === id) {
+      resetCaseForm();
+    }
     saveState();
     renderCases();
     showToast("Jurisprudência removida.");
+    return;
+  }
+
+  if (type === "deleteLegalMaterial") {
+    if (!window.confirm("Excluir esta lei ou tabela?")) return;
+    state.legalMaterials = state.legalMaterials.filter((item) => item.id !== id);
+    saveState();
+    renderCases();
+    showToast("Material removido.");
   }
 }
 

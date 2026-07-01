@@ -439,6 +439,7 @@ button:disabled {
 .panel,
 .subject-card,
 .case-card,
+.legal-material-card,
 .performance-row {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -616,12 +617,14 @@ button:focus-visible {
 
 .subject-card h3,
 .topic-item strong,
-.case-card h3 {
+.case-card h3,
+.legal-material-card h3 {
   overflow-wrap: anywhere;
 }
 
 .topic-list,
 .case-list,
+.legal-material-list,
 .insight-list,
 .topic-performance,
 .control-list,
@@ -652,7 +655,8 @@ button:focus-visible {
 
 .topic-meta,
 .case-meta,
-.inline-actions {
+.inline-actions,
+.legal-material-card-top {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -759,11 +763,17 @@ button:focus-visible {
   gap: 10px;
 }
 
-.highlight-toolbar {
+.highlight-toolbar,
+.rich-editor-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.rich-editor-toolbar .mini-button,
+.rich-editor-toolbar .color-control {
+  flex: 0 1 auto;
 }
 
 .editor-field {
@@ -852,6 +862,20 @@ button:focus-visible {
 
 .law-editor:empty::before {
   content: "Cole o texto da lei ou do site aqui para grifar e salvar nesta fonte.";
+}
+
+.note-editor[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.rich-text-editor {
+  min-height: 180px;
+}
+
+.compact-editor {
+  min-height: 120px;
 }
 
 .note-content {
@@ -1139,6 +1163,47 @@ td {
   padding: 14px;
 }
 
+.legal-material-panel {
+  margin-top: 18px;
+}
+
+.legal-material-panel-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.legal-material-grid {
+  align-items: start;
+}
+
+.legal-material-results {
+  min-width: 0;
+}
+
+.legal-material-list {
+  max-height: min(52vh, 620px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.legal-material-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.legal-material-card-top {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.legal-material-card h3 {
+  margin: 6px 0 0;
+}
+
 .case-filter-form {
   display: grid;
   gap: 12px;
@@ -1156,16 +1221,72 @@ td {
   font-size: 0.9rem;
 }
 
-.case-card p {
+.case-card p,
+.legal-material-content {
   margin: 0;
   color: #263341;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-.case-card a {
+.rich-card-content {
+  color: #263341;
+  line-height: 1.58;
+  overflow-wrap: anywhere;
+}
+
+.rich-card-content p,
+.rich-card-content div {
+  margin: 0 0 8px;
+}
+
+.rich-card-content > :last-child {
+  margin-bottom: 0;
+}
+
+.case-content {
+  padding: 10px 0 2px;
+}
+
+.case-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.hashtag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.case-card a,
+.legal-material-card a {
   color: var(--blue);
   font-weight: 800;
+}
+
+.legal-material-table {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.legal-material-table table {
+  min-width: 420px;
+}
+
+.legal-material-table th,
+.legal-material-table td {
+  padding: 9px 10px;
 }
 
 .timer-panel {
@@ -1422,8 +1543,32 @@ td {
 .theme-dark .note-card,
 .theme-dark .category-card,
 .theme-dark .goal-card,
+.theme-dark .legal-material-card,
 .theme-dark .empty-state {
   background: #131920;
+}
+
+.theme-dark .legal-material-content {
+  color: var(--ink);
+}
+
+.theme-dark .rich-card-content {
+  color: var(--ink);
+}
+
+.theme-dark .color-control {
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.theme-dark .hashtag {
+  border-color: #1d4e89;
+  background: #10233f;
+  color: #bfdbfe;
+}
+
+.theme-dark .legal-material-table {
+  background: #111820;
 }
 
 .theme-dark .nav-button:hover,
@@ -1579,6 +1724,8 @@ td {
   .source-card-top,
   .note-card-top,
   .goal-card-top,
+  .legal-material-panel-header,
+  .legal-material-card-top,
   .filter-footer {
     align-items: stretch;
     flex-direction: column;
@@ -1590,6 +1737,7 @@ td {
   .storage-actions,
   .profile-actions,
   .highlight-toolbar,
+  .rich-editor-toolbar,
   .source-preview-actions,
   .side-nav,
   .stat-grid,
@@ -1605,6 +1753,11 @@ td {
   .music-actions,
   .flashcard-actions {
     align-items: stretch;
+  }
+
+  .rich-editor-toolbar .mini-button,
+  .rich-editor-toolbar .color-control {
+    flex: 1 1 128px;
   }
 
   .button,

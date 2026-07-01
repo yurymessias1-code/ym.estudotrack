@@ -287,10 +287,16 @@
                 Título
                 <input id="caseTitle" type="text" placeholder="Ex.: Tema repetitivo sobre improbidade" required />
               </label>
-              <label>
-                Assunto relacionado
-                <select id="caseTopic"></select>
-              </label>
+              <div class="split-inputs">
+                <label>
+                  Matéria relacionada
+                  <select id="caseSubject"></select>
+                </label>
+                <label>
+                  Assunto relacionado
+                  <select id="caseTopic"></select>
+                </label>
+              </div>
               <label>
                 Data
                 <input id="caseDate" type="date" required />
@@ -299,15 +305,42 @@
                 Tema ou classe
                 <input id="caseTheme" type="text" placeholder="Ex.: Tema 1199, ADI, REsp" />
               </label>
+              <div class="editor-field">
+                <span class="field-title">Tese, resumo ou ementa</span>
+                <div class="rich-editor-toolbar" data-editor="#caseSummaryEditor" aria-label="Editor da jurisprudência">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="caseTextColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#caseTextColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="caseSummaryEditor" class="note-editor rich-text-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Escreva a tese, resumo ou ementa"></div>
+              </div>
               <label>
-                Tese, resumo ou ementa
-                <textarea id="caseSummary" rows="5" required></textarea>
+                Hashtags
+                <input id="caseTags" type="text" placeholder="#improbidade #tema1199 #controle" />
               </label>
               <label>
                 Fonte
                 <input id="caseSource" type="url" placeholder="https://..." />
               </label>
-              <button class="button primary" type="submit">Salvar jurisprudência</button>
+              <div class="inline-actions">
+                <button class="button primary" id="caseSubmitBtn" type="submit">Salvar jurisprudência</button>
+                <button class="button ghost hidden" id="caseCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
             </form>
 
             <section class="panel">
@@ -340,6 +373,59 @@
               <div class="case-list" id="caseList"></div>
             </section>
           </div>
+
+          <section class="panel legal-material-panel" aria-labelledby="legalMaterialTitleHeading">
+            <div class="panel-header legal-material-panel-header">
+              <div>
+                <p class="eyebrow">Material de apoio</p>
+                <h3 id="legalMaterialTitleHeading">Leis e tabelas</h3>
+              </div>
+              <span class="tag" id="legalMaterialSummary">0 materiais salvos.</span>
+            </div>
+
+            <div class="content-grid form-and-list legal-material-grid">
+              <form class="form-panel legal-material-form" id="legalMaterialForm">
+                <div class="split-inputs">
+                  <label>
+                    Tipo
+                    <select id="legalMaterialType">
+                      <option value="law">Lei</option>
+                      <option value="table">Tabela</option>
+                    </select>
+                  </label>
+                  <label>
+                    Matéria relacionada
+                    <select id="legalMaterialSubject"></select>
+                  </label>
+                </div>
+                <label>
+                  Assunto relacionado
+                  <select id="legalMaterialTopic"></select>
+                </label>
+                <label>
+                  Título
+                  <input id="legalMaterialTitle" type="text" placeholder="Ex.: Lei 8.112/90" required />
+                </label>
+                <label>
+                  Referência
+                  <input id="legalMaterialReference" type="text" placeholder="Ex.: art. 37 ou quadro de prazos" />
+                </label>
+                <label>
+                  Texto ou tabela
+                  <textarea id="legalMaterialContent" rows="7" placeholder="Coluna 1 | Coluna 2&#10;Item A | Item B"></textarea>
+                </label>
+                <label>
+                  Fonte
+                  <input id="legalMaterialSource" type="url" placeholder="https://..." />
+                </label>
+                <button class="button primary" type="submit">Salvar material</button>
+              </form>
+
+              <section class="legal-material-results" aria-label="Leis e tabelas salvas">
+                <div class="legal-material-list" id="legalMaterialList"></div>
+              </section>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="pomodoro" aria-labelledby="pomodoroTitle">
@@ -355,7 +441,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow" id="timerMode">Foco</p>
-                  <h3 id="timerTopicLabel">Selecione um assunto</h3>
+                  <h3 id="timerTopicLabel">Selecione uma matéria</h3>
                 </div>
                 <span class="cycle-pill" id="cycleCounter">Ciclo 1</span>
               </div>
@@ -389,10 +475,16 @@
                   <h3>Configurar Pomodoro</h3>
                 </div>
               </div>
-              <label>
-                Assunto
-                <select id="timerTopic" required></select>
-              </label>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="timerSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="timerTopic"></select>
+                </label>
+              </div>
               <div class="split-inputs">
                 <label>
                   Foco
@@ -427,10 +519,16 @@
                   <h3>Registro manual</h3>
                 </div>
               </div>
-              <label>
-                Assunto
-                <select id="studyTopic" required></select>
-              </label>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="studySubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="studyTopic"></select>
+                </label>
+              </div>
               <div class="split-inputs">
                 <label>
                   Minutos
@@ -631,18 +729,63 @@
                   <h3>Cadastrar flashcard</h3>
                 </div>
               </div>
-              <label>
-                Assunto
-                <select id="flashcardTopic" required></select>
-              </label>
-              <label>
-                Frente
-                <textarea id="flashcardFront" rows="4" placeholder="Pergunta, conceito ou enunciado" required></textarea>
-              </label>
-              <label>
-                Verso
-                <textarea id="flashcardBack" rows="5" placeholder="Resposta, regra, exceção ou observação" required></textarea>
-              </label>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="flashcardSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="flashcardTopic"></select>
+                </label>
+              </div>
+              <div class="editor-field">
+                <span class="field-title">Frente</span>
+                <div class="rich-editor-toolbar" data-editor="#flashcardFrontEditor" aria-label="Editor da frente do flashcard">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="flashcardFrontColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#flashcardFrontColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="flashcardFrontEditor" class="note-editor rich-text-editor compact-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Pergunta, conceito ou enunciado"></div>
+              </div>
+              <div class="editor-field">
+                <span class="field-title">Verso</span>
+                <div class="rich-editor-toolbar" data-editor="#flashcardBackEditor" aria-label="Editor do verso do flashcard">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="flashcardBackColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#flashcardBackColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="flashcardBackEditor" class="note-editor rich-text-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Resposta, regra, exceção ou observação"></div>
+              </div>
               <label>
                 Prioridade
                 <select id="flashcardPriority">
@@ -659,7 +802,10 @@
                   <option value="easy">Fácil</option>
                 </select>
               </label>
-              <button class="button primary" type="submit">Salvar flashcard</button>
+              <div class="inline-actions">
+                <button class="button primary" id="flashcardSubmitBtn" type="submit">Salvar flashcard</button>
+                <button class="button ghost hidden" id="flashcardCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
             </form>
 
             <section class="panel flashcard-review-panel">

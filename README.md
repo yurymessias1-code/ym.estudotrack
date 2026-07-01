@@ -7,10 +7,12 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
-- Pomodoro com registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
+- editor simples em jurisprudências e flashcards, com negrito, itálico, sublinhado, cores, marca-texto, alinhamento e parágrafos;
+- edição e exclusão individual de julgados e flashcards cadastrados;
+- leis e tabelas de apoio cadastradas pelo usuário na aba Jurisprudências;
+- Pomodoro por matéria, com assunto opcional, registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
 - player de foco por link do YouTube ou Spotify;
-- flashcards com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
-- exclusão individual de flashcards;
+- flashcards por matéria ou por assunto, com revisão por dificuldade, acertos, erros, repetição por contagem de cartões, sorteio aleatório de pendentes e filtro por matéria/assunto;
 - anotações em layout de caderno, com marca-texto, categorias e fonte externa vinculada;
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador, com entrada por nome e PIN sem lista pública de perfis;
@@ -74,6 +76,7 @@ Durante o descanso, o círculo do temporizador mostra uma animação.
 
 Por padrão, o app usa 25 minutos de foco, 5 minutos de pausa curta e 30 minutos de descanso longo a cada 120 minutos ou rodada configurada.
 Na própria aba **Pomodoro**, o usuário pode alterar foco, pausa curta, descanso longo, intervalo do descanso longo e ciclos por rodada.
+Para iniciar ou registrar tempo manualmente, basta escolher a matéria; o assunto específico continua disponível, mas é opcional.
 O botão **Pular etapa** permite avançar manualmente do foco para o descanso ou do descanso para o próximo foco.
 
 ## Reset de estatísticas
@@ -98,6 +101,12 @@ Na mesma aba é possível cadastrar objetivos, como data de prova, revisão fina
 A aba **Jurisprudências** separa julgados de STJ e STF.
 Os julgados cadastrados pelo usuário podem ser pesquisados por texto livre, matéria e assunto vinculado.
 O filtro funciona sobre título, tema, tese/resumo, fonte, matéria e assunto.
+Cada julgado pode receber hashtags, como `#tema1199` ou `#improbidade`, e essas tags também entram na pesquisa.
+Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores, marca-texto, alinhamento e parágrafos.
+Ao cadastrar jurisprudência, lei ou tabela, é possível escolher apenas a matéria e deixar o assunto em branco.
+Na mesma aba, o usuário também pode cadastrar leis e tabelas de apoio, vinculando cada item a uma matéria/assunto quando quiser.
+Esses materiais entram na mesma busca por texto, matéria e assunto e podem ser excluídos individualmente.
+Para tabelas, cada linha pode usar colunas separadas por `|`, `;` ou tabulação.
 
 ## Flashcards por dificuldade
 
@@ -117,6 +126,8 @@ Na mesma aba, o painel **Escolher revisão** permite estudar:
 
 Também é possível escolher entre **Sortear pendentes** e **Fila por vencimento**.
 Mesmo no modo aleatório, o app só sorteia cartões que já estão pendentes conforme a regra de repetição da dificuldade.
+Ao cadastrar flashcards, a matéria é obrigatória e o assunto é opcional.
+Cada flashcard pode ser editado individualmente, com frente e verso em texto formatado por cores, marca-texto, alinhamento e parágrafos.
 
 ## Anotações e fontes
 

@@ -7,11 +7,11 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
-- editor simples em jurisprudências e flashcards, com negrito, itálico, sublinhado, cores, marca-texto, alinhamento e parágrafos;
+- editor avançado em jurisprudências, leis e tabelas, com negrito, itálico, sublinhado, cores rápidas, marca-texto, alinhamento, parágrafos, tabelas editáveis e imagens;
 - edição e exclusão individual de julgados e flashcards cadastrados;
 - leis e tabelas de apoio cadastradas pelo usuário na aba Jurisprudências;
 - colagem de tabelas vindas do Word, Excel ou editores de texto, com cópia para colar de volta no Word e exportação CSV;
-- editor de documento oficial em leis e tabelas, com negrito, itálico, sublinhado, alinhamento, tabelas editáveis e cores pré-fixadas;
+- editor de documento oficial em leis, tabelas e jurisprudências, com negrito, itálico, sublinhado, alinhamento, tabelas editáveis e cores pré-fixadas;
 - busca própria em leis, tabelas e imagens por texto, matéria e assunto;
 - cadastro de imagens/fotos em Jurisprudências, com cópia e download;
 - Pomodoro por matéria, com assunto opcional, registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
@@ -107,11 +107,11 @@ A aba **Jurisprudências** separa julgados de STJ e STF.
 Os julgados cadastrados pelo usuário podem ser pesquisados por texto livre, matéria e assunto vinculado.
 O filtro funciona sobre título, tema, tese/resumo, fonte, matéria e assunto.
 Cada julgado pode receber hashtags, como `#tema1199` ou `#improbidade`, e essas tags também entram na pesquisa.
-Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores, marca-texto, alinhamento e parágrafos.
+Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores rápidas, marca-texto, alinhamento, parágrafos, tabelas coladas do Word/Excel e imagens.
 Ao cadastrar jurisprudência, lei ou tabela, é possível escolher apenas a matéria e deixar o assunto em branco.
 Na mesma aba, o usuário também pode cadastrar leis, tabelas de apoio e imagens/fotos, vinculando cada item a uma matéria/assunto quando quiser.
 Esses materiais possuem busca própria por texto, matéria e assunto e podem ser excluídos individualmente.
-O editor de leis e tabelas permite preservar e ajustar formatação de documento oficial, com negrito, itálico, sublinhado, alinhamento, parágrafos, tabelas editáveis e cores rápidas: vermelho, verde, amarelo, azul e cor original.
+O editor de leis, tabelas e jurisprudências permite preservar e ajustar formatação de documento oficial, com negrito, itálico, sublinhado, alinhamento, parágrafos, tabelas editáveis e cores rápidas: vermelho, verde, amarelo, azul e cor original.
 Para tabelas, cada linha pode usar colunas separadas por `|`, `;` ou tabulação.
 Também é possível colar tabela diretamente do Word, Excel ou editor de texto; o app mantém a tabela editável quando o navegador entrega HTML da tabela.
 Cada tabela salva possui botões para copiar como tabela compatível com Word, copiar como texto e baixar em CSV.

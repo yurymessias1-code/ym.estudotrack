@@ -317,9 +317,15 @@
                   <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
                   <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
                   <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
-                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
-                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
-                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <button class="mini-button text-red" data-rich-preset-color="red" type="button">Vermelho</button>
+                  <button class="mini-button text-green" data-rich-preset-color="green" type="button">Verde</button>
+                  <button class="mini-button text-yellow" data-rich-preset-color="yellow" type="button">Amarelo</button>
+                  <button class="mini-button text-blue" data-rich-preset-color="blue" type="button">Azul</button>
+                  <button class="mini-button" data-rich-preset-color="original" type="button">Cor original</button>
+                  <button class="mini-button marker-red" data-rich-highlight="red" type="button">Fundo vermelho</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Fundo amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Fundo verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Fundo azul</button>
                   <label class="color-control">
                     Cor
                     <input id="caseTextColor" type="color" value="#0f172a" />
@@ -327,7 +333,7 @@
                   <button class="mini-button" data-rich-color="#caseTextColor" type="button">Aplicar cor</button>
                   <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
                 </div>
-                <div id="caseSummaryEditor" class="note-editor rich-text-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Escreva a tese, resumo ou ementa"></div>
+                <div id="caseSummaryEditor" class="note-editor rich-text-editor official-document-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Escreva a tese, resumo ou ementa. Cole tabelas do Word/Excel, imagens e edite como documento oficial."></div>
               </div>
               <label>
                 Hashtags

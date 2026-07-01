@@ -2265,6 +2265,11 @@ function applyRichEditorPresetColor(control) {
   document.execCommand("foreColor", false, colors[control.dataset.richPresetColor] || colors.original);
 }
 
+function isSafeImageSource(value) {
+  const source = String(value || "").trim();
+  return /^data:image\/(png|jpe?g|gif|webp|bmp);base64,[a-z0-9+/=]+$/i.test(source) || Boolean(getSafeExternalUrl(source));
+}
+
 function applyHighlightToEditor(editorSelector, kind, colorSelector) {
   const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
   const editor = $(editorSelector);
@@ -2286,7 +2291,15 @@ function sanitizeNoteHTML(html) {
     Array.from(element.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       if (name.startsWith("on")) element.removeAttribute(attribute.name);
-      if (name === "href" || name === "src") element.removeAttribute(attribute.name);
+      if (name === "href" || name === "srcset" || name === "formaction") element.removeAttribute(attribute.name);
+      if (name === "src") {
+        const tagName = element.tagName.toLowerCase();
+        if (tagName === "img" && isSafeImageSource(attribute.value)) {
+          element.setAttribute(attribute.name, attribute.value.trim());
+        } else {
+          element.removeAttribute(attribute.name);
+        }
+      }
       if (name === "style") {
         const safeStyle = attribute.value
           .split(";")
@@ -2336,9 +2349,9 @@ function caseMatchesFilters(item) {
   const topic = getTopic(item.topicId);
   const subjectId = getEntrySubjectId(item);
   const subject = getSubject(subjectId);
-  const subjectFilter = state.ui.legalMaterialSubjectFilter || "";
-  const topicFilter = state.ui.legalMaterialTopicFilter || "";
-  const search = normalizeSearchText(state.ui.legalMaterialSearch);
+  const subjectFilter = state.ui.caseSubjectFilter || "";
+  const topicFilter = state.ui.caseTopicFilter || "";
+  const search = normalizeSearchText(state.ui.caseSearch);
 
   if (subjectFilter && subjectId !== subjectFilter) return false;
   if (topicFilter && item.topicId !== topicFilter) return false;
@@ -2657,16 +2670,26 @@ function insertTextIntoTextarea(textarea, text) {
   textarea.selectionEnd = nextPosition;
 }
 
-async function handleLegalMaterialContentPaste(event) {
+async function handleRichDocumentPaste(event, options = {}) {
   const clipboard = event.clipboardData;
   if (!clipboard) return;
-  const editor = $("#legalMaterialContentEditor");
+  const editor = $(options.editorSelector);
   const imageItem = Array.from(clipboard.items || []).find((item) => item.kind === "file" && item.type.startsWith("image/"));
   if (imageItem) {
     const file = imageItem.getAsFile();
     if (!file) return;
     event.preventDefault();
-    await setLegalMaterialImageFromFile(file);
+    if (options.legalMaterialMode) {
+      await setLegalMaterialImageFromFile(file);
+      return;
+    }
+    try {
+      const dataUrl = await readImageFileAsDataURL(file);
+      insertHTMLIntoEditor(editor, `<img src="${escapeHTML(dataUrl)}" alt="${escapeHTML(file.name || "Imagem")}" />`);
+      showToast("Imagem colada no documento.");
+    } catch (error) {
+      showToast(error.message || "Não foi possível colar a imagem.");
+    }
     return;
   }
 
@@ -2674,9 +2697,9 @@ async function handleLegalMaterialContentPaste(event) {
   const tableHTML = extractTablesHTML(html);
   if (tableHTML) {
     event.preventDefault();
-    $("#legalMaterialType").value = "table";
+    if (options.legalMaterialMode) $("#legalMaterialType").value = "table";
     insertHTMLIntoEditor(editor, tableHTML);
-    showToast("Tabela colada como documento editável.");
+    showToast(options.legalMaterialMode ? "Tabela colada como documento editável." : "Tabela colada na jurisprudência.");
     return;
   }
 
@@ -2684,10 +2707,18 @@ async function handleLegalMaterialContentPaste(event) {
   const plainTableHTML = plainTextTableToHTML(plainText);
   if (plainTableHTML) {
     event.preventDefault();
-    $("#legalMaterialType").value = "table";
+    if (options.legalMaterialMode) $("#legalMaterialType").value = "table";
     insertHTMLIntoEditor(editor, plainTableHTML);
-    showToast("Tabela em texto convertida para tabela editável.");
+    showToast(options.legalMaterialMode ? "Tabela em texto convertida para tabela editável." : "Tabela em texto convertida na jurisprudência.");
   }
+}
+
+async function handleLegalMaterialContentPaste(event) {
+  await handleRichDocumentPaste(event, { editorSelector: "#legalMaterialContentEditor", legalMaterialMode: true });
+}
+
+async function handleCaseSummaryPaste(event) {
+  await handleRichDocumentPaste(event, { editorSelector: "#caseSummaryEditor" });
 }
 
 async function writeClipboardWithHTML(html, text) {
@@ -2790,9 +2821,9 @@ function legalMaterialMatchesFilters(item) {
   const topic = getTopic(item.topicId);
   const subjectId = getEntrySubjectId(item);
   const subject = getSubject(subjectId);
-  const subjectFilter = state.ui.caseSubjectFilter || "";
-  const topicFilter = state.ui.caseTopicFilter || "";
-  const search = normalizeSearchText(state.ui.caseSearch);
+  const subjectFilter = state.ui.legalMaterialSubjectFilter || "";
+  const topicFilter = state.ui.legalMaterialTopicFilter || "";
+  const search = normalizeSearchText(state.ui.legalMaterialSearch);
 
   if (subjectFilter && subjectId !== subjectFilter) return false;
   if (topicFilter && item.topicId !== topicFilter) return false;
@@ -3830,6 +3861,10 @@ function attachEvents() {
 
   $("#legalMaterialContentEditor").addEventListener("paste", (event) => {
     handleLegalMaterialContentPaste(event);
+  });
+
+  $("#caseSummaryEditor").addEventListener("paste", (event) => {
+    handleCaseSummaryPaste(event);
   });
 
   $("#timerSettingsForm").addEventListener("submit", (event) => {

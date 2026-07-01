@@ -1277,6 +1277,7 @@ td {
 .rich-card-content {
   color: #263341;
   line-height: 1.58;
+  overflow-x: auto;
   overflow-wrap: anywhere;
 }
 
@@ -1289,8 +1290,34 @@ td {
   margin-bottom: 0;
 }
 
+.rich-card-content table {
+  min-width: min(100%, 420px);
+  max-width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.rich-card-content th,
+.rich-card-content td {
+  min-width: 90px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.rich-card-content img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 8px 0;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
 .case-content {
   padding: 10px 0 2px;
+  overflow-x: auto;
 }
 
 .case-tags {
@@ -1674,6 +1701,19 @@ td {
 }
 
 .theme-dark .legal-material-table {
+  background: #111820;
+}
+
+.theme-dark .rich-card-content table {
+  background: #111820;
+}
+
+.theme-dark .rich-card-content th,
+.theme-dark .rich-card-content td {
+  border-color: var(--line);
+}
+
+.theme-dark .rich-card-content img {
   background: #111820;
 }
 

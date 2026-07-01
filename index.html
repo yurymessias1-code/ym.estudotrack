@@ -411,10 +411,32 @@
                   Referência
                   <input id="legalMaterialReference" type="text" placeholder="Ex.: art. 37 ou quadro de prazos" />
                 </label>
-                <label>
-                  Texto ou tabela
-                  <textarea id="legalMaterialContent" rows="7" placeholder="Cole texto, tabela do Word/Excel ou use linhas assim: Coluna 1 | Coluna 2&#10;Item A | Item B"></textarea>
-                </label>
+                <div class="editor-field">
+                  <span class="field-title">Documento oficial, texto ou tabela</span>
+                  <div class="rich-editor-toolbar" data-editor="#legalMaterialContentEditor" aria-label="Editor de leis e tabelas">
+                    <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                    <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                    <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                    <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                    <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                    <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                    <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                    <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                    <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                    <button class="mini-button text-red" data-rich-preset-color="red" type="button">Vermelho</button>
+                    <button class="mini-button text-green" data-rich-preset-color="green" type="button">Verde</button>
+                    <button class="mini-button text-yellow" data-rich-preset-color="yellow" type="button">Amarelo</button>
+                    <button class="mini-button text-blue" data-rich-preset-color="blue" type="button">Azul</button>
+                    <button class="mini-button" data-rich-preset-color="original" type="button">Cor original</button>
+                    <button class="mini-button marker-red" data-rich-highlight="red" type="button">Fundo vermelho</button>
+                    <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Fundo amarelo</button>
+                    <button class="mini-button marker-green" data-rich-highlight="green" type="button">Fundo verde</button>
+                    <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Fundo azul</button>
+                    <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                  </div>
+                  <div id="legalMaterialContentEditor" class="note-editor rich-text-editor official-document-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Cole aqui o documento oficial, tabela do Word/Excel ou texto da lei. Depois edite cores, negrito, itálico e células da tabela."></div>
+                  <textarea id="legalMaterialContent" class="hidden" rows="1"></textarea>
+                </div>
                 <label>
                   Foto ou imagem
                   <input id="legalMaterialImage" type="file" accept="image/*" />
@@ -428,6 +450,26 @@
               </form>
 
               <section class="legal-material-results" aria-label="Leis e tabelas salvas">
+                <form class="case-filter-form" id="legalMaterialFilterForm">
+                  <label>
+                    Buscar em leis e tabelas
+                    <input id="legalMaterialSearch" type="search" placeholder="Texto, referência, matéria, assunto ou título" />
+                  </label>
+                  <div class="split-inputs">
+                    <label>
+                      Matéria
+                      <select id="legalMaterialSubjectFilter"></select>
+                    </label>
+                    <label>
+                      Assunto
+                      <select id="legalMaterialTopicFilter"></select>
+                    </label>
+                  </div>
+                  <div class="filter-footer">
+                    <span id="legalMaterialFilterSummary">Todos os materiais cadastrados.</span>
+                    <button class="button ghost" id="clearLegalMaterialFiltersBtn" type="button">Limpar filtros</button>
+                  </div>
+                </form>
                 <div class="legal-material-list" id="legalMaterialList"></div>
               </section>
             </div>
@@ -1154,6 +1196,10 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <button id="scrollTopBtn" class="scroll-top-button" type="button" aria-label="Voltar ao topo da página" title="Voltar ao topo">
+      <span aria-hidden="true">↑</span>
+      <span>Topo</span>
+    </button>
 
     <script src="app.js"></script>
   </body>

@@ -245,14 +245,16 @@ function normalizeSource(source = {}) {
 function normalizeLegalMaterial(item = {}) {
   const validTypes = ["law", "table", "image"];
   const title = typeof item.title === "string" ? item.title.trim() : "";
+  const type = validTypes.includes(item.type) ? item.type : "law";
+  const rawContent = typeof item.content === "string" ? item.content.trim() : "";
   return {
     id: item.id || uid(),
-    type: validTypes.includes(item.type) ? item.type : "law",
+    type,
     subjectId: typeof item.subjectId === "string" ? item.subjectId : "",
     topicId: typeof item.topicId === "string" ? item.topicId : "",
     title: title || "Material sem título",
     reference: typeof item.reference === "string" ? item.reference.trim() : "",
-    content: typeof item.content === "string" ? item.content.trim() : "",
+    content: type === "image" ? rawContent : type === "table" && !looksLikeHTML(rawContent) ? rawContent : normalizeRichText(rawContent),
     source: typeof item.source === "string" ? item.source.trim() : "",
     createdAt: item.createdAt || todayISO(),
     updatedAt: item.updatedAt || new Date().toISOString(),
@@ -308,6 +310,9 @@ function normalizeState(candidate, fallbackProfileId = "") {
         caseSearch: typeof candidate.ui?.caseSearch === "string" ? candidate.ui.caseSearch : "",
         caseSubjectFilter: typeof candidate.ui?.caseSubjectFilter === "string" ? candidate.ui.caseSubjectFilter : "",
         caseTopicFilter: typeof candidate.ui?.caseTopicFilter === "string" ? candidate.ui.caseTopicFilter : "",
+        legalMaterialSearch: typeof candidate.ui?.legalMaterialSearch === "string" ? candidate.ui.legalMaterialSearch : "",
+        legalMaterialSubjectFilter: typeof candidate.ui?.legalMaterialSubjectFilter === "string" ? candidate.ui.legalMaterialSubjectFilter : "",
+        legalMaterialTopicFilter: typeof candidate.ui?.legalMaterialTopicFilter === "string" ? candidate.ui.legalMaterialTopicFilter : "",
         reportRange: candidate.ui?.reportRange || "day",
       controlRange: candidate.ui?.controlRange || "week",
       controlDayDate: candidate.ui?.controlDayDate || todayISO(),
@@ -358,6 +363,9 @@ function createEmptyState(profile = {}) {
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
+        legalMaterialSearch: "",
+        legalMaterialSubjectFilter: "",
+        legalMaterialTopicFilter: "",
         reportRange: "day",
       controlRange: "week",
       controlDayDate: todayISO(),
@@ -486,6 +494,9 @@ function createSeedState() {
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
+        legalMaterialSearch: "",
+        legalMaterialSubjectFilter: "",
+        legalMaterialTopicFilter: "",
         reportRange: "day",
       controlRange: "week",
       activeFlashcardId: "",
@@ -641,6 +652,15 @@ function showToast(message) {
   showToast.timeout = window.setTimeout(() => toast.classList.remove("show"), 2600);
 }
 
+function updateScrollTopButton() {
+  $("#scrollTopBtn")?.classList.toggle("visible", window.scrollY > 420);
+}
+
+function scrollToPageTop() {
+  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
+}
+
 function populateTopicSelect(select, { includeEmpty = false, subjectId = "", emptyLabel = "Sem vínculo" } = {}) {
   if (!select) return;
   const current = select.value;
@@ -735,6 +755,39 @@ function populateCaseFilterSelectors() {
   topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
   subjectSelect.value = state.ui.caseSubjectFilter || "";
   topicSelect.value = state.ui.caseTopicFilter || "";
+  subjectSelect.disabled = state.subjects.length === 0;
+  topicSelect.disabled = state.topics.length === 0;
+}
+
+function populateLegalMaterialFilterSelectors() {
+  const subjectSelect = $("#legalMaterialSubjectFilter");
+  const topicSelect = $("#legalMaterialTopicFilter");
+  const searchInput = $("#legalMaterialSearch");
+  if (!subjectSelect || !topicSelect || !searchInput) return;
+
+  if (!state.subjects.some((subject) => subject.id === state.ui.legalMaterialSubjectFilter)) state.ui.legalMaterialSubjectFilter = "";
+  if (!state.topics.some((topic) => topic.id === state.ui.legalMaterialTopicFilter)) state.ui.legalMaterialTopicFilter = "";
+  const selectedTopic = getTopic(state.ui.legalMaterialTopicFilter);
+  if (state.ui.legalMaterialSubjectFilter && selectedTopic && selectedTopic.subjectId !== state.ui.legalMaterialSubjectFilter) {
+    state.ui.legalMaterialTopicFilter = "";
+  }
+
+  const subjectOptions = state.subjects
+    .map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`)
+    .join("");
+  const topicOptions = state.topics
+    .filter((topic) => !state.ui.legalMaterialSubjectFilter || topic.subjectId === state.ui.legalMaterialSubjectFilter)
+    .map((topic) => {
+      const subject = getSubject(topic.subjectId);
+      return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
+    })
+    .join("");
+
+  if (document.activeElement !== searchInput) searchInput.value = state.ui.legalMaterialSearch || "";
+  subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
+  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
+  subjectSelect.value = state.ui.legalMaterialSubjectFilter || "";
+  topicSelect.value = state.ui.legalMaterialTopicFilter || "";
   subjectSelect.disabled = state.subjects.length === 0;
   topicSelect.disabled = state.topics.length === 0;
 }
@@ -2188,7 +2241,7 @@ function applyRichEditorCommand(control) {
 function applyRichEditorHighlight(control) {
   const editor = getRichEditorFromControl(control);
   if (!editor) return;
-  const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
+  const colors = { red: "#fecaca", yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
   document.execCommand("backColor", false, colors[control.dataset.richHighlight] || colors.yellow);
 }
 
@@ -2197,6 +2250,19 @@ function applyRichEditorColor(control) {
   if (!editor) return;
   const color = $(control.dataset.richColor)?.value || "#0f172a";
   document.execCommand("foreColor", false, color);
+}
+
+function applyRichEditorPresetColor(control) {
+  const editor = getRichEditorFromControl(control);
+  if (!editor) return;
+  const colors = {
+    red: "#dc2626",
+    green: "#15803d",
+    yellow: "#ca8a04",
+    blue: "#2563eb",
+    original: "#263341",
+  };
+  document.execCommand("foreColor", false, colors[control.dataset.richPresetColor] || colors.original);
 }
 
 function applyHighlightToEditor(editorSelector, kind, colorSelector) {
@@ -2225,7 +2291,7 @@ function sanitizeNoteHTML(html) {
         const safeStyle = attribute.value
           .split(";")
           .map((part) => part.trim())
-          .filter((part) => /^(background|background-color|color|font-weight|font-style|text-decoration|text-align|line-height|margin-top|margin-bottom)\s*:/i.test(part))
+          .filter((part) => /^(background|background-color|border|border-color|border-collapse|border-spacing|border-style|border-width|color|font-family|font-size|font-weight|font-style|height|line-height|margin|margin-top|margin-right|margin-bottom|margin-left|padding|padding-top|padding-right|padding-bottom|padding-left|text-decoration|text-align|text-indent|vertical-align|width)\s*:/i.test(part))
           .join("; ");
         if (safeStyle) {
           element.setAttribute("style", safeStyle);
@@ -2270,9 +2336,9 @@ function caseMatchesFilters(item) {
   const topic = getTopic(item.topicId);
   const subjectId = getEntrySubjectId(item);
   const subject = getSubject(subjectId);
-  const subjectFilter = state.ui.caseSubjectFilter || "";
-  const topicFilter = state.ui.caseTopicFilter || "";
-  const search = normalizeSearchText(state.ui.caseSearch);
+  const subjectFilter = state.ui.legalMaterialSubjectFilter || "";
+  const topicFilter = state.ui.legalMaterialTopicFilter || "";
+  const search = normalizeSearchText(state.ui.legalMaterialSearch);
 
   if (subjectFilter && subjectId !== subjectFilter) return false;
   if (topicFilter && item.topicId !== topicFilter) return false;
@@ -2385,7 +2451,17 @@ function slugifyFileName(value, fallback = "material") {
 }
 
 function parseLegalMaterialTable(content) {
-  return String(content || "")
+  const raw = String(content || "");
+  if (looksLikeHTML(raw)) {
+    const documentHTML = new DOMParser().parseFromString(raw, "text/html");
+    const table = documentHTML.querySelector("table");
+    if (table) {
+      return Array.from(table.rows)
+        .map((row) => Array.from(row.cells).map((cell) => cell.textContent.replace(/\s+/g, " ").trim()))
+        .filter((row) => row.some(Boolean));
+    }
+  }
+  return raw
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
@@ -2400,6 +2476,13 @@ function legalMaterialTableToPlainText(content) {
 }
 
 function legalMaterialTableToHTML(item) {
+  if (looksLikeHTML(item.content)) {
+    const documentHTML = new DOMParser().parseFromString(item.content, "text/html");
+    const tables = Array.from(documentHTML.querySelectorAll("table"));
+    if (tables.length) {
+      return sanitizeNoteHTML(tables.map((table) => table.outerHTML).join(""));
+    }
+  }
   const rows = parseLegalMaterialTable(item.content);
   if (!rows.length) return `<p>${escapeHTML(item.content || "")}</p>`;
   const [header, ...body] = rows;
@@ -2441,6 +2524,39 @@ function htmlTableToPlainText(html) {
     )
     .filter(Boolean)
     .join("\n");
+}
+
+function extractTablesHTML(html) {
+  const documentHTML = new DOMParser().parseFromString(String(html || ""), "text/html");
+  const tables = Array.from(documentHTML.querySelectorAll("table"));
+  return tables.length ? sanitizeNoteHTML(tables.map((table) => table.outerHTML).join("")) : "";
+}
+
+function plainTextTableToHTML(text) {
+  const rows = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(splitLegalMaterialRow)
+    .filter((row) => row.length > 1);
+  if (!rows.length) return "";
+  const [header, ...body] = rows;
+  return `
+    <table>
+      <thead>
+        <tr>${header.map((cell) => `<th>${escapeHTML(cell)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${body.map((row) => `<tr>${header.map((_, index) => `<td>${escapeHTML(row[index] || "")}</td>`).join("")}</tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function insertHTMLIntoEditor(editor, html) {
+  if (!editor) return;
+  editor.focus();
+  document.execCommand("insertHTML", false, html);
 }
 
 function getLegalMaterial(id) {
@@ -2495,10 +2611,41 @@ async function setLegalMaterialImageFromFile(file) {
       $("#legalMaterialTitle").value = file.name?.replace(/\.[^.]+$/, "") || "Imagem";
     }
     $("#legalMaterialContent").value = dataUrl;
+    $("#legalMaterialContentEditor").innerHTML = `<img src="${dataUrl}" alt="${escapeHTML(file.name || "Imagem")}" />`;
     showToast("Imagem carregada. Salve o material para guardar.");
   } catch (error) {
     showToast(error.message || "Não foi possível carregar a imagem.");
   }
+}
+
+function legalMaterialContentForEditor(content, type) {
+  const raw = String(content || "").trim();
+  if (!raw) return "";
+  if (type === "image") {
+    const src = getLegalImageSource({ content: raw });
+    return src ? `<img src="${escapeHTML(src)}" alt="Imagem" />` : "";
+  }
+  if (type === "table") {
+    return looksLikeHTML(raw) ? sanitizeNoteHTML(raw) : legalMaterialTableToHTML({ content: raw });
+  }
+  return renderRichText(raw);
+}
+
+function getLegalMaterialFormContent(type) {
+  const editor = $("#legalMaterialContentEditor");
+  if (type === "image") {
+    const imageSource = editor?.querySelector("img")?.getAttribute("src") || $("#legalMaterialContent").value.trim();
+    return imageSource.trim();
+  }
+  const html = sanitizeNoteHTML(editor?.innerHTML.trim() || "");
+  $("#legalMaterialContent").value = html;
+  return html;
+}
+
+function resetLegalMaterialForm() {
+  $("#legalMaterialForm").reset();
+  $("#legalMaterialContent").value = "";
+  $("#legalMaterialContentEditor").innerHTML = "";
 }
 
 function insertTextIntoTextarea(textarea, text) {
@@ -2513,6 +2660,7 @@ function insertTextIntoTextarea(textarea, text) {
 async function handleLegalMaterialContentPaste(event) {
   const clipboard = event.clipboardData;
   if (!clipboard) return;
+  const editor = $("#legalMaterialContentEditor");
   const imageItem = Array.from(clipboard.items || []).find((item) => item.kind === "file" && item.type.startsWith("image/"));
   if (imageItem) {
     const file = imageItem.getAsFile();
@@ -2523,19 +2671,22 @@ async function handleLegalMaterialContentPaste(event) {
   }
 
   const html = clipboard.getData("text/html");
-  const tableText = htmlTableToPlainText(html);
-  if (tableText) {
+  const tableHTML = extractTablesHTML(html);
+  if (tableHTML) {
     event.preventDefault();
     $("#legalMaterialType").value = "table";
-    insertTextIntoTextarea(event.target, tableText);
-    showToast("Tabela colada e preparada para salvar.");
+    insertHTMLIntoEditor(editor, tableHTML);
+    showToast("Tabela colada como documento editável.");
     return;
   }
 
   const plainText = clipboard.getData("text/plain");
-  const looksLikeTable = plainText.split(/\r?\n/).some((line) => line.split("\t").length > 1);
-  if (looksLikeTable) {
+  const plainTableHTML = plainTextTableToHTML(plainText);
+  if (plainTableHTML) {
+    event.preventDefault();
     $("#legalMaterialType").value = "table";
+    insertHTMLIntoEditor(editor, plainTableHTML);
+    showToast("Tabela em texto convertida para tabela editável.");
   }
 }
 
@@ -2590,8 +2741,8 @@ async function copyLegalMaterial(id, mode = "rich") {
       return;
     }
 
-    await navigator.clipboard.writeText(item.content || "");
-    showToast("Texto copiado.");
+    await writeClipboardWithHTML(renderRichText(item.content || ""), richTextToPlain(item.content || ""));
+    showToast("Documento copiado com formatação.");
   } catch {
     showToast("Não foi possível copiar. Selecione o conteúdo manualmente.");
   }
@@ -2631,7 +2782,7 @@ function downloadLegalMaterial(id) {
     return;
   }
 
-  downloadBlobFile(new Blob([item.content || ""], { type: "text/plain;charset=utf-8" }), `${baseName}.txt`);
+  downloadBlobFile(new Blob([richTextToPlain(item.content || "")], { type: "text/plain;charset=utf-8" }), `${baseName}.txt`);
   showToast("Texto exportado.");
 }
 
@@ -2652,7 +2803,7 @@ function legalMaterialMatchesFilters(item) {
       legalMaterialTypeLabel(item.type),
       item.title,
       item.reference,
-      item.type === "image" ? "" : item.content,
+      item.type === "image" ? "" : richTextToPlain(item.content),
       item.source,
       topic?.name,
       subject?.name,
@@ -2665,6 +2816,7 @@ function legalMaterialMatchesFilters(item) {
 function renderLegalMaterials() {
   const list = $("#legalMaterialList");
   if (!list) return;
+  populateLegalMaterialFilterSelectors();
 
   const allItems = Array.isArray(state.legalMaterials) ? [...state.legalMaterials] : [];
   const items = allItems
@@ -2673,12 +2825,14 @@ function renderLegalMaterials() {
   const summary = $("#legalMaterialSummary");
   if (summary) {
     const filters = [
-      state.ui.caseSearch ? "texto" : "",
-      state.ui.caseSubjectFilter ? "matéria" : "",
-      state.ui.caseTopicFilter ? "assunto" : "",
+      state.ui.legalMaterialSearch ? "texto" : "",
+      state.ui.legalMaterialSubjectFilter ? "matéria" : "",
+      state.ui.legalMaterialTopicFilter ? "assunto" : "",
     ].filter(Boolean);
     const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
     summary.textContent = `${items.length} de ${allItems.length} materiais${suffix}.`;
+    const filterSummary = $("#legalMaterialFilterSummary");
+    if (filterSummary) filterSummary.textContent = `${items.length} de ${allItems.length} leis, tabelas e imagens${suffix}.`;
   }
 
   list.innerHTML = items.length
@@ -2689,7 +2843,7 @@ function renderLegalMaterials() {
 function renderLegalMaterialCard(item) {
   const safeSource = getSafeExternalUrl(item.source);
   const topicLabel = getEntrySubjectId(item) || item.topicId ? getEntryScopeLabel(item) : "";
-  const copyLabel = item.type === "table" ? "Copiar tabela" : item.type === "image" ? "Copiar foto" : "Copiar texto";
+  const copyLabel = item.type === "table" ? "Copiar tabela" : item.type === "image" ? "Copiar foto" : "Copiar documento";
   const downloadLabel = item.type === "table" ? "Baixar CSV" : item.type === "image" ? "Baixar foto" : "Baixar TXT";
   return `
     <article class="legal-material-card">
@@ -2722,7 +2876,7 @@ function renderLegalMaterialBody(item) {
   if (!content) return `<p class="legal-material-content">Sem conteúdo registrado.</p>`;
   if (item.type === "table") return renderLegalMaterialTable(content);
   if (item.type === "image") return renderLegalMaterialImage(item);
-  return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
+  return `<div class="legal-material-content rich-card-content">${renderRichText(content)}</div>`;
 }
 
 function splitLegalMaterialRow(line) {
@@ -2733,7 +2887,7 @@ function splitLegalMaterialRow(line) {
 function renderLegalMaterialTable(content) {
   const rows = parseLegalMaterialTable(content);
 
-  if (!rows.length) return `<p class="legal-material-content">${escapeHTML(content)}</p>`;
+  if (!rows.length) return `<div class="legal-material-content rich-card-content">${renderRichText(content)}</div>`;
 
   return `
     <div class="legal-material-table">
@@ -3318,7 +3472,7 @@ function finishTimerManually() {
 
 function attachEvents() {
   document.addEventListener("mousedown", (event) => {
-    const editorButton = event.target.closest("[data-rich-command], [data-rich-highlight], [data-rich-color], [data-highlight], [data-source-highlight], [data-reader-highlight]");
+    const editorButton = event.target.closest("[data-rich-command], [data-rich-highlight], [data-rich-color], [data-rich-preset-color], [data-highlight], [data-source-highlight], [data-reader-highlight]");
     if (editorButton) event.preventDefault();
   });
 
@@ -3378,6 +3532,12 @@ function attachEvents() {
       return;
     }
 
+    const richPresetColor = event.target.closest("[data-rich-preset-color]");
+    if (richPresetColor) {
+      applyRichEditorPresetColor(richPresetColor);
+      return;
+    }
+
     const action = event.target.closest("[data-action]");
     if (action) handleAction(action);
   });
@@ -3388,6 +3548,9 @@ function attachEvents() {
   });
 
   $("#logoutProfileBtn").addEventListener("click", logoutProfile);
+  $("#scrollTopBtn").addEventListener("click", scrollToPageTop);
+  window.addEventListener("scroll", updateScrollTopButton, { passive: true });
+  updateScrollTopButton();
 
   $("#caseFilterForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3419,6 +3582,38 @@ function attachEvents() {
     state.ui.caseTopicFilter = "";
     saveState();
     renderCases();
+  });
+
+  $("#legalMaterialFilterForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    renderLegalMaterials();
+  });
+
+  $("#legalMaterialSearch").addEventListener("input", (event) => {
+    state.ui.legalMaterialSearch = event.target.value;
+    saveState();
+    renderLegalMaterials();
+  });
+
+  $("#legalMaterialSubjectFilter").addEventListener("change", (event) => {
+    state.ui.legalMaterialSubjectFilter = event.target.value;
+    state.ui.legalMaterialTopicFilter = "";
+    saveState();
+    renderLegalMaterials();
+  });
+
+  $("#legalMaterialTopicFilter").addEventListener("change", (event) => {
+    state.ui.legalMaterialTopicFilter = event.target.value;
+    saveState();
+    renderLegalMaterials();
+  });
+
+  $("#clearLegalMaterialFiltersBtn").addEventListener("click", () => {
+    state.ui.legalMaterialSearch = "";
+    state.ui.legalMaterialSubjectFilter = "";
+    state.ui.legalMaterialTopicFilter = "";
+    saveState();
+    renderLegalMaterials();
   });
 
   $("#caseCancelEditBtn").addEventListener("click", () => {
@@ -3607,21 +3802,22 @@ function attachEvents() {
   $("#legalMaterialForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const { subjectId, topicId } = resolveSubjectTopic("#legalMaterialSubject", "#legalMaterialTopic");
+    const materialType = $("#legalMaterialType").value;
     const material = normalizeLegalMaterial({
       id: uid(),
-      type: $("#legalMaterialType").value,
+      type: materialType,
       subjectId,
       topicId,
       title: $("#legalMaterialTitle").value,
       reference: $("#legalMaterialReference").value,
-      content: $("#legalMaterialContent").value,
+      content: getLegalMaterialFormContent(materialType),
       source: $("#legalMaterialSource").value,
       createdAt: todayISO(),
       updatedAt: new Date().toISOString(),
     });
     state.legalMaterials.push(material);
     saveState();
-    event.target.reset();
+    resetLegalMaterialForm();
     render();
     showToast(`${legalMaterialTypeLabel(material.type)} salva.`);
   });
@@ -3632,7 +3828,7 @@ function attachEvents() {
     event.target.value = "";
   });
 
-  $("#legalMaterialContent").addEventListener("paste", (event) => {
+  $("#legalMaterialContentEditor").addEventListener("paste", (event) => {
     handleLegalMaterialContentPaste(event);
   });
 

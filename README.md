@@ -11,6 +11,8 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - edição e exclusão individual de julgados e flashcards cadastrados;
 - leis e tabelas de apoio cadastradas pelo usuário na aba Jurisprudências;
 - colagem de tabelas vindas do Word, Excel ou editores de texto, com cópia para colar de volta no Word e exportação CSV;
+- editor de documento oficial em leis e tabelas, com negrito, itálico, sublinhado, alinhamento, tabelas editáveis e cores pré-fixadas;
+- busca própria em leis, tabelas e imagens por texto, matéria e assunto;
 - cadastro de imagens/fotos em Jurisprudências, com cópia e download;
 - Pomodoro por matéria, com assunto opcional, registro de tempo, lofi tic-tac opcional, alarme ao terminar cada etapa, botão para pular etapa e descanso longo configurável;
 - player de foco por link do YouTube ou Spotify;
@@ -19,6 +21,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador, com entrada por nome e PIN sem lista pública de perfis;
 - modo claro e modo escuro;
+- botão discreto para voltar ao topo da página após rolagem;
 - exportação, importação e backup dos dados em JSON.
 - reset global de estatísticas sem apagar cadastros, fontes e anotações.
 
@@ -107,9 +110,10 @@ Cada julgado pode receber hashtags, como `#tema1199` ou `#improbidade`, e essas 
 Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores, marca-texto, alinhamento e parágrafos.
 Ao cadastrar jurisprudência, lei ou tabela, é possível escolher apenas a matéria e deixar o assunto em branco.
 Na mesma aba, o usuário também pode cadastrar leis, tabelas de apoio e imagens/fotos, vinculando cada item a uma matéria/assunto quando quiser.
-Esses materiais entram na mesma busca por texto, matéria e assunto e podem ser excluídos individualmente.
+Esses materiais possuem busca própria por texto, matéria e assunto e podem ser excluídos individualmente.
+O editor de leis e tabelas permite preservar e ajustar formatação de documento oficial, com negrito, itálico, sublinhado, alinhamento, parágrafos, tabelas editáveis e cores rápidas: vermelho, verde, amarelo, azul e cor original.
 Para tabelas, cada linha pode usar colunas separadas por `|`, `;` ou tabulação.
-Também é possível colar tabela diretamente do Word, Excel ou editor de texto; o app converte para uma tabela interna.
+Também é possível colar tabela diretamente do Word, Excel ou editor de texto; o app mantém a tabela editável quando o navegador entrega HTML da tabela.
 Cada tabela salva possui botões para copiar como tabela compatível com Word, copiar como texto e baixar em CSV.
 Imagens/fotos podem ser escolhidas por arquivo ou coladas no campo do material, e depois copiadas ou baixadas pelo card.
 

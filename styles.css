@@ -106,6 +106,40 @@ button:disabled {
   min-width: 0;
 }
 
+.home-brand {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.home-brand:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.28);
+  outline-offset: 4px;
+}
+
+.brand-logo-full {
+  display: block;
+  width: min(100%, 210px);
+  height: auto;
+  max-height: 164px;
+  border-radius: var(--radius);
+  object-fit: contain;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.home-brand:hover .brand-logo-full,
+.home-brand:focus-visible .brand-logo-full {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.12);
+}
+
 .brand-mark {
   position: relative;
   display: grid;
@@ -1661,7 +1695,11 @@ td {
 }
 
 .theme-dark .profile-panel,
+.theme-dark .stat-card,
+.theme-dark .subject-card,
 .theme-dark .topic-item,
+.theme-dark .case-card,
+.theme-dark .performance-row,
 .theme-dark .control-row,
 .theme-dark .flashcard-review,
 .theme-dark .flashcard-library-card,
@@ -1674,19 +1712,55 @@ td {
   background: #131920;
 }
 
-.theme-dark .legal-material-content {
-  color: var(--ink);
-}
-
+.theme-dark .case-card p,
+.theme-dark .legal-material-content,
+.theme-dark .case-content,
+.theme-dark .note-content,
+.theme-dark .note-editor,
+.theme-dark .official-document-editor,
 .theme-dark .rich-card-content {
   color: var(--ink);
 }
 
-.theme-dark .rich-card-content [style*="color: #263341"],
-.theme-dark .rich-card-content [style*="color: rgb(38, 51, 65)"],
-.theme-dark .official-document-editor [style*="color: #263341"],
-.theme-dark .official-document-editor [style*="color: rgb(38, 51, 65)"] {
+.theme-dark input::placeholder,
+.theme-dark textarea::placeholder {
+  color: #7f8d99;
+}
+
+.theme-dark table {
+  color: var(--ink);
+}
+
+.theme-dark th {
+  color: var(--muted);
+}
+
+.theme-dark a,
+.theme-dark .case-card a,
+.theme-dark .legal-material-card a {
+  color: #93c5fd;
+}
+
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: #263341" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: rgb(38, 51, 65)" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: black" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: #000" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color:#000" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: rgb(0, 0, 0)" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: rgb(15, 23, 42)" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: #0f172a" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: #111827" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="color: #17202a" i] {
   color: var(--ink) !important;
+}
+
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background: white" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background-color: white" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background: #fff" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background-color: #fff" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background: rgb(255, 255, 255)" i],
+.theme-dark :is(.rich-card-content, .official-document-editor, .note-content, .note-editor, .legal-material-table) [style*="background-color: rgb(255, 255, 255)" i] {
+  background: transparent !important;
 }
 
 .theme-dark .color-control {

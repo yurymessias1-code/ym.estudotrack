@@ -638,10 +638,11 @@ function getRangeLabel(range) {
   return { day: "hoje", week: "na semana", month: "no mês", year: "no ano" }[range] || "no período";
 }
 
-function setView(view) {
+function setView(view, options = {}) {
   state.ui.view = view;
   saveState();
   render();
+  if (options.scrollTop) scrollToPageTop();
 }
 
 function showToast(message) {
@@ -2270,6 +2271,53 @@ function isSafeImageSource(value) {
   return /^data:image\/(png|jpe?g|gif|webp|bmp);base64,[a-z0-9+/=]+$/i.test(source) || Boolean(getSafeExternalUrl(source));
 }
 
+function cssColorToRGB(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s*!important\s*$/i, "");
+  if (normalized === "black") return { r: 0, g: 0, b: 0 };
+  if (normalized === "white") return { r: 255, g: 255, b: 255 };
+  const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const raw = hex[1].length === 3 ? hex[1].split("").map((char) => char + char).join("") : hex[1];
+    return {
+      r: Number.parseInt(raw.slice(0, 2), 16),
+      g: Number.parseInt(raw.slice(2, 4), 16),
+      b: Number.parseInt(raw.slice(4, 6), 16),
+    };
+  }
+  const rgb = normalized.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (rgb) {
+    return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) };
+  }
+  return null;
+}
+
+function isDarkInlineColor(value) {
+  const rgb = cssColorToRGB(value);
+  if (!rgb) return false;
+  return rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 92;
+}
+
+function isWhiteInlineBackground(value) {
+  const rgb = cssColorToRGB(value);
+  if (!rgb) return false;
+  return rgb.r > 244 && rgb.g > 244 && rgb.b > 244;
+}
+
+function normalizeSafeStylePart(part) {
+  const match = /^([a-z-]+)\s*:\s*(.+)$/i.exec(part);
+  if (!match) return "";
+  const property = match[1].toLowerCase();
+  const value = match[2].trim();
+  const allowed = /^(background|background-color|border|border-color|border-collapse|border-spacing|border-style|border-width|color|font-family|font-size|font-weight|font-style|height|line-height|margin|margin-top|margin-right|margin-bottom|margin-left|padding|padding-top|padding-right|padding-bottom|padding-left|text-decoration|text-align|text-indent|vertical-align|width)$/i;
+  if (!allowed.test(property)) return "";
+  if (property === "color" && isDarkInlineColor(value)) return "color: #263341";
+  if ((property === "background" || property === "background-color") && isWhiteInlineBackground(value)) return `${property}: transparent`;
+  return `${property}: ${value}`;
+}
+
 function applyHighlightToEditor(editorSelector, kind, colorSelector) {
   const colors = { yellow: "#fff59d", green: "#bbf7d0", blue: "#bfdbfe" };
   const editor = $(editorSelector);
@@ -2304,7 +2352,8 @@ function sanitizeNoteHTML(html) {
         const safeStyle = attribute.value
           .split(";")
           .map((part) => part.trim())
-          .filter((part) => /^(background|background-color|border|border-color|border-collapse|border-spacing|border-style|border-width|color|font-family|font-size|font-weight|font-style|height|line-height|margin|margin-top|margin-right|margin-bottom|margin-left|padding|padding-top|padding-right|padding-bottom|padding-left|text-decoration|text-align|text-indent|vertical-align|width)\s*:/i.test(part))
+          .map(normalizeSafeStylePart)
+          .filter(Boolean)
           .join("; ");
         if (safeStyle) {
           element.setAttribute("style", safeStyle);
@@ -3510,7 +3559,7 @@ function attachEvents() {
   document.addEventListener("click", (event) => {
     const viewButton = event.target.closest("[data-view]");
     if (viewButton) {
-      setView(viewButton.dataset.view);
+      setView(viewButton.dataset.view, { scrollTop: viewButton.dataset.scrollTop === "true" });
       return;
     }
 

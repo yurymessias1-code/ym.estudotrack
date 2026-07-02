@@ -4,6 +4,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 
 - matérias e assuntos;
 - controle de questões, acertos e erros;
+- logo "Estudos Track" aplicada no layout, clicável para voltar ao Painel, e configurada como ícone da aba do navegador;
 - controle por dia, semana, mês e ano com seleção de período específico;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
@@ -20,7 +21,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - anotações em layout de caderno, com marca-texto, categorias e fonte externa vinculada;
 - fontes/sites com texto hospedado no app, grifos salvos, sincronização por link quando permitida, limpeza de texto e edição/exclusão;
 - perfis locais separados por usuário no mesmo navegador, com entrada por nome e PIN sem lista pública de perfis;
-- modo claro e modo escuro;
+- modo claro e modo escuro, com reforço de legibilidade para textos colados, jurisprudências, tabelas e editores;
 - botão discreto para voltar ao topo da página após rolagem;
 - exportação, importação e backup dos dados em JSON.
 - reset global de estatísticas sem apagar cadastros, fontes e anotações.

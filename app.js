@@ -268,12 +268,10 @@ function normalizeLegalMaterial(item = {}) {
 function normalizeEditalItem(item = {}) {
   const subjectName = typeof item.subjectName === "string" ? item.subjectName.trim() : "";
   const topicName = typeof item.topicName === "string" ? item.topicName.trim() : "";
-  const priority = ["Alta", "Média", "Baixa"].includes(item.priority) ? item.priority : "Média";
   return {
     id: item.id || uid(),
     subjectName: subjectName || "Conhecimentos gerais",
     topicName: topicName || "Assunto não identificado",
-    priority,
     order: Number(item.order) || 0,
   };
 }
@@ -290,11 +288,14 @@ function normalizeEditalData(edital = {}) {
       : [];
   return {
     examName: typeof edital.examName === "string" ? edital.examName.trim() : "",
+    targetRole: typeof edital.targetRole === "string" ? edital.targetRole.trim() : "",
     examDate: typeof edital.examDate === "string" ? edital.examDate : "",
     weeklyHours: clamp(Number(edital.weeklyHours) || 15, 1, 80),
     sessionMinutes: clamp(Number(edital.sessionMinutes) || 50, 15, 240),
     rawText: rawPdfText ? "" : rawText,
     items,
+    ignoredCount: Number(edital.ignoredCount) || 0,
+    scopeNote: typeof edital.scopeNote === "string" ? edital.scopeNote : "",
     importedAt: edital.importedAt || "",
   };
 }
@@ -1524,6 +1525,125 @@ function looksLikeGarbledEditalLine(line) {
   return value.length > 18 && letters < 4 && symbols > 4;
 }
 
+function editalSearchText(value) {
+  return normalizeSearchText(value).replace(/\s+/g, " ").trim();
+}
+
+function editalKeywords(value) {
+  const stopWords = new Set([
+    "para",
+    "cargo",
+    "area",
+    "área",
+    "nivel",
+    "nível",
+    "classe",
+    "padrao",
+    "padrão",
+    "especialidade",
+    "do",
+    "da",
+    "de",
+    "dos",
+    "das",
+    "e",
+    "a",
+    "o",
+  ]);
+  return editalSearchText(value)
+    .split(" ")
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 3 && !stopWords.has(word));
+}
+
+function editalLineMatchesTarget(line, targetRole) {
+  const keywords = editalKeywords(targetRole);
+  if (!keywords.length) return false;
+  const normalizedLine = editalSearchText(line);
+  const normalizedTarget = editalSearchText(targetRole);
+  if (normalizedTarget && normalizedLine.includes(normalizedTarget)) return true;
+  const hits = keywords.filter((keyword) => normalizedLine.includes(keyword)).length;
+  return hits >= Math.max(1, Math.ceil(keywords.length * 0.55));
+}
+
+function isEditalContentStartLine(line) {
+  const normalized = editalSearchText(line);
+  return /(conteudo programatico|programa de prova|programa das provas|objetos de avaliacao|objetos de avaliação|conhecimentos basicos|conhecimentos especificos|conhecimentos gerais|disciplinas|materias cobradas|matérias cobradas)/i.test(normalized);
+}
+
+function isEditalRoleHeadingLine(line) {
+  const normalized = editalSearchText(line);
+  return /^(cargo|cargos|emprego|funcao|função|area|área|especialidade)\b/.test(normalized) || /\bcargo\s*:/.test(normalized);
+}
+
+function isEditalHardSectionEndLine(line) {
+  const normalized = editalSearchText(line);
+  return /(cronograma|inscricoes|inscrição|inscrições|isencao|isenção|taxa de inscricao|vagas|remuneracao|remuneração|requisitos|atribuicoes|atribuições|jornada|lotacao|lotação|prova objetiva|prova discursiva|avaliacao de titulos|avaliação de títulos|classificacao|classificação|recursos|resultado|convocacao|convocação|posse|matricula|matrícula|procedimentos|disposicoes finais|disposições finais|anexo\s+[ivxlcdm]+)$/i.test(normalized);
+}
+
+function isAdministrativeEditalLine(line) {
+  const normalized = editalSearchText(line);
+  if (!normalized) return true;
+  if (isEditalHardSectionEndLine(line)) return true;
+  return /(edital de abertura|concurso publico|concurso público|banca organizadora|organizadora|inscricao|inscrição|isencao|isenção|boleto|pagamento|taxa|salario|salário|remuneracao|remuneração|vencimento|vagas|cadastro reserva|requisito|escolaridade|jornada|carga horaria|carga horária|lotacao|lotação|atribuicao|atribuição|atribuicoes|atribuições|documentacao|documentação|recurso|resultado|gabarito|convocacao|convocação|posse|pericia|perícia|heteroidentificacao|heteroidentificação|deficiencia|deficiência|pessoa com deficiencia|prova objetiva|prova discursiva|prova pratica|prova prática|avaliacao de titulos|avaliação de títulos|data provavel|horario|horário|local de prova|cartao de confirmacao|cartão de confirmação|numero de questoes|número de questões|valor da questao|valor da questão|pontuacao|pontuação|eliminatorio|eliminatório|classificatorio|classificatório)/i.test(normalized);
+}
+
+function isProgrammaticTopicLine(line) {
+  const value = cleanEditalLine(line);
+  if (!value || value.length < 4) return false;
+  if (isEditalRoleHeadingLine(value)) return false;
+  if (looksLikeGarbledEditalLine(value) || isAdministrativeEditalLine(value)) return false;
+  const letters = value.replace(/[^A-Za-zÀ-ÿ]/g, "").length;
+  if (letters < 4) return false;
+  if (/^(conteúdo programático|conteudo programatico|programa|programa de prova|conhecimentos|conhecimentos básicos|conhecimentos basicos|conhecimentos específicos|conhecimentos especificos|matérias cobradas|materias cobradas)$/i.test(value)) return false;
+  if (/^\(?[a-e]\)?$/i.test(value)) return false;
+  return true;
+}
+
+function extractScopedEditalLines(rawText, targetRole) {
+  const lines = String(rawText || "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(cleanEditalLine)
+    .filter((line) => line.length > 2 && !looksLikeGarbledEditalLine(line));
+  const contentIndexes = lines.map((line, index) => (isEditalContentStartLine(line) ? index : -1)).filter((index) => index >= 0);
+  const targetIndexes = targetRole
+    ? lines.map((line, index) => (editalLineMatchesTarget(line, targetRole) ? index : -1)).filter((index) => index >= 0)
+    : [];
+  const blocks = [];
+  let scopeNote = "";
+
+  if (targetRole && targetIndexes.length) {
+    targetIndexes.forEach((targetIndex, targetOrder) => {
+      const nextTarget = targetIndexes[targetOrder + 1] || lines.length;
+      const nextRole = lines.findIndex((line, index) => index > targetIndex && index < nextTarget && isEditalRoleHeadingLine(line) && !editalLineMatchesTarget(line, targetRole));
+      const searchEnd = nextRole > -1 ? nextRole : Math.min(lines.length, targetIndex + 500);
+      const contentStart = contentIndexes.find((index) => index >= targetIndex && index < searchEnd);
+      const start = contentStart ?? targetIndex;
+      const endSection = lines.findIndex((line, index) => index > start && index < searchEnd && isEditalHardSectionEndLine(line));
+      blocks.push(...lines.slice(start, endSection > -1 ? endSection : searchEnd));
+    });
+    scopeNote = `Análise restrita ao cargo/área: ${targetRole}.`;
+  } else if (targetRole) {
+    scopeNote = `Cargo/área "${targetRole}" não foi localizado com segurança; análise restrita aos blocos de conteúdo programático encontrados.`;
+  }
+
+  if (!blocks.length && contentIndexes.length) {
+    contentIndexes.forEach((startIndex) => {
+      const endIndex = lines.findIndex((line, index) => index > startIndex && isEditalHardSectionEndLine(line));
+      blocks.push(...lines.slice(startIndex, endIndex > -1 ? endIndex : Math.min(lines.length, startIndex + 500)));
+    });
+    if (!scopeNote) scopeNote = "Análise restrita aos blocos de conteúdo programático/conhecimentos encontrados.";
+  }
+
+  if (!blocks.length) {
+    blocks.push(...lines);
+    if (!scopeNote) scopeNote = "Não encontrei um bloco de conteúdo programático claro; usei apenas linhas com aparência de matéria/assunto cobrado.";
+  }
+
+  return { lines: blocks, scopeNote };
+}
+
 function titleCaseEdital(value) {
   const smallWords = new Set(["de", "da", "do", "das", "dos", "e", "em", "a", "o"]);
   return String(value || "")
@@ -1557,25 +1677,33 @@ function splitEditalTopics(value) {
   return [text];
 }
 
-function editalPriorityFor(index, total) {
-  if (total <= 3) return "Alta";
-  const ratio = index / Math.max(1, total - 1);
-  if (ratio < 0.34) return "Alta";
-  if (ratio > 0.82) return "Baixa";
-  return "Média";
-}
-
-function parseEditalText(rawText) {
-  if (looksLikeRawPdfText(rawText)) return [];
-  const rawLines = String(rawText || "")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .map(cleanEditalLine)
-    .filter((line) => line.length > 2 && !looksLikeGarbledEditalLine(line));
+function analyzeEditalText(rawText, targetRole = "") {
+  if (looksLikeRawPdfText(rawText)) return { items: [], ignoredCount: 0, scopeNote: "O texto parecia código bruto de PDF e foi ignorado." };
+  const { lines: rawLines, scopeNote } = extractScopedEditalLines(rawText, targetRole);
   const items = [];
+  let ignoredCount = 0;
   let currentSubject = "Conhecimentos gerais";
 
   rawLines.forEach((line) => {
+    if (isAdministrativeEditalLine(line) || !isProgrammaticTopicLine(line)) {
+      ignoredCount += 1;
+      return;
+    }
+
+    if (isEditalContentStartLine(line)) {
+      const rest = cleanEditalLine(line.split(":").slice(1).join(":"));
+      if (rest) {
+        splitEditalTopics(rest).forEach((topic) => {
+          if (isProgrammaticTopicLine(topic)) {
+            items.push({ subjectName: currentSubject, topicName: topic });
+          } else {
+            ignoredCount += 1;
+          }
+        });
+      }
+      return;
+    }
+
     const colonIndex = line.indexOf(":");
     if (colonIndex > 2 && colonIndex <= 80) {
       const possibleSubject = cleanEditalLine(line.slice(0, colonIndex));
@@ -1583,7 +1711,11 @@ function parseEditalText(rawText) {
       if (looksLikeEditalSubject(possibleSubject)) {
         currentSubject = titleCaseEdital(possibleSubject);
         splitEditalTopics(rest).forEach((topic) => {
-          if (topic) items.push({ subjectName: currentSubject, topicName: topic });
+          if (isProgrammaticTopicLine(topic)) {
+            items.push({ subjectName: currentSubject, topicName: topic });
+          } else {
+            ignoredCount += 1;
+          }
         });
         return;
       }
@@ -1595,8 +1727,10 @@ function parseEditalText(rawText) {
     }
 
     splitEditalTopics(line).forEach((topic) => {
-      if (topic && !/^(conteúdo programático|conteudo programatico|programa|conhecimentos)$/i.test(topic)) {
+      if (isProgrammaticTopicLine(topic)) {
         items.push({ subjectName: currentSubject, topicName: topic });
+      } else {
+        ignoredCount += 1;
       }
     });
   });
@@ -1611,13 +1745,20 @@ function parseEditalText(rawText) {
       return true;
     });
 
-  return unique.map((item, index) =>
+  return {
+    items: unique.map((item, index) =>
     normalizeEditalItem({
       ...item,
-      priority: editalPriorityFor(index, unique.length),
       order: index,
     })
-  );
+    ),
+    ignoredCount,
+    scopeNote,
+  };
+}
+
+function parseEditalText(rawText, targetRole = "") {
+  return analyzeEditalText(rawText, targetRole).items;
 }
 
 function groupEditalItems(items = []) {
@@ -1644,10 +1785,7 @@ function buildEditalSchedule(edital = state.edital) {
   const weeklyHours = clamp(Number(edital.weeklyHours) || 15, 1, 80);
   const sessionMinutes = clamp(Number(edital.sessionMinutes) || 50, 15, 240);
   const sessionsPerWeek = Math.max(1, Math.floor((weeklyHours * 60) / sessionMinutes));
-  const ordered = [...items].sort((a, b) => {
-    const weight = { Alta: 0, Média: 1, Baixa: 2 };
-    return (weight[a.priority] ?? 1) - (weight[b.priority] ?? 1) || Number(a.order || 0) - Number(b.order || 0);
-  });
+  const ordered = [...items].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   let itemIndex = 0;
 
   return Array.from({ length: weeks }, (_, weekIndex) => {
@@ -1668,7 +1806,7 @@ function buildEditalSchedule(edital = state.edital) {
       const item = ordered[itemIndex % ordered.length];
       itemIndex += 1;
       subjectCount.set(item.subjectName, (subjectCount.get(item.subjectName) || 0) + 1);
-      tasks.push({ type: item.priority, text: `${item.subjectName}: ${item.topicName}`, minutes: sessionMinutes });
+      tasks.push({ type: "Estudo", text: `${item.subjectName}: ${item.topicName}`, minutes: sessionMinutes });
     }
 
     const topSubjects = [...subjectCount.entries()]
@@ -1698,6 +1836,7 @@ function renderEdital() {
 
   [
     ["#editalExamName", edital.examName],
+    ["#editalTargetRole", edital.targetRole],
     ["#editalExamDate", edital.examDate],
     ["#editalWeeklyHours", edital.weeklyHours],
     ["#editalSessionMinutes", edital.sessionMinutes],
@@ -1709,17 +1848,17 @@ function renderEdital() {
 
   $("#editalImportPlanBtn").disabled = edital.items.length === 0;
   $("#copyEditalScheduleBtn").disabled = schedule.length === 0;
-  $("#editalSummaryTitle").textContent = edital.examName ? `Cronograma para ${edital.examName}` : "Cronograma sugerido";
+  $("#editalSummaryTitle").textContent = edital.examName ? `Matérias cobradas - ${edital.examName}` : "Matérias cobradas identificadas";
 
   $("#editalStats").innerHTML = [
     statCard("Até a prova", edital.examDate ? `${days} dias` : "Sem data", edital.examDate ? formatDate(edital.examDate) : "informe a data"),
     statCard("Semanas", String(weeks || 0), `${formatMinutes(totalMinutes)} planejados`),
-    statCard("Matérias", String(groups.size), `${edital.items.length} assuntos extraídos`),
+    statCard("Matérias", String(groups.size), `${edital.items.length} assuntos cobrados`),
     statCard("Ritmo", `${edital.weeklyHours}h/sem`, `${edital.sessionMinutes} min por bloco`),
   ].join("");
 
   $("#editalAdvice").textContent = edital.items.length
-    ? `Sugestão: faça os blocos na ordem abaixo, reserve as revisões indicadas e use questões/flashcards nas semanas finais.`
+    ? `${edital.scopeNote || "Análise restrita aos assuntos cobrados encontrados."} ${edital.ignoredCount ? `${edital.ignoredCount} linhas foram ignoradas por não parecerem matéria cobrada.` : ""}`.trim()
     : "Importe ou cole o edital para gerar um plano proporcional até a prova.";
 
   $("#editalDetectedList").innerHTML = edital.items.length
@@ -1733,7 +1872,7 @@ function renderEdital() {
               </summary>
               <div class="edital-topic-chips">
                 ${subjectItems
-                  .map((item) => `<span class="edital-topic-chip"><b>${escapeHTML(item.priority)}</b>${escapeHTML(item.topicName)}</span>`)
+                  .map((item) => `<span class="edital-topic-chip"><b>Cobrado</b>${escapeHTML(item.topicName)}</span>`)
                   .join("")}
               </div>
             </details>
@@ -1779,23 +1918,27 @@ function renderEditalScheduleWeek(week) {
 
 function saveEditalFromForm() {
   const rawText = $("#editalText").value.trim();
+  const targetRole = $("#editalTargetRole").value.trim();
   if (looksLikeRawPdfText(rawText)) {
     showToast("O texto importado parece código interno de PDF. Importe o .pdf novamente ou cole o conteúdo programático em texto.");
     return;
   }
-  const items = parseEditalText(rawText);
+  const analysis = analyzeEditalText(rawText, targetRole);
   state.edital = normalizeEditalData({
     examName: $("#editalExamName").value,
+    targetRole,
     examDate: $("#editalExamDate").value,
     weeklyHours: $("#editalWeeklyHours").value,
     sessionMinutes: $("#editalSessionMinutes").value,
     rawText,
-    items,
+    items: analysis.items,
+    ignoredCount: analysis.ignoredCount,
+    scopeNote: analysis.scopeNote,
     importedAt: new Date().toISOString(),
   });
   saveState();
   render();
-  showToast(items.length ? `${items.length} assuntos extraídos do edital.` : "Nenhum assunto identificado no texto.");
+  showToast(analysis.items.length ? `${analysis.items.length} assuntos cobrados identificados.` : "Nenhuma matéria cobrada foi identificada com segurança.");
 }
 
 function loadExternalScript(src) {
@@ -1932,7 +2075,7 @@ function importEditalItemsToPlan() {
     }
     subjectItems.forEach((item) => {
       if (findTopicByName(subject.id, item.topicName)) return;
-      state.topics.push({ id: uid(), subjectId: subject.id, name: item.topicName, priority: item.priority });
+      state.topics.push({ id: uid(), subjectId: subject.id, name: item.topicName, priority: "Média" });
       createdTopics += 1;
     });
   });
@@ -1948,6 +2091,7 @@ function editalScheduleToText() {
   const header = state.edital.examName ? `Cronograma - ${state.edital.examName}` : "Cronograma do edital";
   return [
     header,
+    state.edital.targetRole ? `Cargo/área: ${state.edital.targetRole}` : "",
     state.edital.examDate ? `Prova: ${formatDate(state.edital.examDate)}` : "",
     `Ritmo: ${state.edital.weeklyHours}h/semana, blocos de ${state.edital.sessionMinutes}min`,
     "",

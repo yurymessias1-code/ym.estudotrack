@@ -204,6 +204,10 @@
                 <input id="editalExamName" type="text" placeholder="Ex.: TJ, TRT, Prefeitura..." />
               </label>
               <label>
+                Cargo ou área a analisar
+                <input id="editalTargetRole" type="text" placeholder="Ex.: Analista Judiciário - Área Judiciária" />
+              </label>
+              <label>
                 Data da prova
                 <input id="editalExamDate" type="date" required />
               </label>
@@ -222,8 +226,8 @@
                 <input id="editalFile" type="file" accept=".pdf,.txt,.html,.htm,application/pdf,text/plain,text/html" />
               </label>
               <label>
-                Assuntos cobrados
-                <textarea id="editalText" class="edital-textarea" rows="12" placeholder="Cole aqui o conteúdo programático. Ex.: Direito Constitucional: direitos fundamentais; controle de constitucionalidade; organização do Estado."></textarea>
+                Conteúdo programático do cargo
+                <textarea id="editalText" class="edital-textarea" rows="12" placeholder="Cole o edital ou somente o conteúdo programático. Informe o cargo acima para o app separar o que é matéria cobrada do que é regra administrativa do edital."></textarea>
               </label>
               <div class="inline-actions">
                 <button class="button primary" type="submit">Gerar cronograma</button>
@@ -235,7 +239,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Análise</p>
-                  <h3 id="editalSummaryTitle">Cronograma sugerido</h3>
+                  <h3 id="editalSummaryTitle">Matérias cobradas identificadas</h3>
                 </div>
               </div>
               <div class="edital-stat-grid" id="editalStats"></div>

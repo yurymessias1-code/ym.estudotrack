@@ -4,6 +4,8 @@ const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
 const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
+const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 const titles = {
   dashboard: "Painel",
@@ -43,6 +45,7 @@ const syncingSources = new Set();
 let pomodoroAudioContext = null;
 let lofiTickInterval = null;
 let lofiTickStep = 0;
+let pdfJsLoadPromise = null;
 
 function todayISO() {
   return toISODate(new Date());
@@ -276,13 +279,22 @@ function normalizeEditalItem(item = {}) {
 }
 
 function normalizeEditalData(edital = {}) {
+  const rawText = typeof edital.rawText === "string" ? edital.rawText.slice(0, SOURCE_TEXT_LIMIT) : "";
+  const rawPdfText = looksLikeRawPdfText(rawText);
+  const items = rawPdfText
+    ? []
+    : Array.isArray(edital.items)
+      ? edital.items
+          .map(normalizeEditalItem)
+          .filter((item) => item.topicName && !looksLikeGarbledEditalLine(item.subjectName) && !looksLikeGarbledEditalLine(item.topicName))
+      : [];
   return {
     examName: typeof edital.examName === "string" ? edital.examName.trim() : "",
     examDate: typeof edital.examDate === "string" ? edital.examDate : "",
     weeklyHours: clamp(Number(edital.weeklyHours) || 15, 1, 80),
     sessionMinutes: clamp(Number(edital.sessionMinutes) || 50, 15, 240),
-    rawText: typeof edital.rawText === "string" ? edital.rawText.slice(0, SOURCE_TEXT_LIMIT) : "",
-    items: Array.isArray(edital.items) ? edital.items.map(normalizeEditalItem).filter((item) => item.topicName) : [],
+    rawText: rawPdfText ? "" : rawText,
+    items,
     importedAt: edital.importedAt || "",
   };
 }
@@ -1482,6 +1494,36 @@ function cleanEditalLine(line) {
     .trim();
 }
 
+function looksLikeRawPdfText(value) {
+  const text = String(value || "").slice(0, 6000);
+  if (/^\s*%PDF-\d/i.test(text)) return true;
+  const pdfTokens = [
+    /\/Type\s*\/(Catalog|Pages|Page|Font|XObject)/i,
+    /\/Filter\s*\/FlateDecode/i,
+    /\bendobj\b/i,
+    /\bstartxref\b/i,
+    /\bxref\b/i,
+    /\bstream\b[\s\S]*\bendstream\b/i,
+  ];
+  const tokenCount = pdfTokens.filter((pattern) => pattern.test(text)).length;
+  const brokenCount = (text.match(/�/g) || []).length;
+  return tokenCount >= 2 || brokenCount > 20;
+}
+
+function looksLikeGarbledEditalLine(line) {
+  const value = cleanEditalLine(line);
+  if (!value) return true;
+  if (/^%PDF-\d/i.test(value)) return true;
+  if (/\/Type\/|\/Pages\b|\/Catalog\b|\/Filter\/|\/FlateDecode|\/XObject|\/Font|\/ProcSet|\/MediaBox|\/Contents\b/i.test(value)) return true;
+  if (/\bendobj\b|\bobj\b|\bstream\b|\bendstream\b|\bxref\b|\bstartxref\b|\btrailer\b/i.test(value)) return true;
+  if ((value.match(/\d+\s+\d+\s+R/g) || []).length >= 2) return true;
+  const brokenCount = (value.match(/�/g) || []).length;
+  if (brokenCount >= 2 || brokenCount / Math.max(1, value.length) > 0.04) return true;
+  const letters = value.replace(/[^A-Za-zÀ-ÿ]/g, "").length;
+  const symbols = value.replace(/[A-Za-zÀ-ÿ0-9\s.,;:()/-]/g, "").length;
+  return value.length > 18 && letters < 4 && symbols > 4;
+}
+
 function titleCaseEdital(value) {
   const smallWords = new Set(["de", "da", "do", "das", "dos", "e", "em", "a", "o"]);
   return String(value || "")
@@ -1524,11 +1566,12 @@ function editalPriorityFor(index, total) {
 }
 
 function parseEditalText(rawText) {
+  if (looksLikeRawPdfText(rawText)) return [];
   const rawLines = String(rawText || "")
     .replace(/\r/g, "\n")
     .split("\n")
     .map(cleanEditalLine)
-    .filter((line) => line.length > 2);
+    .filter((line) => line.length > 2 && !looksLikeGarbledEditalLine(line));
   const items = [];
   let currentSubject = "Conhecimentos gerais";
 
@@ -1736,6 +1779,10 @@ function renderEditalScheduleWeek(week) {
 
 function saveEditalFromForm() {
   const rawText = $("#editalText").value.trim();
+  if (looksLikeRawPdfText(rawText)) {
+    showToast("O texto importado parece código interno de PDF. Importe o .pdf novamente ou cole o conteúdo programático em texto.");
+    return;
+  }
   const items = parseEditalText(rawText);
   state.edital = normalizeEditalData({
     examName: $("#editalExamName").value,
@@ -1751,7 +1798,82 @@ function saveEditalFromForm() {
   showToast(items.length ? `${items.length} assuntos extraídos do edital.` : "Nenhum assunto identificado no texto.");
 }
 
-function readEditalFile(file) {
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = Array.from(document.scripts).find((script) => script.src === src);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      if (window.pdfjsLib) resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", () => reject(new Error("Não foi possível carregar o leitor de PDF.")), { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePdfJS() {
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    return window.pdfjsLib;
+  }
+  if (!pdfJsLoadPromise) {
+    pdfJsLoadPromise = loadExternalScript(PDFJS_URL).then(() => {
+      if (!window.pdfjsLib) throw new Error("Leitor de PDF indisponível.");
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+      return window.pdfjsLib;
+    });
+  }
+  return pdfJsLoadPromise;
+}
+
+function pdfTextItemsToLines(items = []) {
+  const positioned = items
+    .filter((item) => String(item.str || "").trim())
+    .map((item) => ({
+      text: String(item.str || "").trim(),
+      x: Number(item.transform?.[4] || 0),
+      y: Math.round(Number(item.transform?.[5] || 0) * 2) / 2,
+    }))
+    .sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines = [];
+  positioned.forEach((item) => {
+    const current = lines[lines.length - 1];
+    if (current && Math.abs(current.y - item.y) <= 2.5) {
+      current.parts.push(item);
+    } else {
+      lines.push({ y: item.y, parts: [item] });
+    }
+  });
+  return lines.map((line) => line.parts.sort((a, b) => a.x - b.x).map((part) => part.text).join(" ")).join("\n");
+}
+
+async function readPdfFileAsText(file) {
+  const pdfjsLib = await ensurePdfJS();
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const pages = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const text = pdfTextItemsToLines(content.items);
+    if (text.trim()) pages.push(text);
+  }
+  const extracted = pages.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!extracted) {
+    throw new Error("Esse PDF parece ser imagem/escaneado. Cole o conteúdo programático em texto ou use OCR antes de importar.");
+  }
+  if (looksLikeRawPdfText(extracted)) {
+    throw new Error("Não consegui extrair texto limpo desse PDF. Cole o conteúdo programático em texto.");
+  }
+  return extracted;
+}
+
+async function readPlainEditalFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
@@ -1767,6 +1889,16 @@ function readEditalFile(file) {
     reader.addEventListener("error", () => reject(new Error("Não foi possível ler o arquivo do edital.")));
     reader.readAsText(file, "utf-8");
   });
+}
+
+async function readEditalFile(file) {
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+  if (isPdf) return readPdfFileAsText(file);
+  const text = await readPlainEditalFile(file);
+  if (looksLikeRawPdfText(text)) {
+    throw new Error("Esse arquivo parece um PDF lido como texto. Importe o arquivo .pdf diretamente ou cole o conteúdo programático em texto.");
+  }
+  return text;
 }
 
 function findSubjectByName(name) {
@@ -4212,12 +4344,14 @@ function attachEvents() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+      showToast(isPdf ? "Lendo o PDF do edital..." : "Lendo arquivo do edital...");
       const text = await readEditalFile(file);
       $("#editalText").value = text.slice(0, SOURCE_TEXT_LIMIT);
       if (!$("#editalExamName").value.trim()) {
         $("#editalExamName").value = file.name.replace(/\.[^.]+$/, "");
       }
-      showToast("Edital carregado. Confira o texto e gere o cronograma.");
+      showToast(isPdf ? "Texto do PDF extraído. Confira e gere o cronograma." : "Edital carregado. Confira o texto e gere o cronograma.");
     } catch (error) {
       showToast(error.message || "Não foi possível importar o edital.");
     } finally {

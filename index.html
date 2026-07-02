@@ -21,6 +21,7 @@
           <button class="nav-button active" data-view="dashboard">Painel</button>
           <button class="nav-button" data-view="controle">Controle</button>
           <button class="nav-button" data-view="plano">Matérias</button>
+          <button class="nav-button" data-view="edital">Edital</button>
           <button class="nav-button" data-view="questoes">Questões</button>
           <button class="nav-button" data-view="flashcards">Flashcards</button>
           <button class="nav-button" data-view="anotacoes">Anotações</button>
@@ -84,6 +85,7 @@
               <h2 id="dashboardTitle">Acompanhe o que rende e o que precisa de reforço</h2>
               <div class="quick-actions">
                 <button class="button primary" data-view="questoes" type="button">Lançar questões</button>
+                <button class="button secondary" data-view="edital" type="button">Importar edital</button>
                 <button class="button secondary" data-view="flashcards" type="button">Revisar flashcards</button>
                 <button class="button secondary" data-view="anotacoes" type="button">Anotar lei</button>
                 <button class="button secondary" data-view="jurisprudencias" type="button">Salvar julgado</button>
@@ -178,6 +180,82 @@
           </div>
 
           <div class="subject-board" id="subjectBoard"></div>
+        </section>
+
+        <section class="view" id="edital" aria-labelledby="editalTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Cronograma por prova</p>
+              <h2 id="editalTitle">Importar edital e montar plano de estudo</h2>
+            </div>
+            <button class="button secondary" id="editalImportPlanBtn" type="button">Importar para Matérias</button>
+          </div>
+
+          <div class="content-grid edital-grid">
+            <form class="panel form-panel" id="editalForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Edital</p>
+                  <h3>Dados da prova</h3>
+                </div>
+              </div>
+              <label>
+                Nome da prova
+                <input id="editalExamName" type="text" placeholder="Ex.: TJ, TRT, Prefeitura..." />
+              </label>
+              <label>
+                Data da prova
+                <input id="editalExamDate" type="date" required />
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Horas por semana
+                  <input id="editalWeeklyHours" type="number" min="1" max="80" step="0.5" value="15" required />
+                </label>
+                <label>
+                  Bloco de estudo
+                  <input id="editalSessionMinutes" type="number" min="15" max="240" step="5" value="50" required />
+                </label>
+              </div>
+              <label>
+                Arquivo do edital
+                <input id="editalFile" type="file" accept=".txt,.html,.htm,text/plain,text/html" />
+              </label>
+              <label>
+                Assuntos cobrados
+                <textarea id="editalText" class="edital-textarea" rows="12" placeholder="Cole aqui o conteúdo programático. Ex.: Direito Constitucional: direitos fundamentais; controle de constitucionalidade; organização do Estado."></textarea>
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" type="submit">Gerar cronograma</button>
+                <button class="button ghost danger" id="editalClearBtn" type="button">Limpar edital</button>
+              </div>
+            </form>
+
+            <section class="panel edital-summary-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Análise</p>
+                  <h3 id="editalSummaryTitle">Cronograma sugerido</h3>
+                </div>
+              </div>
+              <div class="edital-stat-grid" id="editalStats"></div>
+              <div class="edital-alert" id="editalAdvice">Importe ou cole o edital para gerar um plano proporcional até a prova.</div>
+              <div class="edital-detected-list" id="editalDetectedList"></div>
+              <div class="inline-actions">
+                <button class="button ghost" id="copyEditalScheduleBtn" type="button">Copiar cronograma</button>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Semanas até a prova</p>
+                <h3>Roteiro sugerido</h3>
+              </div>
+            </div>
+            <div class="edital-schedule-list" id="editalScheduleList"></div>
+          </section>
         </section>
 
         <section class="view" id="questoes" aria-labelledby="questoesTitle">

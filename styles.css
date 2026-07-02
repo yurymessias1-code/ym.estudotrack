@@ -516,6 +516,119 @@ button:disabled {
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
 }
 
+.edital-grid {
+  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.edital-textarea {
+  min-height: 260px;
+}
+
+.edital-summary-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.edital-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.edital-alert {
+  padding: 12px;
+  border: 1px solid #bfe1dc;
+  border-radius: var(--radius);
+  background: #ecfdf8;
+  color: #0b5f59;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.edital-detected-list,
+.edital-schedule-list {
+  display: grid;
+  gap: 12px;
+}
+
+.edital-subject-group,
+.edital-week-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.edital-subject-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.edital-topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.edital-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid #d7e5ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #263341;
+  font-size: 0.88rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.edital-week-card {
+  display: grid;
+  gap: 12px;
+}
+
+.edital-week-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.edital-week-header h3 {
+  margin: 0;
+}
+
+.edital-task-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.edital-task-list li {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  line-height: 1.45;
+}
+
+.edital-task-list li small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .notebook-layout {
   display: grid;
   grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
@@ -1697,6 +1810,10 @@ td {
 .theme-dark .profile-panel,
 .theme-dark .stat-card,
 .theme-dark .subject-card,
+.theme-dark .edital-subject-group,
+.theme-dark .edital-week-card,
+.theme-dark .edital-task-list li,
+.theme-dark .edital-topic-chip,
 .theme-dark .topic-item,
 .theme-dark .case-card,
 .theme-dark .performance-row,
@@ -1710,6 +1827,17 @@ td {
 .theme-dark .legal-material-card,
 .theme-dark .empty-state {
   background: #131920;
+}
+
+.theme-dark .edital-alert {
+  border-color: #2a7067;
+  background: #12342f;
+  color: #b8fff2;
+}
+
+.theme-dark .edital-topic-chip {
+  border-color: var(--line);
+  color: var(--ink);
 }
 
 .theme-dark .case-card p,
@@ -1924,6 +2052,7 @@ td {
   .dashboard-visual,
   .two-columns,
   .form-and-list,
+  .edital-grid,
   .pomodoro-grid,
   .notebook-layout,
   .notebook-notes-area {
@@ -1950,6 +2079,8 @@ td {
   .topbar,
   .section-heading,
   .panel-header,
+  .edital-week-header,
+  .edital-subject-group summary,
   .subject-card-header,
   .insight-top,
   .performance-top,
@@ -1976,6 +2107,7 @@ td {
   .source-preview-actions,
   .side-nav,
   .stat-grid,
+  .edital-stat-grid,
   .subject-board,
   .period-picker-grid,
   .split-inputs {

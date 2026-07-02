@@ -3,6 +3,7 @@
 Aplicativo web estático para controle de estudos para concursos, com:
 
 - matérias e assuntos;
+- aba de edital para colar/importar conteúdo programático, extrair assuntos cobrados e gerar cronograma até a prova;
 - controle de questões, acertos e erros;
 - logo "Estudos Track" aplicada no layout, clicável para voltar ao Painel, e configurada como ícone da aba do navegador;
 - controle por dia, semana, mês e ano com seleção de período específico;

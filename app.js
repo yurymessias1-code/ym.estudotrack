@@ -9,6 +9,7 @@ const titles = {
   dashboard: "Painel",
   controle: "Controle",
   plano: "Matérias",
+  edital: "Edital",
   questoes: "Questões",
   flashcards: "Flashcards",
   anotacoes: "Anotações",
@@ -261,6 +262,31 @@ function normalizeLegalMaterial(item = {}) {
   };
 }
 
+function normalizeEditalItem(item = {}) {
+  const subjectName = typeof item.subjectName === "string" ? item.subjectName.trim() : "";
+  const topicName = typeof item.topicName === "string" ? item.topicName.trim() : "";
+  const priority = ["Alta", "Média", "Baixa"].includes(item.priority) ? item.priority : "Média";
+  return {
+    id: item.id || uid(),
+    subjectName: subjectName || "Conhecimentos gerais",
+    topicName: topicName || "Assunto não identificado",
+    priority,
+    order: Number(item.order) || 0,
+  };
+}
+
+function normalizeEditalData(edital = {}) {
+  return {
+    examName: typeof edital.examName === "string" ? edital.examName.trim() : "",
+    examDate: typeof edital.examDate === "string" ? edital.examDate : "",
+    weeklyHours: clamp(Number(edital.weeklyHours) || 15, 1, 80),
+    sessionMinutes: clamp(Number(edital.sessionMinutes) || 50, 15, 240),
+    rawText: typeof edital.rawText === "string" ? edital.rawText.slice(0, SOURCE_TEXT_LIMIT) : "",
+    items: Array.isArray(edital.items) ? edital.items.map(normalizeEditalItem).filter((item) => item.topicName) : [],
+    importedAt: edital.importedAt || "",
+  };
+}
+
 function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
   return {
@@ -280,6 +306,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
       STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF.map(normalizeCaseItem) : [],
     },
     legalMaterials: Array.isArray(candidate.legalMaterials) ? candidate.legalMaterials.map(normalizeLegalMaterial) : empty.legalMaterials,
+    edital: normalizeEditalData(candidate.edital || empty.edital),
     media: {
       url: typeof candidate.media?.url === "string" ? candidate.media.url : "",
     },
@@ -349,6 +376,7 @@ function createEmptyState(profile = {}) {
     goals: [],
     cases: { STJ: [], STF: [] },
     legalMaterials: [],
+    edital: normalizeEditalData(),
     media: { url: "" },
     account: { name: "", email: "" },
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 30, longBreakEveryMinutes: 120, cycles: 4, tickLofiEnabled: true },
@@ -839,6 +867,7 @@ function render() {
   renderControl();
   renderGoals();
   renderPlan();
+  renderEdital();
   renderQuestions();
   renderFlashcards();
   renderNotes();
@@ -1442,6 +1471,361 @@ function renderTopicItem(topic, color) {
       </div>
     </div>
   `;
+}
+
+function cleanEditalLine(line) {
+  return String(line || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/^[\s\-–—•●▪*]+/, "")
+    .replace(/^\d+(\.\d+)*[\s.)-]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleCaseEdital(value) {
+  const smallWords = new Set(["de", "da", "do", "das", "dos", "e", "em", "a", "o"]);
+  return String(value || "")
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((word, index) => (index > 0 && smallWords.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(" ");
+}
+
+function looksLikeEditalSubject(value) {
+  const line = cleanEditalLine(value).replace(/[:.;]+$/, "");
+  if (!line || line.length > 90) return false;
+  const words = line.split(/\s+/).filter(Boolean);
+  const subjectStart = /^(direito|língua|lingua|português|portugues|matemática|matematica|raciocínio|raciocinio|informática|informatica|noções|nocoes|conhecimentos|legislação|legislacao|administração|administracao|arquivologia|contabilidade|atualidades|ética|etica)/i;
+  const letters = line.replace(/[^A-Za-zÀ-ÿ]/g, "");
+  const upperLetters = letters.replace(/[^A-ZÀ-Ý]/g, "");
+  const upperRatio = letters ? upperLetters.length / letters.length : 0;
+  return words.length <= 7 && (subjectStart.test(line) || upperRatio > 0.68);
+}
+
+function splitEditalTopics(value) {
+  const text = cleanEditalLine(value)
+    .replace(/\s+[–—]\s+/g, "; ")
+    .replace(/\s+\|\s+/g, "; ");
+  if (!text) return [];
+  const semicolonParts = text.split(/[;•●▪]/).map(cleanEditalLine).filter(Boolean);
+  if (semicolonParts.length > 1) return semicolonParts;
+  const commaParts = text.split(",").map(cleanEditalLine).filter(Boolean);
+  if (commaParts.length >= 3 && commaParts.every((part) => part.length >= 8)) return commaParts;
+  return [text];
+}
+
+function editalPriorityFor(index, total) {
+  if (total <= 3) return "Alta";
+  const ratio = index / Math.max(1, total - 1);
+  if (ratio < 0.34) return "Alta";
+  if (ratio > 0.82) return "Baixa";
+  return "Média";
+}
+
+function parseEditalText(rawText) {
+  const rawLines = String(rawText || "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(cleanEditalLine)
+    .filter((line) => line.length > 2);
+  const items = [];
+  let currentSubject = "Conhecimentos gerais";
+
+  rawLines.forEach((line) => {
+    const colonIndex = line.indexOf(":");
+    if (colonIndex > 2 && colonIndex <= 80) {
+      const possibleSubject = cleanEditalLine(line.slice(0, colonIndex));
+      const rest = cleanEditalLine(line.slice(colonIndex + 1));
+      if (looksLikeEditalSubject(possibleSubject)) {
+        currentSubject = titleCaseEdital(possibleSubject);
+        splitEditalTopics(rest).forEach((topic) => {
+          if (topic) items.push({ subjectName: currentSubject, topicName: topic });
+        });
+        return;
+      }
+    }
+
+    if (line.endsWith(":") || looksLikeEditalSubject(line)) {
+      currentSubject = titleCaseEdital(line.replace(/[:.]+$/, ""));
+      return;
+    }
+
+    splitEditalTopics(line).forEach((topic) => {
+      if (topic && !/^(conteúdo programático|conteudo programatico|programa|conhecimentos)$/i.test(topic)) {
+        items.push({ subjectName: currentSubject, topicName: topic });
+      }
+    });
+  });
+
+  const seen = new Set();
+  const unique = items
+    .map((item, index) => ({ ...item, order: index }))
+    .filter((item) => {
+      const key = `${normalizeSearchText(item.subjectName)}::${normalizeSearchText(item.topicName)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  return unique.map((item, index) =>
+    normalizeEditalItem({
+      ...item,
+      priority: editalPriorityFor(index, unique.length),
+      order: index,
+    })
+  );
+}
+
+function groupEditalItems(items = []) {
+  return items.reduce((groups, item) => {
+    const key = item.subjectName || "Conhecimentos gerais";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+    return groups;
+  }, new Map());
+}
+
+function getDaysUntilExam(examDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(examDate || ""))) return 0;
+  const today = parseISODate(todayISO());
+  const exam = parseISODate(examDate);
+  return Math.max(0, Math.ceil((exam.getTime() - today.getTime()) / 86400000));
+}
+
+function buildEditalSchedule(edital = state.edital) {
+  const items = Array.isArray(edital.items) ? edital.items : [];
+  if (!items.length || !edital.examDate) return [];
+  const days = getDaysUntilExam(edital.examDate);
+  const weeks = Math.max(1, Math.ceil(Math.max(days, 1) / 7));
+  const weeklyHours = clamp(Number(edital.weeklyHours) || 15, 1, 80);
+  const sessionMinutes = clamp(Number(edital.sessionMinutes) || 50, 15, 240);
+  const sessionsPerWeek = Math.max(1, Math.floor((weeklyHours * 60) / sessionMinutes));
+  const ordered = [...items].sort((a, b) => {
+    const weight = { Alta: 0, Média: 1, Baixa: 2 };
+    return (weight[a.priority] ?? 1) - (weight[b.priority] ?? 1) || Number(a.order || 0) - Number(b.order || 0);
+  });
+  let itemIndex = 0;
+
+  return Array.from({ length: weeks }, (_, weekIndex) => {
+    const weekStart = toISODate(addDays(parseISODate(todayISO()), weekIndex * 7));
+    const weekEnd = toISODate(addDays(parseISODate(weekStart), Math.min(6, Math.max(0, days - weekIndex * 7))));
+    const isFinalWeek = weekIndex === weeks - 1;
+    const tasks = [];
+    const subjectCount = new Map();
+
+    for (let session = 1; session <= sessionsPerWeek; session += 1) {
+      const shouldReview = (session % 5 === 0 && itemIndex > 0) || (isFinalWeek && session > Math.ceil(sessionsPerWeek * 0.55));
+      if (shouldReview) {
+        const reviewed = ordered.slice(Math.max(0, itemIndex - 4), itemIndex).map((item) => item.subjectName);
+        const reviewSubject = reviewed.length ? [...new Set(reviewed)].join(", ") : "assuntos anteriores";
+        tasks.push({ type: "Revisão", text: `Questões e flashcards de ${reviewSubject}`, minutes: sessionMinutes });
+        continue;
+      }
+      const item = ordered[itemIndex % ordered.length];
+      itemIndex += 1;
+      subjectCount.set(item.subjectName, (subjectCount.get(item.subjectName) || 0) + 1);
+      tasks.push({ type: item.priority, text: `${item.subjectName}: ${item.topicName}`, minutes: sessionMinutes });
+    }
+
+    const topSubjects = [...subjectCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([subject]) => subject);
+
+    return {
+      week: weekIndex + 1,
+      start: weekStart,
+      end: weekEnd,
+      minutes: tasks.reduce((sum, task) => sum + task.minutes, 0),
+      focus: topSubjects.length ? topSubjects.join(", ") : "Revisão",
+      tasks,
+    };
+  });
+}
+
+function renderEdital() {
+  const edital = normalizeEditalData(state.edital);
+  state.edital = edital;
+  const schedule = buildEditalSchedule(edital);
+  const groups = groupEditalItems(edital.items);
+  const days = getDaysUntilExam(edital.examDate);
+  const weeks = schedule.length;
+  const totalMinutes = schedule.reduce((sum, week) => sum + week.minutes, 0);
+
+  [
+    ["#editalExamName", edital.examName],
+    ["#editalExamDate", edital.examDate],
+    ["#editalWeeklyHours", edital.weeklyHours],
+    ["#editalSessionMinutes", edital.sessionMinutes],
+    ["#editalText", edital.rawText],
+  ].forEach(([selector, value]) => {
+    const field = $(selector);
+    if (field && document.activeElement !== field) field.value = value || "";
+  });
+
+  $("#editalImportPlanBtn").disabled = edital.items.length === 0;
+  $("#copyEditalScheduleBtn").disabled = schedule.length === 0;
+  $("#editalSummaryTitle").textContent = edital.examName ? `Cronograma para ${edital.examName}` : "Cronograma sugerido";
+
+  $("#editalStats").innerHTML = [
+    statCard("Até a prova", edital.examDate ? `${days} dias` : "Sem data", edital.examDate ? formatDate(edital.examDate) : "informe a data"),
+    statCard("Semanas", String(weeks || 0), `${formatMinutes(totalMinutes)} planejados`),
+    statCard("Matérias", String(groups.size), `${edital.items.length} assuntos extraídos`),
+    statCard("Ritmo", `${edital.weeklyHours}h/sem`, `${edital.sessionMinutes} min por bloco`),
+  ].join("");
+
+  $("#editalAdvice").textContent = edital.items.length
+    ? `Sugestão: faça os blocos na ordem abaixo, reserve as revisões indicadas e use questões/flashcards nas semanas finais.`
+    : "Importe ou cole o edital para gerar um plano proporcional até a prova.";
+
+  $("#editalDetectedList").innerHTML = edital.items.length
+    ? [...groups.entries()]
+        .map(
+          ([subject, subjectItems]) => `
+            <details class="edital-subject-group" open>
+              <summary>
+                <strong>${escapeHTML(subject)}</strong>
+                <span class="tag">${subjectItems.length} assuntos</span>
+              </summary>
+              <div class="edital-topic-chips">
+                ${subjectItems
+                  .map((item) => `<span class="edital-topic-chip"><b>${escapeHTML(item.priority)}</b>${escapeHTML(item.topicName)}</span>`)
+                  .join("")}
+              </div>
+            </details>
+          `
+        )
+        .join("")
+    : `<div class="empty-state">Nenhum assunto importado ainda.</div>`;
+
+  $("#editalScheduleList").innerHTML = schedule.length
+    ? schedule.map(renderEditalScheduleWeek).join("")
+    : `<div class="empty-state">Informe a data da prova e cole os assuntos cobrados para ver o cronograma.</div>`;
+}
+
+function renderEditalScheduleWeek(week) {
+  return `
+    <article class="edital-week-card">
+      <div class="edital-week-header">
+        <div>
+          <p class="eyebrow">Semana ${week.week}</p>
+          <h3>${formatShortDate(week.start)} a ${formatShortDate(week.end)}</h3>
+        </div>
+        <div class="topic-meta">
+          <span class="tag">${formatMinutes(week.minutes)}</span>
+          <span class="tag">${escapeHTML(week.focus)}</span>
+        </div>
+      </div>
+      <ol class="edital-task-list">
+        ${week.tasks
+          .map(
+            (task) => `
+              <li>
+                <span class="tag">${escapeHTML(task.type)}</span>
+                <span>${escapeHTML(task.text)}</span>
+                <small>${formatMinutes(task.minutes)}</small>
+              </li>
+            `
+          )
+          .join("")}
+      </ol>
+    </article>
+  `;
+}
+
+function saveEditalFromForm() {
+  const rawText = $("#editalText").value.trim();
+  const items = parseEditalText(rawText);
+  state.edital = normalizeEditalData({
+    examName: $("#editalExamName").value,
+    examDate: $("#editalExamDate").value,
+    weeklyHours: $("#editalWeeklyHours").value,
+    sessionMinutes: $("#editalSessionMinutes").value,
+    rawText,
+    items,
+    importedAt: new Date().toISOString(),
+  });
+  saveState();
+  render();
+  showToast(items.length ? `${items.length} assuntos extraídos do edital.` : "Nenhum assunto identificado no texto.");
+}
+
+function readEditalFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const content = String(reader.result || "");
+      if (/\.html?$/i.test(file.name || "") || file.type === "text/html") {
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = content;
+        resolve(wrapper.textContent || "");
+        return;
+      }
+      resolve(content);
+    });
+    reader.addEventListener("error", () => reject(new Error("Não foi possível ler o arquivo do edital.")));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+function findSubjectByName(name) {
+  const key = normalizeSearchText(name);
+  return state.subjects.find((subject) => normalizeSearchText(subject.name) === key);
+}
+
+function findTopicByName(subjectId, name) {
+  const key = normalizeSearchText(name);
+  return state.topics.find((topic) => topic.subjectId === subjectId && normalizeSearchText(topic.name) === key);
+}
+
+function importEditalItemsToPlan() {
+  const items = state.edital.items || [];
+  if (!items.length) {
+    showToast("Gere o cronograma antes de importar.");
+    return;
+  }
+  const groups = groupEditalItems(items);
+  const palette = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#15803d", "#a16207", "#be123c"];
+  const subjectGoal = Math.max(1, Math.round((Number(state.edital.weeklyHours || 15) / Math.max(1, groups.size)) * 2) / 2);
+  let createdSubjects = 0;
+  let createdTopics = 0;
+
+  [...groups.entries()].forEach(([subjectName, subjectItems], index) => {
+    let subject = findSubjectByName(subjectName);
+    if (!subject) {
+      subject = { id: uid(), name: subjectName, color: palette[index % palette.length], goalHours: subjectGoal };
+      state.subjects.push(subject);
+      createdSubjects += 1;
+    }
+    subjectItems.forEach((item) => {
+      if (findTopicByName(subject.id, item.topicName)) return;
+      state.topics.push({ id: uid(), subjectId: subject.id, name: item.topicName, priority: item.priority });
+      createdTopics += 1;
+    });
+  });
+
+  saveState();
+  render();
+  showToast(`${createdSubjects} matérias e ${createdTopics} assuntos importados.`);
+}
+
+function editalScheduleToText() {
+  const schedule = buildEditalSchedule(state.edital);
+  if (!schedule.length) return "";
+  const header = state.edital.examName ? `Cronograma - ${state.edital.examName}` : "Cronograma do edital";
+  return [
+    header,
+    state.edital.examDate ? `Prova: ${formatDate(state.edital.examDate)}` : "",
+    `Ritmo: ${state.edital.weeklyHours}h/semana, blocos de ${state.edital.sessionMinutes}min`,
+    "",
+    ...schedule.map((week) => {
+      const tasks = week.tasks.map((task, index) => `  ${index + 1}. [${task.type}] ${task.text} - ${formatMinutes(task.minutes)}`).join("\n");
+      return `Semana ${week.week} (${formatDate(week.start)} a ${formatDate(week.end)})\nFoco: ${week.focus}\n${tasks}`;
+    }),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function renderQuestions() {
@@ -3817,6 +4201,52 @@ function attachEvents() {
     event.target.reset();
     render();
     showToast("Assunto adicionado.");
+  });
+
+  $("#editalForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveEditalFromForm();
+  });
+
+  $("#editalFile").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await readEditalFile(file);
+      $("#editalText").value = text.slice(0, SOURCE_TEXT_LIMIT);
+      if (!$("#editalExamName").value.trim()) {
+        $("#editalExamName").value = file.name.replace(/\.[^.]+$/, "");
+      }
+      showToast("Edital carregado. Confira o texto e gere o cronograma.");
+    } catch (error) {
+      showToast(error.message || "Não foi possível importar o edital.");
+    } finally {
+      event.target.value = "";
+    }
+  });
+
+  $("#editalClearBtn").addEventListener("click", () => {
+    if (!window.confirm("Limpar o edital importado e o cronograma sugerido?")) return;
+    state.edital = normalizeEditalData();
+    saveState();
+    render();
+    showToast("Edital limpo.");
+  });
+
+  $("#editalImportPlanBtn").addEventListener("click", importEditalItemsToPlan);
+
+  $("#copyEditalScheduleBtn").addEventListener("click", async () => {
+    const text = editalScheduleToText();
+    if (!text) {
+      showToast("Gere um cronograma antes de copiar.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Cronograma copiado.");
+    } catch {
+      showToast("Cronograma gerado. Copie manualmente se o navegador bloquear.");
+    }
   });
 
   $("#questionForm").addEventListener("submit", (event) => {

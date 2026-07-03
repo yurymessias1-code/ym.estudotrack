@@ -550,6 +550,18 @@ button:disabled {
 .edital-schedule-list {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.edital-detected-list {
+  max-height: min(52vh, 620px);
+}
+
+.edital-schedule-list {
+  max-height: min(70vh, 760px);
 }
 
 .edital-subject-group,
@@ -569,18 +581,35 @@ button:disabled {
   cursor: pointer;
 }
 
+.edital-subject-group summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.edital-subject-group summary .tag {
+  flex: 0 0 auto;
+}
+
 .edital-topic-chips {
   display: flex;
   flex-wrap: wrap;
+  align-content: start;
   gap: 8px;
   margin-top: 12px;
+  max-height: 220px;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .edital-topic-chip {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 220px;
   gap: 7px;
   max-width: 100%;
+  min-width: 0;
   padding: 6px 9px;
   border: 1px solid #d7e5ec;
   border-radius: 999px;
@@ -611,7 +640,11 @@ button:disabled {
   display: grid;
   gap: 8px;
   margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
   padding-left: 20px;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .edital-task-list li {
@@ -2142,6 +2175,18 @@ td {
 
   .dashboard-visual {
     padding: 16px;
+  }
+
+  .edital-detected-list {
+    max-height: 440px;
+  }
+
+  .edital-topic-chips {
+    max-height: 180px;
+  }
+
+  .edital-schedule-list {
+    max-height: 560px;
   }
 
   .visual-copy h2 {

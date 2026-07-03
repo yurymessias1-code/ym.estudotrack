@@ -41,18 +41,18 @@
           <p class="eyebrow">Acesso individual</p>
           <strong id="profileLabel">Entrar no meu perfil</strong>
           <label>
-            Nome do perfil
-            <input id="profileName" type="text" autocomplete="username" placeholder="Ex.: Ana, João, Yury" />
+            E-mail ou nome do perfil
+            <input id="profileName" type="text" autocomplete="username" placeholder="seu@email.com ou nome local" />
           </label>
           <label>
-            PIN do perfil
-            <input id="profilePin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Crie ou digite seu PIN" />
+            Senha ou PIN
+            <input id="profilePin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Senha online ou PIN local" />
           </label>
           <div class="profile-actions">
             <button class="button secondary" id="profileAccessBtn" type="submit">Entrar</button>
             <button class="button ghost" id="logoutProfileBtn" type="button">Sair</button>
           </div>
-          <span id="profileStatus">Cada usuário entra pelo próprio nome e PIN. Perfil novo começa zerado e os dados ficam separados por acesso.</span>
+          <span id="profileStatus">Com Supabase configurado, cada conta entra por e-mail e senha. Sem Supabase, cada perfil local entra por nome e PIN.</span>
         </form>
 
         <div class="storage-actions">
@@ -1177,7 +1177,7 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">Conta</p>
-              <h2 id="contaTitle">Login local e backup</h2>
+              <h2 id="contaTitle">Conta online e backup</h2>
             </div>
           </div>
 
@@ -1186,7 +1186,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Identificação</p>
-                  <h3>Login local</h3>
+                  <h3>Identificação da conta</h3>
                 </div>
               </div>
               <label>
@@ -1197,8 +1197,8 @@
                 E-mail
                 <input id="accountEmail" type="email" placeholder="voce@email.com" />
               </label>
-              <button class="button primary" type="submit">Salvar login local</button>
-              <p class="music-note">Este login identifica e separa os dados neste navegador. Backup online real exige backend externo.</p>
+              <button class="button primary" type="submit">Salvar identificação</button>
+              <p class="music-note">Com Supabase configurado, os dados ficam vinculados ao e-mail da conta. Sem Supabase, continuam separados apenas neste navegador.</p>
             </form>
 
             <section class="panel form-panel">
@@ -1283,6 +1283,8 @@
       <span>Topo</span>
     </button>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

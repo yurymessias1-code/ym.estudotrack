@@ -75,6 +75,29 @@ Também existe uma aba **Conta** com login local e geração/restauração de ba
 
 Para sincronizar automaticamente entre dispositivos com login e senha, será necessário adicionar um backend, como Supabase, Firebase ou outro banco com autenticação.
 
+## Supabase para login online
+
+Esta versão já vem preparada para Supabase. Enquanto `supabase-config.js` estiver vazio, o app continua funcionando com perfis locais por nome e PIN. Depois de configurar o Supabase, o painel **Acesso individual** passa a usar e-mail e senha, e cada usuário só carrega os próprios dados.
+
+Passos:
+
+1. Crie um projeto em https://supabase.com.
+2. No painel do Supabase, abra **SQL Editor** e rode o conteúdo do arquivo `supabase-schema.sql`.
+3. Em **Project Settings > API**, copie a **Project URL** e a chave **anon public**.
+4. Abra `supabase-config.js` e preencha:
+
+```js
+window.ESTUDOS_TRACK_SUPABASE = {
+  url: "https://SEU-PROJETO.supabase.co",
+  anonKey: "SUA_CHAVE_ANON_PUBLIC",
+  table: "study_profiles",
+};
+```
+
+5. Publique novamente no Netlify.
+
+O isolamento dos dados acontece pela tabela `study_profiles` e pelas políticas de Row Level Security. Cada linha usa `user_id = auth.uid()`, então uma conta autenticada só consegue ler, salvar, atualizar ou excluir a própria linha.
+
 ## Pomodoro com alarme
 
 O Pomodoro toca um alarme curto quando cada bloco termina: foco, pausa curta ou descanso longo.

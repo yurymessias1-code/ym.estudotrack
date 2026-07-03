@@ -1,6 +1,8 @@
 const PROFILE_ROOT_KEY = "ymEstudos.profiles.v1";
 const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
 const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
+const SUPABASE_PROFILE_PREFIX = "supabase-";
+const REMOTE_SAVE_DEBOUNCE_MS = 900;
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
 const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
@@ -46,6 +48,14 @@ let pomodoroAudioContext = null;
 let lofiTickInterval = null;
 let lofiTickStep = 0;
 let pdfJsLoadPromise = null;
+let remoteStore = {
+  client: null,
+  enabled: false,
+  user: null,
+  saveTimer: null,
+  syncing: false,
+  pendingSave: false,
+};
 
 function todayISO() {
   return toISODate(new Date());
@@ -114,6 +124,154 @@ function readJSON(key) {
     return saved ? JSON.parse(saved) : null;
   } catch {
     return null;
+  }
+}
+
+function getSupabaseSettings() {
+  const config = globalThis.ESTUDOS_TRACK_SUPABASE || {};
+  const url = String(config.url || "").trim();
+  const anonKey = String(config.anonKey || "").trim();
+  return {
+    url,
+    anonKey,
+    table: String(config.table || "study_profiles").trim() || "study_profiles",
+    configured: /^https?:\/\//i.test(url) && anonKey.length > 20,
+  };
+}
+
+function isSupabaseConfigured() {
+  return getSupabaseSettings().configured;
+}
+
+function getSupabaseClient() {
+  const settings = getSupabaseSettings();
+  if (!settings.configured) return null;
+  if (remoteStore.client) return remoteStore.client;
+  const factory = globalThis.supabase?.createClient;
+  if (typeof factory !== "function") return null;
+  remoteStore.client = factory(settings.url, settings.anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  remoteStore.enabled = true;
+  return remoteStore.client;
+}
+
+function remoteProfileId(userId) {
+  return `${SUPABASE_PROFILE_PREFIX}${userId}`;
+}
+
+function getRemoteDisplayName(user) {
+  const emailName = String(user?.email || "").split("@")[0];
+  return user?.user_metadata?.display_name || state.account?.name || emailName || "Conta online";
+}
+
+function isRemoteSessionActive() {
+  return Boolean(remoteStore.user && isSupabaseConfigured());
+}
+
+function queueRemoteSave() {
+  if (!isRemoteSessionActive()) return;
+  if (remoteStore.syncing) {
+    remoteStore.pendingSave = true;
+    return;
+  }
+  clearTimeout(remoteStore.saveTimer);
+  remoteStore.saveTimer = setTimeout(() => {
+    saveRemoteStateNow();
+  }, REMOTE_SAVE_DEBOUNCE_MS);
+}
+
+async function saveRemoteStateNow() {
+  const client = getSupabaseClient();
+  const user = remoteStore.user;
+  if (!client || !user || remoteStore.syncing) return;
+  const settings = getSupabaseSettings();
+  remoteStore.syncing = true;
+  try {
+    const payload = JSON.parse(JSON.stringify(state));
+    const displayName = state.profile?.name || state.account?.name || getRemoteDisplayName(user);
+    const { error } = await client.from(settings.table).upsert(
+      {
+        user_id: user.id,
+        display_name: displayName,
+        state: payload,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+    if (error) throw error;
+  } catch (error) {
+    console.warn("Falha ao sincronizar com Supabase:", error);
+    showToast("Não foi possível sincronizar com o Supabase agora. Seus dados ficaram salvos neste navegador.");
+  } finally {
+    remoteStore.syncing = false;
+    if (remoteStore.pendingSave) {
+      remoteStore.pendingSave = false;
+      queueRemoteSave();
+    }
+  }
+}
+
+async function loadSupabaseProfile(user, options = {}) {
+  const client = getSupabaseClient();
+  if (!client || !user) return false;
+  const settings = getSupabaseSettings();
+  remoteStore.user = user;
+  sessionStorage.setItem(ACTIVE_SESSION_PROFILE_KEY, remoteProfileId(user.id));
+
+  try {
+    const { data, error } = await client.from(settings.table).select("display_name,state").eq("user_id", user.id).maybeSingle();
+    if (error) throw error;
+
+    const displayName = data?.display_name || getRemoteDisplayName(user);
+    const loadedState = data?.state ? normalizeState(data.state, remoteProfileId(user.id)) : createEmptyState();
+    loadedState.profile = makeProfile({
+      ...loadedState.profile,
+      id: remoteProfileId(user.id),
+      name: loadedState.profile?.name || displayName,
+      pinHash: "supabase-auth",
+      createdAt: loadedState.profile?.createdAt || todayISO(),
+    });
+    loadedState.account = {
+      ...loadedState.account,
+      name: loadedState.account?.name || displayName,
+      email: user.email || loadedState.account?.email || "",
+    };
+    state = loadedState;
+    saveState({ syncRemote: false });
+    if (!data) await saveRemoteStateNow();
+    resetTimer();
+    render();
+    showToast(options.isNew ? "Conta online criada com dados zerados." : "Conta online carregada.");
+    return true;
+  } catch (error) {
+    console.warn("Falha ao carregar perfil Supabase:", error);
+    showToast("Não foi possível carregar os dados online. Verifique a tabela e as políticas do Supabase.");
+    return false;
+  }
+}
+
+async function initializeSupabaseAuth() {
+  const client = getSupabaseClient();
+  if (!isSupabaseConfigured()) return;
+  if (!client) {
+    showToast("Supabase configurado, mas o SDK não carregou. Verifique a conexão do site.");
+    renderProfilePanel();
+    return;
+  }
+
+  try {
+    const { data, error } = await client.auth.getSession();
+    if (error) throw error;
+    if (data?.session?.user) await loadSupabaseProfile(data.session.user);
+    else renderProfilePanel();
+  } catch (error) {
+    console.warn("Falha ao iniciar autenticação Supabase:", error);
+    showToast("Não foi possível iniciar a conta online.");
   }
 }
 
@@ -550,17 +708,18 @@ function createSeedState() {
   };
 }
 
-function saveState() {
+function saveState(options = {}) {
   state.profile = makeProfile(state.profile);
   const root = getProfilesRoot();
   const previousRecord = root.profiles.find((profile) => profile.id === state.profile.id) || {};
   const login = normalizeProfileLogin(state.profile.name || previousRecord.name);
-  if (!login || !state.profile.pinHash) return;
+  const remoteActive = isRemoteSessionActive();
+  if (!login || (!state.profile.pinHash && !remoteActive)) return;
   const profileRecord = {
     id: state.profile.id,
     name: state.profile.name || "Perfil sem nome",
     login,
-    pinHash: state.profile.pinHash || previousRecord.pinHash || "",
+    pinHash: state.profile.pinHash || previousRecord.pinHash || (remoteActive ? "supabase-auth" : ""),
     updatedAt: new Date().toISOString(),
   };
   const profiles = root.profiles.filter((profile) => {
@@ -573,6 +732,7 @@ function saveState() {
   sessionStorage.setItem(ACTIVE_SESSION_PROFILE_KEY, state.profile.id);
   localStorage.setItem(profileStorageKey(state.profile.id), JSON.stringify(state));
   localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: "", profiles }));
+  if (options.syncRemote !== false) queueRemoteSave();
 }
 
 function getSubject(id) {
@@ -912,20 +1072,86 @@ function renderNavigation() {
 
 function renderProfilePanel() {
   const isAuthenticated = isProfileAuthenticated();
+  const onlineMode = isSupabaseConfigured();
   const name = state.profile?.name?.trim();
-  $("#profileLabel").textContent = isAuthenticated && name ? `Perfil: ${name}` : "Entrar no meu perfil";
+  $("#profileLabel").textContent = isAuthenticated && name ? `Perfil: ${name}` : onlineMode ? "Entrar na conta online" : "Entrar no meu perfil";
+  $("#profileName").placeholder = onlineMode ? "seu@email.com" : "Ex.: Ana, Joao, Yury";
+  $("#profilePin").placeholder = onlineMode ? "Senha da conta online" : "Crie ou digite seu PIN";
+  $("#profilePin").inputMode = onlineMode ? "text" : "numeric";
   if (document.activeElement !== $("#profileName")) {
-    $("#profileName").value = isAuthenticated ? name || "" : "";
+    $("#profileName").value = isAuthenticated ? (onlineMode ? state.account?.email || name || "" : name || "") : "";
   }
   if (document.activeElement !== $("#profilePin")) $("#profilePin").value = "";
-  $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : "Entrar";
+  $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : onlineMode ? "Entrar / cadastrar" : "Entrar";
   $("#logoutProfileBtn").disabled = !isAuthenticated;
   $("#profileStatus").textContent = isAuthenticated && name
-    ? `Somente os dados de ${name} estão abertos nesta sessão. Use Sair ao terminar.`
-    : "Digite nome e PIN. Se o perfil não existir, ele será criado zerado, sem dados antigos ou de outro usuário.";
+    ? onlineMode
+      ? `Conta online ativa. Somente os dados de ${name} sao sincronizados para este login.`
+      : `Somente os dados de ${name} estao abertos nesta sessao. Use Sair ao terminar.`
+    : onlineMode
+      ? "Digite e-mail e senha. Se a conta nao existir, ela sera cadastrada zerada no Supabase."
+      : "Digite nome e PIN. Se o perfil nao existir, ele sera criado zerado, sem dados antigos ou de outro usuario.";
 }
 
-function accessProfileByNameAndPin(name, pin) {
+async function accessProfileByNameAndPin(name, pin) {
+  if (isSupabaseConfigured()) {
+    await accessSupabaseProfile(name, pin);
+    return;
+  }
+
+  accessLocalProfileByNameAndPin(name, pin);
+}
+
+async function accessSupabaseProfile(email, password) {
+  const client = getSupabaseClient();
+  if (!client) {
+    showToast("Supabase configurado, mas o SDK nao carregou. Confira a conexao e o script do site.");
+    return;
+  }
+
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  const cleanPassword = String(password || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    showToast("Informe um e-mail valido para a conta online.");
+    return;
+  }
+  if (cleanPassword.length < 6) {
+    showToast("Use uma senha com pelo menos 6 caracteres para a conta online.");
+    return;
+  }
+
+  $("#profileAccessBtn").disabled = true;
+  $("#profileStatus").textContent = "Conectando com o Supabase...";
+  try {
+    const login = await client.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword });
+    if (!login.error && login.data?.user) {
+      await loadSupabaseProfile(login.data.user);
+      return;
+    }
+
+    const displayName = cleanEmail.split("@")[0];
+    const signup = await client.auth.signUp({
+      email: cleanEmail,
+      password: cleanPassword,
+      options: { data: { display_name: displayName } },
+    });
+    if (signup.error) throw signup.error;
+    if (signup.data?.session?.user) {
+      await loadSupabaseProfile(signup.data.session.user, { isNew: true });
+      return;
+    }
+
+    showToast("Conta criada. Se o Supabase pedir confirmacao, confirme o e-mail antes de entrar.");
+  } catch (error) {
+    console.warn("Falha no login Supabase:", error);
+    showToast("Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.");
+  } finally {
+    $("#profileAccessBtn").disabled = false;
+    renderProfilePanel();
+  }
+}
+
+function accessLocalProfileByNameAndPin(name, pin) {
   const cleanName = String(name || "").trim().replace(/\s+/g, " ");
   const cleanPin = String(pin || "").trim();
   if (!cleanName) {
@@ -976,7 +1202,19 @@ function accessProfileByNameAndPin(name, pin) {
   showToast("Perfil novo cadastrado zerado.");
 }
 
-function logoutProfile() {
+async function logoutProfile() {
+  if (isRemoteSessionActive()) {
+    clearTimeout(remoteStore.saveTimer);
+    remoteStore.pendingSave = false;
+    try {
+      await saveRemoteStateNow();
+      const client = getSupabaseClient();
+      if (client) await client.auth.signOut();
+    } catch (error) {
+      console.warn("Falha ao sair do Supabase:", error);
+    }
+    remoteStore.user = null;
+  }
   sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
   pauseTimer();
   state = createEmptyState();
@@ -1863,9 +2101,11 @@ function renderEdital() {
 
   $("#editalDetectedList").innerHTML = edital.items.length
     ? [...groups.entries()]
-        .map(
-          ([subject, subjectItems]) => `
-            <details class="edital-subject-group" open>
+        .map(([subject, subjectItems], index) => {
+          const isOpen = groups.size <= 2 || index === 0;
+
+          return `
+            <details class="edital-subject-group" ${isOpen ? "open" : ""}>
               <summary>
                 <strong>${escapeHTML(subject)}</strong>
                 <span class="tag">${subjectItems.length} assuntos</span>
@@ -1876,8 +2116,8 @@ function renderEdital() {
                   .join("")}
               </div>
             </details>
-          `
-        )
+          `;
+        })
         .join("")
     : `<div class="empty-state">Nenhum assunto importado ainda.</div>`;
 
@@ -4287,7 +4527,9 @@ function attachEvents() {
     accessProfileByNameAndPin($("#profileName").value, $("#profilePin").value);
   });
 
-  $("#logoutProfileBtn").addEventListener("click", logoutProfile);
+  $("#logoutProfileBtn").addEventListener("click", () => {
+    logoutProfile();
+  });
   $("#scrollTopBtn").addEventListener("click", scrollToPageTop);
   window.addEventListener("scroll", updateScrollTopButton, { passive: true });
   updateScrollTopButton();
@@ -4416,7 +4658,7 @@ function attachEvents() {
     state.profile.name = state.account.name || state.profile.name;
     saveState();
     renderProfilePanel();
-    showToast("Login local salvo.");
+    showToast(isSupabaseConfigured() ? "Identificacao da conta salva e sincronizada." : "Login local salvo.");
   });
 
   $("#generateBackupBtn").addEventListener("click", () => {
@@ -5358,3 +5600,4 @@ function importData(event) {
 attachEvents();
 resetTimer();
 render();
+initializeSupabaseAuth();

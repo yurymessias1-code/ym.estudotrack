@@ -194,3 +194,4 @@ Se já houver grifos, o app preserva sua versão marcada e mostra uma atualizaç
 
 Alguns sites oficiais podem bloquear visualização ou sincronização dentro do app.
 Nesse caso, use o botão **Abrir site base**, copie o trecho necessário e cole manualmente no leitor da fonte.
+Atualização de deploy.

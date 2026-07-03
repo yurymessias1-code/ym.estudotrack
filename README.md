@@ -94,9 +94,16 @@ window.ESTUDOS_TRACK_SUPABASE = {
 };
 ```
 
-5. Publique novamente no Netlify.
+5. Publique novamente no GitHub Pages.
 
 O isolamento dos dados acontece pela tabela `study_profiles` e pelas políticas de Row Level Security. Cada linha usa `user_id = auth.uid()`, então uma conta autenticada só consegue ler, salvar, atualizar ou excluir a própria linha.
+
+Para recuperação de senha, configure também em **Authentication > URL Configuration** no Supabase:
+
+- **Site URL**: `https://estudostrack.com.br`
+- **Redirect URLs**: `https://estudostrack.com.br`
+
+Depois disso, o botão **Esqueci a senha** envia um link para o e-mail do usuário. Ao abrir o link, o usuário volta ao Estudos Track e define uma nova senha na aba **Conta**.
 
 ## Pomodoro com alarme
 

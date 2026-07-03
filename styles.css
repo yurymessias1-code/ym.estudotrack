@@ -296,6 +296,12 @@ button:disabled {
   gap: 8px;
 }
 
+.profile-recovery-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
 .storage-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

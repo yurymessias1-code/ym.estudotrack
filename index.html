@@ -52,6 +52,9 @@
             <button class="button secondary" id="profileAccessBtn" type="submit">Entrar</button>
             <button class="button ghost" id="logoutProfileBtn" type="button">Sair</button>
           </div>
+          <div class="profile-recovery-actions">
+            <button class="button ghost" id="forgotPasswordBtn" type="button">Esqueci a senha</button>
+          </div>
           <span id="profileStatus">Com Supabase configurado, cada conta entra por e-mail e senha. Sem Supabase, cada perfil local entra por nome e PIN.</span>
         </form>
 
@@ -1199,6 +1202,24 @@
               </label>
               <button class="button primary" type="submit">Salvar identificação</button>
               <p class="music-note">Com Supabase configurado, os dados ficam vinculados ao e-mail da conta. Sem Supabase, continuam separados apenas neste navegador.</p>
+            </form>
+
+            <form class="panel form-panel" id="passwordForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Segurança</p>
+                  <h3>Senha da conta online</h3>
+                </div>
+              </div>
+              <label>
+                Nova senha
+                <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres" />
+              </label>
+              <div class="profile-actions">
+                <button class="button primary" id="updatePasswordBtn" type="submit">Alterar senha</button>
+                <button class="button ghost" id="sendRecoveryFromAccountBtn" type="button">Enviar recuperação</button>
+              </div>
+              <p class="music-note">Use esta área para trocar a senha quando estiver logado ou depois de abrir o link de recuperação enviado pelo Supabase.</p>
             </form>
 
             <section class="panel form-panel">

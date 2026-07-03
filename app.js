@@ -55,6 +55,7 @@ let remoteStore = {
   saveTimer: null,
   syncing: false,
   pendingSave: false,
+  recoveryMode: false,
 };
 
 function todayISO() {
@@ -173,6 +174,73 @@ function isRemoteSessionActive() {
   return Boolean(remoteStore.user && isSupabaseConfigured());
 }
 
+function getAuthRedirectUrl() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function cleanEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail(value));
+}
+
+function getRecoveryEmail() {
+  return cleanEmail($("#profileName")?.value || state.account?.email || remoteStore.user?.email || "");
+}
+
+async function sendPasswordRecovery(email) {
+  const client = getSupabaseClient();
+  if (!client) {
+    showToast("Supabase nao esta configurado para recuperacao de senha.");
+    return;
+  }
+
+  const recoveryEmail = cleanEmail(email);
+  if (!isValidEmail(recoveryEmail)) {
+    showToast("Informe o e-mail da conta para recuperar a senha.");
+    return;
+  }
+
+  try {
+    const { error } = await client.auth.resetPasswordForEmail(recoveryEmail, {
+      redirectTo: getAuthRedirectUrl(),
+    });
+    if (error) throw error;
+    showToast("Link de recuperacao enviado. Abra o e-mail e volte para definir uma nova senha.");
+  } catch (error) {
+    console.warn("Falha ao enviar recuperacao de senha:", error);
+    showToast("Nao foi possivel enviar a recuperacao. Confira o e-mail e as configuracoes de URL do Supabase.");
+  }
+}
+
+async function updateSupabasePassword(password) {
+  const client = getSupabaseClient();
+  if (!client) {
+    showToast("Supabase nao esta configurado para alterar senha.");
+    return;
+  }
+
+  const newPassword = String(password || "").trim();
+  if (newPassword.length < 6) {
+    showToast("Use uma senha com pelo menos 6 caracteres.");
+    return;
+  }
+
+  try {
+    const { error } = await client.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    remoteStore.recoveryMode = false;
+    $("#newPasswordInput").value = "";
+    showToast("Senha atualizada com sucesso.");
+    renderProfilePanel();
+  } catch (error) {
+    console.warn("Falha ao atualizar senha:", error);
+    showToast("Nao foi possivel alterar a senha. Entre pelo link de recuperacao ou faca login novamente.");
+  }
+}
+
 function queueRemoteSave() {
   if (!isRemoteSessionActive()) return;
   if (remoteStore.syncing) {
@@ -246,7 +314,7 @@ async function loadSupabaseProfile(user, options = {}) {
     if (!data) await saveRemoteStateNow();
     resetTimer();
     render();
-    showToast(options.isNew ? "Conta online criada com dados zerados." : "Conta online carregada.");
+    if (!options.recovery) showToast(options.isNew ? "Conta online criada com dados zerados." : "Conta online carregada.");
     return true;
   } catch (error) {
     console.warn("Falha ao carregar perfil Supabase:", error);
@@ -263,6 +331,15 @@ async function initializeSupabaseAuth() {
     renderProfilePanel();
     return;
   }
+
+  client.auth.onAuthStateChange(async (event, session) => {
+    if (event !== "PASSWORD_RECOVERY") return;
+    remoteStore.recoveryMode = true;
+    if (session?.user) {
+      await loadSupabaseProfile(session.user, { recovery: true });
+    }
+    showToast("Recuperacao confirmada. Digite a nova senha na aba Conta.");
+  });
 
   try {
     const { data, error } = await client.auth.getSession();
@@ -1091,6 +1168,16 @@ function renderProfilePanel() {
     : onlineMode
       ? "Digite e-mail e senha. Se a conta nao existir, ela sera cadastrada zerada no Supabase."
       : "Digite nome e PIN. Se o perfil nao existir, ele sera criado zerado, sem dados antigos ou de outro usuario.";
+  if (remoteStore.recoveryMode) {
+    $("#profileStatus").textContent = "Link de recuperacao aceito. Abra a aba Conta e defina uma nova senha.";
+  }
+  $("#forgotPasswordBtn").hidden = !onlineMode;
+  $("#forgotPasswordBtn").disabled = !onlineMode;
+  $("#forgotPasswordBtn").textContent = remoteStore.recoveryMode ? "Reenviar recuperacao" : "Esqueci a senha";
+  const passwordControlsEnabled = onlineMode && isAuthenticated;
+  $("#newPasswordInput").disabled = !passwordControlsEnabled;
+  $("#updatePasswordBtn").disabled = !passwordControlsEnabled;
+  $("#sendRecoveryFromAccountBtn").disabled = !onlineMode;
 }
 
 async function accessProfileByNameAndPin(name, pin) {
@@ -1109,9 +1196,9 @@ async function accessSupabaseProfile(email, password) {
     return;
   }
 
-  const cleanEmail = String(email || "").trim().toLowerCase();
+  const emailAddress = cleanEmail(email);
   const cleanPassword = String(password || "").trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+  if (!isValidEmail(emailAddress)) {
     showToast("Informe um e-mail valido para a conta online.");
     return;
   }
@@ -1123,15 +1210,15 @@ async function accessSupabaseProfile(email, password) {
   $("#profileAccessBtn").disabled = true;
   $("#profileStatus").textContent = "Conectando com o Supabase...";
   try {
-    const login = await client.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword });
+    const login = await client.auth.signInWithPassword({ email: emailAddress, password: cleanPassword });
     if (!login.error && login.data?.user) {
       await loadSupabaseProfile(login.data.user);
       return;
     }
 
-    const displayName = cleanEmail.split("@")[0];
+    const displayName = emailAddress.split("@")[0];
     const signup = await client.auth.signUp({
-      email: cleanEmail,
+      email: emailAddress,
       password: cleanPassword,
       options: { data: { display_name: displayName } },
     });
@@ -4530,6 +4617,9 @@ function attachEvents() {
   $("#logoutProfileBtn").addEventListener("click", () => {
     logoutProfile();
   });
+  $("#forgotPasswordBtn").addEventListener("click", () => {
+    sendPasswordRecovery(getRecoveryEmail());
+  });
   $("#scrollTopBtn").addEventListener("click", scrollToPageTop);
   window.addEventListener("scroll", updateScrollTopButton, { passive: true });
   updateScrollTopButton();
@@ -4659,6 +4749,15 @@ function attachEvents() {
     saveState();
     renderProfilePanel();
     showToast(isSupabaseConfigured() ? "Identificacao da conta salva e sincronizada." : "Login local salvo.");
+  });
+
+  $("#passwordForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateSupabasePassword($("#newPasswordInput").value);
+  });
+
+  $("#sendRecoveryFromAccountBtn").addEventListener("click", () => {
+    sendPasswordRecovery(state.account?.email || remoteStore.user?.email || $("#profileName").value);
   });
 
   $("#generateBackupBtn").addEventListener("click", () => {

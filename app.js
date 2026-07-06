@@ -1189,6 +1189,46 @@ async function accessProfileByNameAndPin(name, pin) {
   accessLocalProfileByNameAndPin(name, pin);
 }
 
+function getSupabaseAuthMessage(error) {
+  return String(error?.message || error?.error_description || error || "").trim();
+}
+
+function isSupabaseEmailUnconfirmedError(error) {
+  const message = getSupabaseAuthMessage(error).toLowerCase();
+  return message.includes("email not confirmed") || message.includes("not confirmed");
+}
+
+function isSupabaseInvalidCredentialsError(error) {
+  const message = getSupabaseAuthMessage(error).toLowerCase();
+  return message.includes("invalid login credentials") || message.includes("invalid credentials");
+}
+
+function getFriendlySupabaseAuthError(error) {
+  const message = getSupabaseAuthMessage(error).toLowerCase();
+  if (isSupabaseEmailUnconfirmedError(error)) {
+    return "Conta criada, mas o e-mail ainda nao foi confirmado. Confira sua caixa de entrada e spam.";
+  }
+  if (message.includes("already registered") || message.includes("user already registered")) {
+    return "Este e-mail ja tem conta. Use a senha correta ou clique em Esqueci a senha.";
+  }
+  if (isSupabaseInvalidCredentialsError(error)) {
+    return "E-mail ou senha incorretos. Se a conta for nova, confirme o e-mail antes de entrar.";
+  }
+  if (message.includes("fetch") || message.includes("failed to fetch") || message.includes("network")) {
+    return "Nao foi possivel conectar ao Supabase. Confira a internet, a URL e a chave publica.";
+  }
+  return "Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.";
+}
+
+async function resendSignupConfirmation(client, email) {
+  const { error } = await client.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: getAuthRedirectUrl() },
+  });
+  if (error) throw error;
+}
+
 async function accessSupabaseProfile(email, password) {
   const client = getSupabaseClient();
   if (!client) {
@@ -1209,18 +1249,37 @@ async function accessSupabaseProfile(email, password) {
 
   $("#profileAccessBtn").disabled = true;
   $("#profileStatus").textContent = "Conectando com o Supabase...";
+  let finalStatus = "";
   try {
     const login = await client.auth.signInWithPassword({ email: emailAddress, password: cleanPassword });
     if (!login.error && login.data?.user) {
       await loadSupabaseProfile(login.data.user);
       return;
     }
+    if (login.error && isSupabaseEmailUnconfirmedError(login.error)) {
+      try {
+        await resendSignupConfirmation(client, emailAddress);
+        finalStatus = "Conta aguardando confirmacao. Reenviamos o e-mail; confira entrada e spam.";
+        showToast(finalStatus);
+      } catch (resendError) {
+        console.warn("Falha ao reenviar confirmacao Supabase:", resendError);
+        finalStatus = "Conta aguardando confirmacao. Confira o e-mail ou os logs SMTP da Brevo.";
+        showToast(finalStatus);
+      }
+      return;
+    }
+    if (login.error && !isSupabaseInvalidCredentialsError(login.error)) {
+      throw login.error;
+    }
 
     const displayName = emailAddress.split("@")[0];
     const signup = await client.auth.signUp({
       email: emailAddress,
       password: cleanPassword,
-      options: { data: { display_name: displayName } },
+      options: {
+        emailRedirectTo: getAuthRedirectUrl(),
+        data: { display_name: displayName },
+      },
     });
     if (signup.error) throw signup.error;
     if (signup.data?.session?.user) {
@@ -1228,13 +1287,16 @@ async function accessSupabaseProfile(email, password) {
       return;
     }
 
-    showToast("Conta criada. Se o Supabase pedir confirmacao, confirme o e-mail antes de entrar.");
+    finalStatus = "Se for uma conta nova, enviamos a confirmacao por e-mail. Se ja existia, use a senha correta ou Esqueci a senha.";
+    showToast(finalStatus);
   } catch (error) {
     console.warn("Falha no login Supabase:", error);
-    showToast("Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.");
+    finalStatus = getFriendlySupabaseAuthError(error);
+    showToast(finalStatus);
   } finally {
     $("#profileAccessBtn").disabled = false;
     renderProfilePanel();
+    if (finalStatus) $("#profileStatus").textContent = finalStatus;
   }
 }
 

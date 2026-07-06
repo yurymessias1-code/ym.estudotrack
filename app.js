@@ -1190,7 +1190,15 @@ async function accessProfileByNameAndPin(name, pin) {
 }
 
 function getSupabaseAuthMessage(error) {
-  return String(error?.message || error?.error_description || error || "").trim();
+  const directMessage = error?.message || error?.error_description || error?.msg || error?.details || error?.hint;
+  if (directMessage) return String(directMessage).trim();
+  if (typeof error === "string") return error.trim();
+  try {
+    const serialized = JSON.stringify(error);
+    return serialized && serialized !== "{}" ? serialized : "";
+  } catch {
+    return "";
+  }
 }
 
 function isSupabaseEmailUnconfirmedError(error) {
@@ -1203,8 +1211,13 @@ function isSupabaseInvalidCredentialsError(error) {
   return message.includes("invalid login credentials") || message.includes("invalid credentials");
 }
 
-function getFriendlySupabaseAuthError(error) {
+function getFriendlySupabaseAuthError(error, operation = "acesso") {
   const message = getSupabaseAuthMessage(error).toLowerCase();
+  if (!message) {
+    return operation === "cadastro"
+      ? "O Supabase recusou o cadastro sem detalhe. Confira Authentication > Logs no Supabase e os logs SMTP da Brevo."
+      : "O Supabase recusou o acesso sem detalhe. Confira a configuracao do projeto e tente novamente.";
+  }
   if (isSupabaseEmailUnconfirmedError(error)) {
     return "Conta criada, mas o e-mail ainda nao foi confirmado. Confira sua caixa de entrada e spam.";
   }
@@ -1229,9 +1242,7 @@ function getFriendlySupabaseAuthError(error) {
   if (message.includes("fetch") || message.includes("failed to fetch") || message.includes("network")) {
     return "Nao foi possivel conectar ao Supabase. Confira a internet, a URL e a chave publica.";
   }
-  return message
-    ? `Erro do Supabase: ${getSupabaseAuthMessage(error)}`
-    : "Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.";
+  return `Erro do Supabase: ${getSupabaseAuthMessage(error)}`;
 }
 
 async function resendSignupConfirmation(client, email) {
@@ -1295,7 +1306,11 @@ async function accessSupabaseProfile(email, password) {
         data: { display_name: displayName },
       },
     });
-    if (signup.error) throw signup.error;
+    if (signup.error) {
+      finalStatus = getFriendlySupabaseAuthError(signup.error, "cadastro");
+      showToast(finalStatus);
+      return;
+    }
     if (signup.data?.session?.user) {
       await loadSupabaseProfile(signup.data.session.user, { isNew: true });
       return;
@@ -1305,7 +1320,7 @@ async function accessSupabaseProfile(email, password) {
     showToast(finalStatus);
   } catch (error) {
     console.warn("Falha no login Supabase:", error);
-    finalStatus = getFriendlySupabaseAuthError(error);
+    finalStatus = getFriendlySupabaseAuthError(error, "acesso");
     showToast(finalStatus);
   } finally {
     $("#profileAccessBtn").disabled = false;

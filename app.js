@@ -1208,6 +1208,18 @@ function getFriendlySupabaseAuthError(error) {
   if (isSupabaseEmailUnconfirmedError(error)) {
     return "Conta criada, mas o e-mail ainda nao foi confirmado. Confira sua caixa de entrada e spam.";
   }
+  if (message.includes("error sending confirmation") || message.includes("confirmation email")) {
+    return "O cadastro chegou ao Supabase, mas o e-mail de confirmacao nao foi enviado. Confira o SMTP no Supabase e os logs da Brevo.";
+  }
+  if (message.includes("rate limit")) {
+    return "O Supabase limitou os envios por enquanto. Aguarde alguns minutos e tente novamente.";
+  }
+  if (message.includes("signups not allowed") || message.includes("signup") && message.includes("disabled")) {
+    return "Cadastro por e-mail esta desativado no Supabase. Ative Authentication > Sign In / Providers > Email.";
+  }
+  if (message.includes("invalid api key") || message.includes("jwt")) {
+    return "A chave publica do Supabase parece incorreta. Confira o arquivo supabase-config.js no GitHub.";
+  }
   if (message.includes("already registered") || message.includes("user already registered")) {
     return "Este e-mail ja tem conta. Use a senha correta ou clique em Esqueci a senha.";
   }
@@ -1217,7 +1229,9 @@ function getFriendlySupabaseAuthError(error) {
   if (message.includes("fetch") || message.includes("failed to fetch") || message.includes("network")) {
     return "Nao foi possivel conectar ao Supabase. Confira a internet, a URL e a chave publica.";
   }
-  return "Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.";
+  return message
+    ? `Erro do Supabase: ${getSupabaseAuthMessage(error)}`
+    : "Nao foi possivel entrar ou cadastrar. Confira e-mail, senha e configuracao do Supabase.";
 }
 
 async function resendSignupConfirmation(client, email) {

@@ -10,6 +10,7 @@ const GLOBAL_SEARCH_LIMIT = 10;
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minuscula, numero e simbolo.";
+const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
 
 const titles = {
   dashboard: "Painel",
@@ -53,6 +54,7 @@ let pdfJsLoadPromise = null;
 let remoteStore = {
   client: null,
   enabled: false,
+  usingFallbackClient: false,
   user: null,
   saveTimer: null,
   syncing: false,
@@ -149,19 +151,264 @@ function isSupabaseConfigured() {
   return getSupabaseSettings().configured;
 }
 
+function getStoredSupabaseFallbackSession() {
+  try {
+    const saved = localStorage.getItem(SUPABASE_FALLBACK_SESSION_KEY);
+    const session = saved ? JSON.parse(saved) : null;
+    return session?.access_token && session?.user ? session : null;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredSupabaseFallbackSession(session) {
+  if (session?.access_token && session?.user) {
+    localStorage.setItem(SUPABASE_FALLBACK_SESSION_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(SUPABASE_FALLBACK_SESSION_KEY);
+  }
+}
+
+function normalizeSupabaseFallbackSession(data = {}) {
+  if (!data?.access_token || !data?.user) return null;
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || "",
+    token_type: data.token_type || "bearer",
+    expires_in: Number(data.expires_in || 0),
+    expires_at: data.expires_at || (data.expires_in ? Math.floor(Date.now() / 1000) + Number(data.expires_in) : 0),
+    user: data.user,
+  };
+}
+
+async function supabaseFallbackFetch(path, options = {}) {
+  const settings = getSupabaseSettings();
+  const headers = {
+    apikey: settings.anonKey,
+    Authorization: `Bearer ${options.token || settings.anonKey}`,
+    ...options.headers,
+  };
+  const hasBody = options.body !== undefined;
+  if (hasBody && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${settings.url}${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: hasBody ? JSON.stringify(options.body) : undefined,
+  });
+  const raw = await response.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = raw;
+    }
+  }
+  if (!response.ok) {
+    return {
+      data: null,
+      error: typeof data === "object" && data ? data : { message: raw || response.statusText, status: response.status },
+    };
+  }
+  return { data, error: null };
+}
+
+function createSupabaseFallbackQuery(table) {
+  let selectedColumns = "*";
+  const filters = [];
+  const sessionToken = () => getStoredSupabaseFallbackSession()?.access_token || "";
+  const filterQuery = () => {
+    const query = new URLSearchParams();
+    filters.forEach(([column, value]) => query.append(column, `eq.${String(value)}`));
+    return query;
+  };
+
+  return {
+    select(columns = "*") {
+      selectedColumns = columns;
+      return this;
+    },
+    eq(column, value) {
+      filters.push([column, value]);
+      return this;
+    },
+    async maybeSingle() {
+      const query = filterQuery();
+      query.set("select", selectedColumns);
+      query.set("limit", "1");
+      const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}?${query}`, {
+        token: sessionToken(),
+      });
+      if (error) return { data: null, error };
+      return { data: Array.isArray(data) ? data[0] || null : data || null, error: null };
+    },
+    async upsert(payload, options = {}) {
+      const query = new URLSearchParams();
+      if (options.onConflict) query.set("on_conflict", options.onConflict);
+      const suffix = query.toString() ? `?${query}` : "";
+      const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}${suffix}`, {
+        method: "POST",
+        token: sessionToken(),
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: payload,
+      });
+      return { data, error };
+    },
+    delete() {
+      return {
+        eq: async (column, value) => {
+          const query = new URLSearchParams();
+          query.append(column, `eq.${String(value)}`);
+          const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}?${query}`, {
+            method: "DELETE",
+            token: sessionToken(),
+            headers: { Prefer: "return=minimal" },
+          });
+          return { data, error };
+        },
+      };
+    },
+  };
+}
+
+function readSupabaseFallbackSessionFromUrl() {
+  const hash = window.location.hash ? new URLSearchParams(window.location.hash.slice(1)) : null;
+  if (!hash?.get("access_token")) return null;
+  const user = {
+    id: hash.get("user_id") || "",
+    email: hash.get("email") || state.account?.email || "",
+    user_metadata: {},
+  };
+  const session = normalizeSupabaseFallbackSession({
+    access_token: hash.get("access_token"),
+    refresh_token: hash.get("refresh_token") || "",
+    token_type: hash.get("token_type") || "bearer",
+    expires_in: Number(hash.get("expires_in") || 0),
+    user,
+  });
+  if (session) {
+    setStoredSupabaseFallbackSession(session);
+    history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+  }
+  return session;
+}
+
+function createSupabaseFallbackClient() {
+  const listeners = new Set();
+  const emit = (event, session) => {
+    listeners.forEach((listener) => {
+      try {
+        listener(event, session ? { user: session.user, access_token: session.access_token } : null);
+      } catch (error) {
+        console.warn("Falha em listener Supabase fallback:", error);
+      }
+    });
+  };
+
+  return {
+    auth: {
+      onAuthStateChange(callback) {
+        listeners.add(callback);
+        return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } };
+      },
+      async getSession() {
+        const recoverySession = readSupabaseFallbackSessionFromUrl();
+        if (recoverySession) {
+          emit("PASSWORD_RECOVERY", recoverySession);
+          return { data: { session: recoverySession }, error: null };
+        }
+        return { data: { session: getStoredSupabaseFallbackSession() }, error: null };
+      },
+      async signInWithPassword({ email, password }) {
+        const { data, error } = await supabaseFallbackFetch("/auth/v1/token?grant_type=password", {
+          method: "POST",
+          body: { email, password },
+        });
+        if (error) return { data: null, error };
+        const session = normalizeSupabaseFallbackSession(data);
+        setStoredSupabaseFallbackSession(session);
+        if (session) emit("SIGNED_IN", session);
+        return { data: { ...data, session, user: session?.user || data?.user || null }, error: null };
+      },
+      async signUp({ email, password, options = {} }) {
+        const redirect = options.emailRedirectTo ? `?redirect_to=${encodeURIComponent(options.emailRedirectTo)}` : "";
+        const { data, error } = await supabaseFallbackFetch(`/auth/v1/signup${redirect}`, {
+          method: "POST",
+          body: { email, password, data: options.data || {} },
+        });
+        if (error) return { data: null, error };
+        const session = normalizeSupabaseFallbackSession(data);
+        if (session) {
+          setStoredSupabaseFallbackSession(session);
+          emit("SIGNED_IN", session);
+        }
+        return { data: { ...data, session, user: session?.user || data?.user || null }, error: null };
+      },
+      async resend({ type, email, options = {} }) {
+        const redirect = options.emailRedirectTo ? `?redirect_to=${encodeURIComponent(options.emailRedirectTo)}` : "";
+        return supabaseFallbackFetch(`/auth/v1/resend${redirect}`, {
+          method: "POST",
+          body: { type, email },
+        });
+      },
+      async resetPasswordForEmail(email, options = {}) {
+        const redirect = options.redirectTo ? `?redirect_to=${encodeURIComponent(options.redirectTo)}` : "";
+        return supabaseFallbackFetch(`/auth/v1/recover${redirect}`, {
+          method: "POST",
+          body: { email },
+        });
+      },
+      async updateUser(payload) {
+        const session = getStoredSupabaseFallbackSession();
+        if (!session) return { data: null, error: { message: "Sessao online ausente." } };
+        const { data, error } = await supabaseFallbackFetch("/auth/v1/user", {
+          method: "PUT",
+          token: session.access_token,
+          body: payload,
+        });
+        if (error) return { data: null, error };
+        const updatedSession = { ...session, user: data?.user || data || session.user };
+        setStoredSupabaseFallbackSession(updatedSession);
+        return { data: { user: updatedSession.user }, error: null };
+      },
+      async signOut() {
+        const session = getStoredSupabaseFallbackSession();
+        if (session) {
+          await supabaseFallbackFetch("/auth/v1/logout", {
+            method: "POST",
+            token: session.access_token,
+          }).catch(() => null);
+        }
+        setStoredSupabaseFallbackSession(null);
+        emit("SIGNED_OUT", null);
+        return { error: null };
+      },
+    },
+    from(table) {
+      return createSupabaseFallbackQuery(table);
+    },
+  };
+}
+
 function getSupabaseClient() {
   const settings = getSupabaseSettings();
   if (!settings.configured) return null;
   if (remoteStore.client) return remoteStore.client;
   const factory = globalThis.supabase?.createClient;
-  if (typeof factory !== "function") return null;
-  remoteStore.client = factory(settings.url, settings.anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
+  if (typeof factory === "function") {
+    remoteStore.client = factory(settings.url, settings.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    });
+  } else if (typeof fetch === "function") {
+    remoteStore.client = createSupabaseFallbackClient();
+    remoteStore.usingFallbackClient = true;
+  } else {
+    return null;
+  }
   remoteStore.enabled = true;
   return remoteStore.client;
 }

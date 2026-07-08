@@ -13,7 +13,7 @@
 - A tela inicial possui **Revisao diaria sugerida**, com atalhos para edital, flashcards, reforco e controle do dia.
 - A aba **Edital** permite remover assuntos detectados incorretamente.
 - A mesma aba permite adicionar materia/assunto manualmente antes de importar para o plano.
-- Os seletores principais de materia e assunto tem busca e lista rolavel para evitar menus gigantes.
+- Os seletores principais de materia e assunto voltaram ao formato nativo, mais compacto e sem sobrepor os botoes de salvar/aplicar.
 
 ## Teste rapido
 
@@ -23,4 +23,4 @@ Com Node.js disponivel, rode dentro da pasta do projeto:
 node tests/smoke-tests.js
 ```
 
-Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, seletores pesquisaveis e politicas do SQL.
+Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, seletores nativos e politicas do SQL.

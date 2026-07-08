@@ -19,14 +19,14 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
+assert(html.includes("20260708-native-select"), "Cache do HTML nao foi atualizado para seletores nativos.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
-assert(app.includes("function enhanceSearchableSelects"), "Seletores pesquisaveis ausentes.");
+assert(!app.includes("enhanceSearchableSelects();"), "Seletores customizados nao devem ser ativados.");
 assert(app.includes("function deleteCurrentProfileData"), "Exclusao de dados da conta ausente.");
 assert(app.includes("deleteEditalItem"), "Remocao individual de item do edital ausente.");
 assert(app.includes("email: user.email"), "Sincronizacao do e-mail no Supabase ausente.");
 
-assert(css.includes(".searchable-select-menu"), "CSS do seletor pesquisavel ausente.");
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
 

@@ -1605,7 +1605,6 @@ function render() {
   renderNavigation();
   renderProfilePanel();
   renderSelectors();
-  enhanceSearchableSelects();
   renderDashboard();
   renderDailyReview();
   renderControl();

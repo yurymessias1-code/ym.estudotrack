@@ -9,6 +9,7 @@ const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
 const GLOBAL_SEARCH_LIMIT = 10;
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minuscula, numero e simbolo.";
 
 const titles = {
   dashboard: "Painel",
@@ -216,6 +217,11 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail(value));
 }
 
+function isStrongOnlinePassword(value) {
+  const password = String(value || "");
+  return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
+}
+
 function getRecoveryEmail() {
   return cleanEmail($("#profileName")?.value || state.account?.email || remoteStore.user?.email || "");
 }
@@ -253,8 +259,8 @@ async function updateSupabasePassword(password) {
   }
 
   const newPassword = String(password || "").trim();
-  if (newPassword.length < 6) {
-    showToast("Use uma senha com pelo menos 6 caracteres.");
+  if (!isStrongOnlinePassword(newPassword)) {
+    showToast(ONLINE_PASSWORD_HINT);
     return;
   }
 
@@ -1513,7 +1519,7 @@ function renderProfilePanel() {
   const name = state.profile?.name?.trim();
   $("#profileLabel").textContent = isAuthenticated && name ? `Perfil: ${name}` : onlineMode ? "Entrar na conta online" : "Entrar no meu perfil";
   $("#profileName").placeholder = onlineMode ? "seu@email.com" : "Ex.: Ana, Joao, Yury";
-  $("#profilePin").placeholder = onlineMode ? "Senha da conta online" : "Crie ou digite seu PIN";
+  $("#profilePin").placeholder = onlineMode ? "Senha forte da conta online" : "Crie ou digite seu PIN";
   $("#profilePin").inputMode = onlineMode ? "text" : "numeric";
   if (document.activeElement !== $("#profileName")) {
     $("#profileName").value = isAuthenticated ? (onlineMode ? state.account?.email || name || "" : name || "") : "";
@@ -1528,7 +1534,7 @@ function renderProfilePanel() {
       ? `Conta online ativa. Somente os dados de ${name} sao sincronizados para este login.`
       : `Somente os dados de ${name} estao abertos nesta sessao. Use Sair ao terminar.`
     : onlineMode
-      ? "Use Entrar para uma conta existente ou Criar conta para cadastrar um e-mail novo."
+      ? "Use Entrar para conta existente ou Criar conta para e-mail novo. Todo cadastro novo exige confirmacao por e-mail."
       : "Use Entrar para abrir um perfil existente ou Criar perfil para começar zerado.";
   if (remoteStore.recoveryMode) {
     $("#profileStatus").textContent = "Link de recuperacao aceito. Abra a aba Conta e defina uma nova senha.";
@@ -1620,6 +1626,12 @@ function getFriendlySupabaseAuthError(error, operation = "acesso") {
   if (message.includes("error sending confirmation") || message.includes("confirmation email")) {
     return "O cadastro chegou ao Supabase, mas o e-mail de confirmacao nao foi enviado. Confira o SMTP no Supabase e os logs da Brevo.";
   }
+  if (message.includes("unauthorized ip") || message.includes("5.7.1") || (message.includes("smtp") && message.includes("unauthorized"))) {
+    return "A Brevo bloqueou o envio por IP nao autorizado. Em Brevo > Seguranca > IPs autorizados, autorize o IP detectado ou desative o bloqueio para chaves SMTP.";
+  }
+  if (message.includes("password should contain") || message.includes("weak password") || (message.includes("password") && message.includes("character of each"))) {
+    return ONLINE_PASSWORD_HINT;
+  }
   if (message.includes("rate limit")) {
     return "O Supabase limitou os envios por enquanto. Aguarde alguns minutos e tente novamente.";
   }
@@ -1663,12 +1675,16 @@ async function accessSupabaseProfile(email, password, options = {}) {
     showToast("Informe um e-mail valido para a conta online.");
     return;
   }
-  if (cleanPassword.length < 6) {
-    showToast("Use uma senha com pelo menos 6 caracteres para a conta online.");
+  if (!cleanPassword) {
+    showToast("Digite a senha da conta online.");
+    return;
+  }
+  const createAccount = Boolean(options.create);
+  if (createAccount && !isStrongOnlinePassword(cleanPassword)) {
+    showToast(ONLINE_PASSWORD_HINT);
     return;
   }
 
-  const createAccount = Boolean(options.create);
   $("#profileAccessBtn").disabled = true;
   $("#profileSignupBtn").disabled = true;
   $("#profileStatus").textContent = createAccount ? "Criando conta no Supabase..." : "Entrando no Supabase...";

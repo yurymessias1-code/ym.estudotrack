@@ -1648,7 +1648,7 @@ function getFriendlySupabaseAuthError(error, operation = "acesso") {
     return "E-mail ou senha incorretos. Se a conta for nova, confirme o e-mail antes de entrar.";
   }
   if (message.includes("fetch") || message.includes("failed to fetch") || message.includes("network")) {
-    return "Nao foi possivel conectar ao Supabase. Confira a internet, a URL e a chave publica.";
+    return "Nao foi possivel conectar ao Supabase. Confira se supabase-config.js foi publicado atualizado, limpe o cache e teste sem bloqueador de anuncios/VPN.";
   }
   return `Erro do Supabase: ${getSupabaseAuthMessage(error)}`;
 }

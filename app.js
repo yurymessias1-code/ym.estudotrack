@@ -6,8 +6,29 @@ const REMOTE_SAVE_DEBOUNCE_MS = 900;
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
 const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
+const GLOBAL_SEARCH_LIMIT = 10;
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const SEARCHABLE_SELECT_IDS = [
+  "topicSubject",
+  "questionTopic",
+  "timerSubject",
+  "timerTopic",
+  "studySubject",
+  "studyTopic",
+  "flashcardSubject",
+  "flashcardTopic",
+  "caseSubject",
+  "caseTopic",
+  "caseSubjectFilter",
+  "caseTopicFilter",
+  "legalMaterialSubject",
+  "legalMaterialTopic",
+  "legalMaterialSubjectFilter",
+  "legalMaterialTopicFilter",
+  "flashcardReviewSubject",
+  "flashcardReviewTopic",
+];
 
 const titles = {
   dashboard: "Painel",
@@ -56,6 +77,9 @@ let remoteStore = {
   syncing: false,
   pendingSave: false,
   recoveryMode: false,
+  syncStatus: "local",
+  lastSyncAt: "",
+  lastSyncError: "",
 };
 
 function todayISO() {
@@ -174,6 +198,32 @@ function isRemoteSessionActive() {
   return Boolean(remoteStore.user && isSupabaseConfigured());
 }
 
+function setSyncStatus(status, message = "") {
+  remoteStore.syncStatus = status;
+  remoteStore.lastSyncError = status === "error" ? message : "";
+  if (status === "saved") remoteStore.lastSyncAt = new Date().toISOString();
+  renderSyncStatus();
+}
+
+function renderSyncStatus() {
+  const badge = $("#syncStatus");
+  if (!badge) return;
+  const status = remoteStore.syncStatus || (isSupabaseConfigured() ? "offline" : "local");
+  const labels = {
+    local: "Salvo local",
+    offline: "Online inativo",
+    saving: "Salvando...",
+    saved: "Salvo",
+    error: "Erro ao salvar",
+  };
+  badge.textContent = labels[status] || "Salvo";
+  badge.className = `sync-status ${status}`;
+  const detail = status === "saved" && remoteStore.lastSyncAt
+    ? `Ultimo salvamento: ${new Date(remoteStore.lastSyncAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+    : remoteStore.lastSyncError || labels[status] || "";
+  badge.title = detail;
+}
+
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
 }
@@ -241,12 +291,76 @@ async function updateSupabasePassword(password) {
   }
 }
 
-function queueRemoteSave() {
-  if (!isRemoteSessionActive()) return;
-  if (remoteStore.syncing) {
-    remoteStore.pendingSave = true;
+async function forceSaveCurrentProfile() {
+  if (!isProfileAuthenticated()) {
+    showToast("Entre em uma conta antes de salvar.");
     return;
   }
+  if (isRemoteSessionActive()) {
+    clearTimeout(remoteStore.saveTimer);
+    remoteStore.pendingSave = false;
+    await saveRemoteStateNow();
+    showToast("Dados enviados para o Supabase.");
+    return;
+  }
+  saveState({ syncRemote: false });
+  showToast("Dados salvos neste navegador.");
+}
+
+async function deleteCurrentProfileData() {
+  if (!isProfileAuthenticated()) {
+    showToast("Entre na conta que deseja excluir.");
+    return;
+  }
+  const confirmed = window.confirm("Excluir todos os dados deste perfil? Esta acao nao pode ser desfeita sem backup.");
+  if (!confirmed) return;
+
+  if (isRemoteSessionActive()) {
+    const client = getSupabaseClient();
+    const settings = getSupabaseSettings();
+    const user = remoteStore.user;
+    try {
+      clearTimeout(remoteStore.saveTimer);
+      const { error } = await client.from(settings.table).delete().eq("user_id", user.id);
+      if (error) throw error;
+      await client.auth.signOut();
+      localStorage.removeItem(profileStorageKey(remoteProfileId(user.id)));
+      remoteStore.user = null;
+      remoteStore.pendingSave = false;
+      setSyncStatus("offline");
+    } catch (error) {
+      console.warn("Falha ao excluir dados da conta:", error);
+      showToast("Nao foi possivel excluir os dados online. Confira o Supabase e tente novamente.");
+      return;
+    }
+  } else {
+    const profileId = state.profile?.id;
+    const root = getProfilesRoot();
+    localStorage.removeItem(profileStorageKey(profileId));
+    localStorage.setItem(
+      PROFILE_ROOT_KEY,
+      JSON.stringify({ activeProfileId: "", profiles: root.profiles.filter((profile) => profile.id !== profileId) })
+    );
+  }
+
+  sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
+  state = createEmptyState();
+  resetTimer();
+  render();
+  showToast("Dados do perfil excluidos.");
+}
+
+function queueRemoteSave() {
+  if (!isRemoteSessionActive()) {
+    setSyncStatus(isSupabaseConfigured() ? "offline" : "local");
+    return;
+  }
+  if (remoteStore.syncing) {
+    remoteStore.pendingSave = true;
+    setSyncStatus("saving");
+    return;
+  }
+  setSyncStatus("saving");
   clearTimeout(remoteStore.saveTimer);
   remoteStore.saveTimer = setTimeout(() => {
     saveRemoteStateNow();
@@ -259,12 +373,14 @@ async function saveRemoteStateNow() {
   if (!client || !user || remoteStore.syncing) return;
   const settings = getSupabaseSettings();
   remoteStore.syncing = true;
+  setSyncStatus("saving");
   try {
     const payload = JSON.parse(JSON.stringify(state));
     const displayName = state.profile?.name || state.account?.name || getRemoteDisplayName(user);
     const { error } = await client.from(settings.table).upsert(
       {
         user_id: user.id,
+        email: user.email || "",
         display_name: displayName,
         state: payload,
         updated_at: new Date().toISOString(),
@@ -272,8 +388,10 @@ async function saveRemoteStateNow() {
       { onConflict: "user_id" }
     );
     if (error) throw error;
+    setSyncStatus("saved");
   } catch (error) {
     console.warn("Falha ao sincronizar com Supabase:", error);
+    setSyncStatus("error", getSupabaseAuthMessage(error) || "Falha na sincronizacao com o Supabase.");
     showToast("Não foi possível sincronizar com o Supabase agora. Seus dados ficaram salvos neste navegador.");
   } finally {
     remoteStore.syncing = false;
@@ -292,7 +410,7 @@ async function loadSupabaseProfile(user, options = {}) {
   sessionStorage.setItem(ACTIVE_SESSION_PROFILE_KEY, remoteProfileId(user.id));
 
   try {
-    const { data, error } = await client.from(settings.table).select("display_name,state").eq("user_id", user.id).maybeSingle();
+    const { data, error } = await client.from(settings.table).select("email,display_name,state,updated_at").eq("user_id", user.id).maybeSingle();
     if (error) throw error;
 
     const displayName = data?.display_name || getRemoteDisplayName(user);
@@ -312,6 +430,7 @@ async function loadSupabaseProfile(user, options = {}) {
     state = loadedState;
     saveState({ syncRemote: false });
     if (!data) await saveRemoteStateNow();
+    else setSyncStatus("saved");
     resetTimer();
     render();
     if (!options.recovery) showToast(options.isNew ? "Conta online criada com dados zerados." : "Conta online carregada.");
@@ -586,6 +705,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
         caseSubjectFilter: typeof candidate.ui?.caseSubjectFilter === "string" ? candidate.ui.caseSubjectFilter : "",
         caseTopicFilter: typeof candidate.ui?.caseTopicFilter === "string" ? candidate.ui.caseTopicFilter : "",
         legalMaterialSearch: typeof candidate.ui?.legalMaterialSearch === "string" ? candidate.ui.legalMaterialSearch : "",
+        globalSearch: typeof candidate.ui?.globalSearch === "string" ? candidate.ui.globalSearch : "",
         legalMaterialSubjectFilter: typeof candidate.ui?.legalMaterialSubjectFilter === "string" ? candidate.ui.legalMaterialSubjectFilter : "",
         legalMaterialTopicFilter: typeof candidate.ui?.legalMaterialTopicFilter === "string" ? candidate.ui.legalMaterialTopicFilter : "",
         reportRange: candidate.ui?.reportRange || "day",
@@ -597,6 +717,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeFlashcardId: candidate.ui?.activeFlashcardId || "",
       flashcardAnswerOpen: Boolean(candidate.ui?.flashcardAnswerOpen),
       flashcardReviewOrder: candidate.ui?.flashcardReviewOrder === "due" ? "due" : "random",
+      flashcardReviewQueue: ["today", "overdue", "hard", "allDue"].includes(candidate.ui?.flashcardReviewQueue) ? candidate.ui.flashcardReviewQueue : "today",
       flashcardReviewScope: ["all", "subject", "topic"].includes(candidate.ui?.flashcardReviewScope) ? candidate.ui.flashcardReviewScope : "all",
       flashcardReviewSubjectId: candidate.ui?.flashcardReviewSubjectId || "",
       flashcardReviewTopicId: candidate.ui?.flashcardReviewTopicId || "",
@@ -605,6 +726,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeNoteId: candidate.ui?.activeNoteId || "",
       activeCaseEditId: candidate.ui?.activeCaseEditId || "",
       activeFlashcardEditId: candidate.ui?.activeFlashcardEditId || "",
+      activeStudyEditId: candidate.ui?.activeStudyEditId || "",
     },
   };
 }
@@ -640,6 +762,7 @@ function createEmptyState(profile = {}) {
         caseSubjectFilter: "",
         caseTopicFilter: "",
         legalMaterialSearch: "",
+        globalSearch: "",
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
         reportRange: "day",
@@ -651,6 +774,7 @@ function createEmptyState(profile = {}) {
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
       flashcardReviewOrder: "random",
+      flashcardReviewQueue: "today",
       flashcardReviewScope: "all",
       flashcardReviewSubjectId: "",
       flashcardReviewTopicId: "",
@@ -659,6 +783,7 @@ function createEmptyState(profile = {}) {
       activeNoteId: "",
       activeCaseEditId: "",
       activeFlashcardEditId: "",
+      activeStudyEditId: "",
     },
   };
 }
@@ -771,6 +896,7 @@ function createSeedState() {
         caseSubjectFilter: "",
         caseTopicFilter: "",
         legalMaterialSearch: "",
+        globalSearch: "",
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
         reportRange: "day",
@@ -778,6 +904,7 @@ function createSeedState() {
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
       flashcardReviewOrder: "random",
+      flashcardReviewQueue: "today",
       flashcardReviewScope: "all",
       flashcardReviewSubjectId: "",
       flashcardReviewTopicId: "",
@@ -810,6 +937,7 @@ function saveState(options = {}) {
   localStorage.setItem(profileStorageKey(state.profile.id), JSON.stringify(state));
   localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: "", profiles }));
   if (options.syncRemote !== false) queueRemoteSave();
+  else if (!isRemoteSessionActive()) setSyncStatus("local");
 }
 
 function getSubject(id) {
@@ -940,6 +1068,234 @@ function scrollToPageTop() {
   window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
 }
 
+function getSearchExcerpt(value, query, maxLength = 170) {
+  const text = richTextToPlain(value).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const search = normalizeSearchText(query);
+  const normalized = normalizeSearchText(text);
+  const hitIndex = search ? normalized.indexOf(search) : -1;
+  const start = hitIndex > 40 ? Math.max(0, hitIndex - 40) : 0;
+  const excerpt = text.slice(start, start + maxLength).trim();
+  return `${start > 0 ? "... " : ""}${excerpt}${text.length > start + maxLength ? " ..." : ""}`;
+}
+
+function makeGlobalSearchResult(section, title, text, view, data = {}) {
+  return {
+    section,
+    title: title || "Sem titulo",
+    text: text || "",
+    view,
+    data,
+  };
+}
+
+function resultMatchesQuery(result, query) {
+  const search = normalizeSearchText(query);
+  if (!search) return false;
+  return normalizeSearchText([result.section, result.title, result.text, ...Object.values(result.data || {})].join(" ")).includes(search);
+}
+
+function buildGlobalSearchResults(query) {
+  const results = [];
+  const add = (result) => {
+    if (results.length >= GLOBAL_SEARCH_LIMIT) return;
+    if (resultMatchesQuery(result, query)) results.push(result);
+  };
+
+  state.subjects.forEach((subject) => {
+    add(
+      makeGlobalSearchResult(
+        "Materias",
+        subject.name,
+        `Meta ${subject.goalHours || 0}h. ${state.topics.filter((topic) => topic.subjectId === subject.id).length} assuntos.`,
+        "plano",
+        { type: "subject", id: subject.id, subjectId: subject.id }
+      )
+    );
+  });
+
+  state.topics.forEach((topic) => {
+    const subject = getSubject(topic.subjectId);
+    add(
+      makeGlobalSearchResult(
+        "Assuntos",
+        topic.name,
+        `${subject?.name || "Sem materia"} - ${topic.total || 0} questoes, ${topic.correct || 0} acertos, ${topic.wrong || 0} erros.`,
+        "plano",
+        { type: "topic", id: topic.id, subjectId: topic.subjectId, topicId: topic.id }
+      )
+    );
+  });
+
+  state.flashcards.forEach((card) => {
+    add(
+      makeGlobalSearchResult(
+        "Flashcards",
+        getSearchExcerpt(card.front, query, 90) || "Flashcard",
+        `${getEntryScopeLabel(card)}. ${getSearchExcerpt(card.back, query, 190)} ${card.priority || ""} ${card.difficulty || ""}`,
+        "flashcards",
+        { type: "flashcard", id: card.id, subjectId: getEntrySubjectId(card), topicId: card.topicId || "" }
+      )
+    );
+  });
+
+  state.sources.forEach((source) => {
+    add(
+      makeGlobalSearchResult(
+        "Fontes",
+        source.title,
+        `${source.category || "Sem categoria"} ${source.url || ""} ${getSearchExcerpt(source.content, query)}`,
+        "anotacoes",
+        { type: "source", id: source.id }
+      )
+    );
+  });
+
+  state.notes.forEach((note) => {
+    const source = getSource(note.sourceId);
+    add(
+      makeGlobalSearchResult(
+        "Anotacoes",
+        note.title,
+        `${note.category || "Sem categoria"} ${source?.title || ""} ${getSearchExcerpt(note.content, query)}`,
+        "anotacoes",
+        { type: "note", id: note.id, sourceId: note.sourceId || "" }
+      )
+    );
+  });
+
+  Object.entries(state.cases || {}).forEach(([court, cases]) => {
+    cases.forEach((item) => {
+      add(
+        makeGlobalSearchResult(
+          `Jurisprudencia ${court}`,
+          item.title,
+          `${getEntryScopeLabel(item)} ${formatDate(item.date)} ${hashtagsToInput(item.tags)} ${getSearchExcerpt(item.summary, query)}`,
+          "jurisprudencias",
+          { type: "case", id: item.id, court, subjectId: getEntrySubjectId(item), topicId: item.topicId || "" }
+        )
+      );
+    });
+  });
+
+  (state.legalMaterials || []).forEach((item) => {
+    add(
+      makeGlobalSearchResult(
+        "Leis e tabelas",
+        item.title,
+        `${legalMaterialTypeLabel(item.type)} ${item.reference || ""} ${getEntryScopeLabel(item)} ${item.source || ""} ${item.type === "image" ? "" : getSearchExcerpt(item.content, query)}`,
+        "jurisprudencias",
+        { type: "legalMaterial", id: item.id, subjectId: getEntrySubjectId(item), topicId: item.topicId || "" }
+      )
+    );
+  });
+
+  (state.edital?.items || []).forEach((item) => {
+    add(
+      makeGlobalSearchResult(
+        "Edital",
+        item.topicName,
+        `${item.subjectName || "Conhecimentos gerais"} ${state.edital.examName || ""} ${state.edital.targetRole || ""}`,
+        "edital",
+        { type: "edital", id: String(item.order || ""), subjectName: item.subjectName || "" }
+      )
+    );
+  });
+
+  return results;
+}
+
+function renderGlobalSearch() {
+  const input = $("#globalSearchInput");
+  const resultsBox = $("#globalSearchResults");
+  const clearButton = $("#globalSearchClearBtn");
+  if (!input || !resultsBox || !clearButton) return;
+
+  const query = state.ui.globalSearch || "";
+  if (document.activeElement !== input) input.value = query;
+  clearButton.hidden = !query.trim();
+
+  if (query.trim().length < 2) {
+    resultsBox.classList.remove("open");
+    resultsBox.innerHTML = "";
+    return;
+  }
+
+  const results = buildGlobalSearchResults(query);
+  resultsBox.classList.add("open");
+  resultsBox.innerHTML = results.length
+    ? results
+        .map((result) => {
+          const dataset = Object.entries({ ...result.data, view: result.view })
+            .map(([key, value]) => {
+              const attr = key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+              return `data-${attr}="${escapeHTML(String(value ?? ""))}"`;
+            })
+            .join(" ");
+          return `
+            <button class="global-result" data-global-result="true" ${dataset} type="button">
+              <small>${escapeHTML(result.section)}</small>
+              <strong>${escapeHTML(result.title)}</strong>
+              ${result.text ? `<span>${escapeHTML(result.text)}</span>` : ""}
+            </button>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Nenhum resultado encontrado.</div>`;
+}
+
+function openGlobalSearchResult(button) {
+  const type = button.dataset.type || "";
+  const id = button.dataset.id || "";
+  const view = button.dataset.view || "dashboard";
+
+  if (type === "flashcard") {
+    state.ui.flashcardReviewScope = button.dataset.topicId ? "topic" : button.dataset.subjectId ? "subject" : "all";
+    state.ui.flashcardReviewSubjectId = button.dataset.subjectId || state.ui.flashcardReviewSubjectId;
+    state.ui.flashcardReviewTopicId = button.dataset.topicId || state.ui.flashcardReviewTopicId;
+    state.ui.activeFlashcardId = id;
+    state.ui.flashcardAnswerOpen = false;
+  }
+
+  if (type === "source") {
+    state.ui.activeSourceId = id;
+  }
+
+  if (type === "note") {
+    state.ui.activeNoteId = id;
+    if (button.dataset.sourceId) state.ui.activeSourceId = button.dataset.sourceId;
+  }
+
+  if (type === "case") {
+    state.ui.caseCourt = button.dataset.court || state.ui.caseCourt || "STJ";
+    state.ui.caseSearch = "";
+    state.ui.caseSubjectFilter = button.dataset.subjectId || "";
+    state.ui.caseTopicFilter = button.dataset.topicId || "";
+  }
+
+  if (type === "legalMaterial") {
+    const item = state.legalMaterials.find((material) => material.id === id);
+    state.ui.legalMaterialSearch = item?.title || "";
+    state.ui.legalMaterialSubjectFilter = button.dataset.subjectId || "";
+    state.ui.legalMaterialTopicFilter = button.dataset.topicId || "";
+  }
+
+  state.ui.globalSearch = "";
+  setView(view, { scrollTop: true });
+}
+
+function compactSelectLabel(value, maxLength = 52) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(12, maxLength - 3)).trim()}...`;
+}
+
+function renderTopicOption(topic, { includeSubject = false, maxLength = 52 } = {}) {
+  const subject = getSubject(topic.subjectId);
+  const fullLabel = includeSubject ? `${subject?.name || "Sem materia"} - ${topic.name}` : topic.name;
+  return `<option value="${topic.id}" title="${escapeHTML(fullLabel)}">${escapeHTML(compactSelectLabel(fullLabel, maxLength))}</option>`;
+}
+
 function populateTopicSelect(select, { includeEmpty = false, subjectId = "", emptyLabel = "Sem vínculo" } = {}) {
   if (!select) return;
   const current = select.value;
@@ -950,8 +1306,12 @@ function populateTopicSelect(select, { includeEmpty = false, subjectId = "", emp
       return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
     })
     .join("");
+  const compactOptions = state.topics
+    .filter((topic) => !subjectId || topic.subjectId === subjectId)
+    .map((topic) => renderTopicOption(topic, { includeSubject: !subjectId, maxLength: subjectId ? 34 : 52 }))
+    .join("");
   const topicIsAvailable = state.topics.some((topic) => topic.id === current && (!subjectId || topic.subjectId === subjectId));
-  select.innerHTML = `${includeEmpty ? `<option value="">${escapeHTML(emptyLabel)}</option>` : ""}${options}`;
+  select.innerHTML = `${includeEmpty ? `<option value="">${escapeHTML(emptyLabel)}</option>` : ""}${compactOptions}`;
   if (topicIsAvailable || (includeEmpty && current === "")) {
     select.value = current;
   }
@@ -969,14 +1329,136 @@ function populateSubjectSelect(select, { includeEmpty = false, emptyLabel = "Sem
   }
 }
 
+function getSearchableSelect(select) {
+  return select?.id ? $(`.searchable-select[data-for="${select.id}"]`) : null;
+}
+
+function getSelectDisplayText(select) {
+  const selected = select?.selectedOptions?.[0];
+  return selected ? selected.textContent.trim() : "Selecione";
+}
+
+function closeSearchableSelects(except = null) {
+  $$(".searchable-select.open").forEach((control) => {
+    if (control === except) return;
+    control.classList.remove("open");
+    const menu = $(".searchable-select-menu", control);
+    const button = $(".searchable-select-button", control);
+    if (menu) menu.hidden = true;
+    if (button) button.setAttribute("aria-expanded", "false");
+  });
+}
+
+function renderSearchableOptions(select) {
+  const control = getSearchableSelect(select);
+  if (!control) return;
+  const input = $(".searchable-select-input", control);
+  const list = $(".searchable-select-options", control);
+  const query = normalizeSearchText(input?.value || "");
+  const options = Array.from(select.options || []).filter((option) => {
+    const text = option.title || option.textContent || "";
+    return !query || normalizeSearchText(text).includes(query);
+  });
+
+  list.innerHTML = options.length
+    ? options
+        .map((option) => {
+          const selected = option.value === select.value;
+          const label = option.title || option.textContent || "Opcao";
+          return `
+            <button class="searchable-select-option${selected ? " active" : ""}" data-value="${escapeHTML(option.value)}" type="button" role="option" aria-selected="${selected}">
+              ${escapeHTML(label)}
+            </button>
+          `;
+        })
+        .join("")
+    : `<div class="searchable-select-empty">Nenhuma opcao encontrada.</div>`;
+}
+
+function refreshSearchableSelect(select) {
+  const control = getSearchableSelect(select);
+  if (!control || !select) return;
+  const button = $(".searchable-select-button", control);
+  const text = getSelectDisplayText(select);
+  button.textContent = text || "Selecione";
+  button.title = text || "";
+  button.disabled = select.disabled;
+  control.classList.toggle("disabled", select.disabled);
+  if (control.classList.contains("open")) renderSearchableOptions(select);
+}
+
+function enhanceSearchableSelect(select) {
+  if (!select || !select.id) return;
+  if (select.dataset.searchableEnhanced === "true") {
+    refreshSearchableSelect(select);
+    return;
+  }
+
+  select.dataset.searchableEnhanced = "true";
+  if (select.required) {
+    select.dataset.wasRequired = "true";
+    select.required = false;
+  }
+  select.classList.add("native-select-hidden");
+
+  const control = document.createElement("div");
+  control.className = "searchable-select";
+  control.dataset.for = select.id;
+  control.innerHTML = `
+    <button class="searchable-select-button" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+    <div class="searchable-select-menu" hidden>
+      <input class="searchable-select-input" type="search" placeholder="Buscar..." autocomplete="off" />
+      <div class="searchable-select-options" role="listbox"></div>
+    </div>
+  `;
+  select.insertAdjacentElement("afterend", control);
+
+  const button = $(".searchable-select-button", control);
+  const menu = $(".searchable-select-menu", control);
+  const input = $(".searchable-select-input", control);
+  const list = $(".searchable-select-options", control);
+
+  button.addEventListener("click", () => {
+    if (select.disabled) return;
+    const willOpen = !control.classList.contains("open");
+    closeSearchableSelects(control);
+    control.classList.toggle("open", willOpen);
+    menu.hidden = !willOpen;
+    button.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+      input.value = "";
+      renderSearchableOptions(select);
+      input.focus();
+    }
+  });
+
+  input.addEventListener("input", () => renderSearchableOptions(select));
+  list.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-value]");
+    if (!option) return;
+    select.value = option.dataset.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    refreshSearchableSelect(select);
+    closeSearchableSelects();
+  });
+
+  refreshSearchableSelect(select);
+}
+
+function enhanceSearchableSelects() {
+  SEARCHABLE_SELECT_IDS.forEach((id) => enhanceSearchableSelect($(`#${id}`)));
+}
+
 function populateFlashcardReviewSelectors() {
   const orderSelect = $("#flashcardReviewOrder");
+  const queueSelect = $("#flashcardReviewQueue");
   const scopeSelect = $("#flashcardReviewScope");
   const subjectSelect = $("#flashcardReviewSubject");
   const topicSelect = $("#flashcardReviewTopic");
-  if (!orderSelect || !scopeSelect || !subjectSelect || !topicSelect) return;
+  if (!orderSelect || !queueSelect || !scopeSelect || !subjectSelect || !topicSelect) return;
 
   state.ui.flashcardReviewOrder = state.ui.flashcardReviewOrder === "due" ? "due" : "random";
+  state.ui.flashcardReviewQueue = ["today", "overdue", "hard", "allDue"].includes(state.ui.flashcardReviewQueue) ? state.ui.flashcardReviewQueue : "today";
   state.ui.flashcardReviewScope = ["all", "subject", "topic"].includes(state.ui.flashcardReviewScope) ? state.ui.flashcardReviewScope : "all";
 
   if (!state.subjects.some((subject) => subject.id === state.ui.flashcardReviewSubjectId)) {
@@ -987,6 +1469,7 @@ function populateFlashcardReviewSelectors() {
   }
 
   orderSelect.value = state.ui.flashcardReviewOrder;
+  queueSelect.value = state.ui.flashcardReviewQueue;
   scopeSelect.value = state.ui.flashcardReviewScope;
   subjectSelect.innerHTML = state.subjects.map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`).join("");
   topicSelect.innerHTML = state.topics
@@ -995,6 +1478,7 @@ function populateFlashcardReviewSelectors() {
       return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
     })
     .join("");
+  topicSelect.innerHTML = state.topics.map((topic) => renderTopicOption(topic, { includeSubject: true, maxLength: 52 })).join("");
   subjectSelect.value = state.ui.flashcardReviewSubjectId;
   topicSelect.value = state.ui.flashcardReviewTopicId;
 
@@ -1032,6 +1516,10 @@ function populateCaseFilterSelectors() {
   if (document.activeElement !== searchInput) searchInput.value = state.ui.caseSearch || "";
   subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
   topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
+  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${state.topics
+    .filter((topic) => !state.ui.caseSubjectFilter || topic.subjectId === state.ui.caseSubjectFilter)
+    .map((topic) => renderTopicOption(topic, { includeSubject: !state.ui.caseSubjectFilter, maxLength: state.ui.caseSubjectFilter ? 34 : 52 }))
+    .join("")}`;
   subjectSelect.value = state.ui.caseSubjectFilter || "";
   topicSelect.value = state.ui.caseTopicFilter || "";
   subjectSelect.disabled = state.subjects.length === 0;
@@ -1065,6 +1553,10 @@ function populateLegalMaterialFilterSelectors() {
   if (document.activeElement !== searchInput) searchInput.value = state.ui.legalMaterialSearch || "";
   subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
   topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
+  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${state.topics
+    .filter((topic) => !state.ui.legalMaterialSubjectFilter || topic.subjectId === state.ui.legalMaterialSubjectFilter)
+    .map((topic) => renderTopicOption(topic, { includeSubject: !state.ui.legalMaterialSubjectFilter, maxLength: state.ui.legalMaterialSubjectFilter ? 34 : 52 }))
+    .join("")}`;
   subjectSelect.value = state.ui.legalMaterialSubjectFilter || "";
   topicSelect.value = state.ui.legalMaterialTopicFilter || "";
   subjectSelect.disabled = state.subjects.length === 0;
@@ -1113,7 +1605,9 @@ function render() {
   renderNavigation();
   renderProfilePanel();
   renderSelectors();
+  enhanceSearchableSelects();
   renderDashboard();
+  renderDailyReview();
   renderControl();
   renderGoals();
   renderPlan();
@@ -1124,6 +1618,7 @@ function render() {
   renderCases();
   renderPomodoro();
   renderReports();
+  renderAccountPanel();
   drawStudyCanvas();
 }
 
@@ -1145,6 +1640,8 @@ function renderNavigation() {
     themeToggle.textContent = isDark ? "Modo claro" : "Modo escuro";
     themeToggle.setAttribute("aria-pressed", String(isDark));
   }
+  renderSyncStatus();
+  renderGlobalSearch();
 }
 
 function renderProfilePanel() {
@@ -1159,15 +1656,17 @@ function renderProfilePanel() {
     $("#profileName").value = isAuthenticated ? (onlineMode ? state.account?.email || name || "" : name || "") : "";
   }
   if (document.activeElement !== $("#profilePin")) $("#profilePin").value = "";
-  $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : onlineMode ? "Entrar / cadastrar" : "Entrar";
+  $("#profileAccessBtn").textContent = isAuthenticated ? "Salvar acesso" : "Entrar";
+  $("#profileSignupBtn").textContent = onlineMode ? "Criar conta" : "Criar perfil";
+  $("#profileSignupBtn").disabled = isAuthenticated;
   $("#logoutProfileBtn").disabled = !isAuthenticated;
   $("#profileStatus").textContent = isAuthenticated && name
     ? onlineMode
       ? `Conta online ativa. Somente os dados de ${name} sao sincronizados para este login.`
       : `Somente os dados de ${name} estao abertos nesta sessao. Use Sair ao terminar.`
     : onlineMode
-      ? "Digite e-mail e senha. Se a conta nao existir, ela sera cadastrada zerada no Supabase."
-      : "Digite nome e PIN. Se o perfil nao existir, ele sera criado zerado, sem dados antigos ou de outro usuario.";
+      ? "Use Entrar para uma conta existente ou Criar conta para cadastrar um e-mail novo."
+      : "Use Entrar para abrir um perfil existente ou Criar perfil para começar zerado.";
   if (remoteStore.recoveryMode) {
     $("#profileStatus").textContent = "Link de recuperacao aceito. Abra a aba Conta e defina uma nova senha.";
   }
@@ -1180,13 +1679,47 @@ function renderProfilePanel() {
   $("#sendRecoveryFromAccountBtn").disabled = !onlineMode;
 }
 
-async function accessProfileByNameAndPin(name, pin) {
+function renderAccountPanel() {
+  const list = $("#accountStatusList");
+  if (!list) return;
+  const authenticated = isProfileAuthenticated();
+  const online = isRemoteSessionActive();
+  const configured = isSupabaseConfigured();
+  const syncLabel = remoteStore.syncStatus === "saved" && remoteStore.lastSyncAt
+    ? `Ultimo salvamento: ${new Date(remoteStore.lastSyncAt).toLocaleString("pt-BR")}`
+    : remoteStore.lastSyncError || (configured ? "Aguardando login online" : "Modo local");
+
+  const rows = [
+    ["Conta", authenticated ? state.account?.email || state.profile?.name || "Perfil aberto" : "Nenhum perfil aberto"],
+    ["Armazenamento", online ? "Supabase com dados isolados por usuario" : configured ? "Supabase configurado, mas sem sessao online" : "Somente este navegador"],
+    ["Sincronizacao", syncLabel],
+    ["Backup", "Use Gerar backup antes de apagar dados ou trocar de navegador"],
+  ];
+
+  list.innerHTML = rows
+    .map(
+      ([label, value]) => `
+        <div class="account-status-row">
+          <span>${escapeHTML(label)}</span>
+          <strong>${escapeHTML(value)}</strong>
+        </div>
+      `
+    )
+    .join("");
+
+  const forceSyncBtn = $("#forceSyncBtn");
+  const deleteBtn = $("#deleteAccountDataBtn");
+  if (forceSyncBtn) forceSyncBtn.disabled = !authenticated;
+  if (deleteBtn) deleteBtn.disabled = !authenticated;
+}
+
+async function accessProfileByNameAndPin(name, pin, options = {}) {
   if (isSupabaseConfigured()) {
-    await accessSupabaseProfile(name, pin);
+    await accessSupabaseProfile(name, pin, options);
     return;
   }
 
-  accessLocalProfileByNameAndPin(name, pin);
+  accessLocalProfileByNameAndPin(name, pin, options);
 }
 
 function getSupabaseAuthMessage(error) {
@@ -1254,7 +1787,7 @@ async function resendSignupConfirmation(client, email) {
   if (error) throw error;
 }
 
-async function accessSupabaseProfile(email, password) {
+async function accessSupabaseProfile(email, password, options = {}) {
   const client = getSupabaseClient();
   if (!client) {
     showToast("Supabase configurado, mas o SDK nao carregou. Confira a conexao e o script do site.");
@@ -1272,29 +1805,32 @@ async function accessSupabaseProfile(email, password) {
     return;
   }
 
+  const createAccount = Boolean(options.create);
   $("#profileAccessBtn").disabled = true;
-  $("#profileStatus").textContent = "Conectando com o Supabase...";
+  $("#profileSignupBtn").disabled = true;
+  $("#profileStatus").textContent = createAccount ? "Criando conta no Supabase..." : "Entrando no Supabase...";
   let finalStatus = "";
   try {
-    const login = await client.auth.signInWithPassword({ email: emailAddress, password: cleanPassword });
-    if (!login.error && login.data?.user) {
-      await loadSupabaseProfile(login.data.user);
-      return;
-    }
-    if (login.error && isSupabaseEmailUnconfirmedError(login.error)) {
-      try {
-        await resendSignupConfirmation(client, emailAddress);
-        finalStatus = "Conta aguardando confirmacao. Reenviamos o e-mail; confira entrada e spam.";
-        showToast(finalStatus);
-      } catch (resendError) {
-        console.warn("Falha ao reenviar confirmacao Supabase:", resendError);
-        finalStatus = "Conta aguardando confirmacao. Confira o e-mail ou os logs SMTP da Brevo.";
-        showToast(finalStatus);
+    if (!createAccount) {
+      const login = await client.auth.signInWithPassword({ email: emailAddress, password: cleanPassword });
+      if (!login.error && login.data?.user) {
+        await loadSupabaseProfile(login.data.user);
+        return;
       }
+      if (login.error && isSupabaseEmailUnconfirmedError(login.error)) {
+        try {
+          await resendSignupConfirmation(client, emailAddress);
+          finalStatus = "Conta aguardando confirmacao. Reenviamos o e-mail; confira entrada e spam.";
+          showToast(finalStatus);
+        } catch (resendError) {
+          console.warn("Falha ao reenviar confirmacao Supabase:", resendError);
+          finalStatus = "Conta aguardando confirmacao. Confira o e-mail ou os logs SMTP da Brevo.";
+          showToast(finalStatus);
+        }
+        return;
+      }
+      if (login.error) throw login.error;
       return;
-    }
-    if (login.error && !isSupabaseInvalidCredentialsError(login.error)) {
-      throw login.error;
     }
 
     const displayName = emailAddress.split("@")[0];
@@ -1316,22 +1852,24 @@ async function accessSupabaseProfile(email, password) {
       return;
     }
 
-    finalStatus = "Se for uma conta nova, enviamos a confirmacao por e-mail. Se ja existia, use a senha correta ou Esqueci a senha.";
+    finalStatus = "Conta criada. Abra o e-mail de confirmacao antes de entrar.";
     showToast(finalStatus);
   } catch (error) {
     console.warn("Falha no login Supabase:", error);
-    finalStatus = getFriendlySupabaseAuthError(error, "acesso");
+    finalStatus = getFriendlySupabaseAuthError(error, createAccount ? "cadastro" : "acesso");
     showToast(finalStatus);
   } finally {
     $("#profileAccessBtn").disabled = false;
+    $("#profileSignupBtn").disabled = isProfileAuthenticated();
     renderProfilePanel();
     if (finalStatus) $("#profileStatus").textContent = finalStatus;
   }
 }
 
-function accessLocalProfileByNameAndPin(name, pin) {
+function accessLocalProfileByNameAndPin(name, pin, options = {}) {
   const cleanName = String(name || "").trim().replace(/\s+/g, " ");
   const cleanPin = String(pin || "").trim();
+  const createProfile = Boolean(options.create);
   if (!cleanName) {
     showToast("Informe o nome do perfil.");
     return;
@@ -1347,6 +1885,10 @@ function accessLocalProfileByNameAndPin(name, pin) {
 
   if (record) {
     if (!record.pinHash) {
+      if (!createProfile) {
+        showToast("Perfil encontrado sem PIN. Use Criar perfil para redefinir o acesso local.");
+        return;
+      }
       state = createEmptyState({ name: cleanName, pinHash });
       saveState();
       resetTimer();
@@ -1373,6 +1915,10 @@ function accessLocalProfileByNameAndPin(name, pin) {
     return;
   }
 
+  if (!createProfile) {
+    showToast("Perfil não encontrado. Clique em Criar perfil para começar zerado.");
+    return;
+  }
   state = createEmptyState({ name: cleanName, pinHash });
   saveState();
   resetTimer();
@@ -1437,6 +1983,12 @@ function syncScopedTopicSelect(subjectSelector, topicSelector) {
   populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto específico" });
 }
 
+function syncScopedTopicSelect(subjectSelector, topicSelector) {
+  const subjectId = $(subjectSelector)?.value || "";
+  populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto especifico" });
+  refreshSearchableSelect($(topicSelector));
+}
+
 function renderDashboard() {
   const todayMinutes = state.studyLogs.filter(getRangePredicate("day")).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
   const weekMinutes = state.studyLogs.filter(getRangePredicate("week")).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
@@ -1460,6 +2012,58 @@ function renderDashboard() {
 
   renderWeekChart();
   renderStrengthList();
+}
+
+function renderDailyReview() {
+  const list = $("#dailyReviewList");
+  if (!list) return;
+  const todayMinutes = state.studyLogs.filter(getRangePredicate("day")).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+  const dueFlashcards = state.flashcards.filter((card) => flashcardIsDue(card));
+  const ranked = getRankedTopics();
+  const weakTopic = ranked.filter((topic) => topic.total > 0).at(-1);
+  const schedule = buildEditalSchedule(state.edital);
+  const currentWeek = schedule[0];
+  const nextTasks = currentWeek?.tasks?.slice(0, 3) || [];
+  const nextSubject = nextTasks[0]?.text?.split(":")[0] || state.subjects[0]?.name || "Materia livre";
+
+  const cards = [
+    {
+      label: "Comecar",
+      title: nextTasks.length ? nextTasks[0].text : "Escolha uma materia e faca um bloco de foco",
+      meta: nextTasks.length ? `${nextTasks.length} tarefas do edital nesta semana` : "Sem cronograma ativo",
+      view: "pomodoro",
+    },
+    {
+      label: "Flashcards",
+      title: dueFlashcards.length ? `${dueFlashcards.length} cartoes para revisar` : "Nenhum flashcard pendente",
+      meta: dueFlashcards[0] ? getEntryScopeLabel(dueFlashcards[0]) : "Mantenha a fila em dia",
+      view: "flashcards",
+    },
+    {
+      label: "Reforco",
+      title: weakTopic ? weakTopic.name : nextSubject,
+      meta: weakTopic ? `${percent(weakTopic.accuracy)} de precisao em questoes` : "Use o primeiro bloco para aquecer",
+      view: weakTopic ? "questoes" : "plano",
+    },
+    {
+      label: "Hoje",
+      title: `${formatMinutes(todayMinutes)} registrados`,
+      meta: todayMinutes ? "Continue preservando o ritmo" : "Ainda sem tempo registrado hoje",
+      view: "controle",
+    },
+  ];
+
+  list.innerHTML = cards
+    .map(
+      (card) => `
+        <button class="daily-review-card" data-view="${card.view}" type="button">
+          <span class="eyebrow">${escapeHTML(card.label)}</span>
+          <strong>${escapeHTML(card.title)}</strong>
+          <small>${escapeHTML(card.meta)}</small>
+        </button>
+      `
+    )
+    .join("");
 }
 
 function statCard(label, value, caption) {
@@ -2290,7 +2894,15 @@ function renderEdital() {
               </summary>
               <div class="edital-topic-chips">
                 ${subjectItems
-                  .map((item) => `<span class="edital-topic-chip"><b>Cobrado</b>${escapeHTML(item.topicName)}</span>`)
+                  .map(
+                    (item) => `
+                      <span class="edital-topic-chip">
+                        <b>Cobrado</b>
+                        <span>${escapeHTML(item.topicName)}</span>
+                        <button class="mini-button ghost danger" data-action="deleteEditalItem" data-id="${item.id}" type="button">Remover</button>
+                      </span>
+                    `
+                  )
                   .join("")}
               </div>
             </details>
@@ -2576,11 +3188,21 @@ function renderFlashcards() {
   updateFlashcardFormMode();
   const scopedCards = getScopedFlashcards();
   const dueCards = getDueFlashcards();
+  const flashcardCounter = Number(state.flashcardSettings.reviewCounter || 0);
+  const dueToday = scopedCards.filter((card) => flashcardIsDue(card, flashcardCounter)).length;
+  const overdueCards = scopedCards.filter((card) => Number(card.nextDueReviewNumber || 0) < flashcardCounter).length;
+  const hardDueCards = scopedCards.filter((card) => card.difficulty === "hard" && flashcardIsDue(card, flashcardCounter)).length;
   $("#flashcardDueCount").textContent = `${dueCards.length} pendentes`;
   const summary = $("#flashcardReviewSummary");
   if (summary) {
     const orderLabel = state.ui.flashcardReviewOrder === "random" ? "sorteio aleatório" : "fila por vencimento";
     summary.textContent = `${dueCards.length} de ${scopedCards.length} cartões pendentes em ${getFlashcardScopeLabel()} - ${orderLabel}.`;
+  }
+
+  $("#flashcardDueCount").textContent = `${dueCards.length} na fila`;
+  if (summary) {
+    const orderLabel = state.ui.flashcardReviewOrder === "random" ? "sorteio aleatorio" : "fila por vencimento";
+    summary.textContent = `${dueCards.length} em ${getFlashcardQueueLabel()} para ${getFlashcardScopeLabel()} - ${orderLabel}. Hoje: ${dueToday}; atrasados: ${overdueCards}; dificeis: ${hardDueCards}.`;
   }
 
   if (!state.flashcards.length) {
@@ -2631,10 +3253,29 @@ function getScopedFlashcards() {
   return state.flashcards.filter(flashcardMatchesReviewScope);
 }
 
-function getDueFlashcards(cards = getScopedFlashcards()) {
+function flashcardIsDue(card, counter = Number(state.flashcardSettings.reviewCounter || 0)) {
+  return Number(card.nextDueReviewNumber || 0) <= counter;
+}
+
+function flashcardMatchesQueue(card, queue = state.ui.flashcardReviewQueue || "today") {
   const counter = Number(state.flashcardSettings.reviewCounter || 0);
+  if (queue === "overdue") return Number(card.nextDueReviewNumber || 0) < counter;
+  if (queue === "hard") return card.difficulty === "hard" && flashcardIsDue(card, counter);
+  return flashcardIsDue(card, counter);
+}
+
+function getFlashcardQueueLabel(queue = state.ui.flashcardReviewQueue || "today") {
+  return {
+    today: "revisar hoje",
+    overdue: "atrasados",
+    hard: "difíceis",
+    allDue: "todos pendentes",
+  }[queue] || "revisar hoje";
+}
+
+function getDueFlashcards(cards = getScopedFlashcards()) {
   return [...cards]
-    .filter((card) => Number(card.nextDueReviewNumber || 0) <= counter)
+    .filter((card) => flashcardMatchesQueue(card))
     .sort(flashcardRuleSort);
 }
 
@@ -2797,16 +3438,19 @@ function renderFlashcardLibrary() {
 
 function updateFlashcardReviewSettings({ silent = false } = {}) {
   const nextOrder = $("#flashcardReviewOrder")?.value === "due" ? "due" : "random";
+  const nextQueue = ["today", "overdue", "hard", "allDue"].includes($("#flashcardReviewQueue")?.value) ? $("#flashcardReviewQueue").value : "today";
   const nextScope = ["all", "subject", "topic"].includes($("#flashcardReviewScope")?.value) ? $("#flashcardReviewScope").value : "all";
   const nextSubjectId = $("#flashcardReviewSubject")?.value || state.ui.flashcardReviewSubjectId || "";
   const nextTopicId = $("#flashcardReviewTopic")?.value || state.ui.flashcardReviewTopicId || "";
   const changed =
     state.ui.flashcardReviewOrder !== nextOrder ||
+    state.ui.flashcardReviewQueue !== nextQueue ||
     state.ui.flashcardReviewScope !== nextScope ||
     state.ui.flashcardReviewSubjectId !== nextSubjectId ||
     state.ui.flashcardReviewTopicId !== nextTopicId;
 
   state.ui.flashcardReviewOrder = nextOrder;
+  state.ui.flashcardReviewQueue = nextQueue;
   state.ui.flashcardReviewScope = nextScope;
   state.ui.flashcardReviewSubjectId = nextSubjectId;
   state.ui.flashcardReviewTopicId = nextTopicId;
@@ -4065,6 +4709,32 @@ function renderLegalMaterialImage(item) {
   `;
 }
 
+function updateStudyLogFormMode() {
+  const isEditing = Boolean(state.ui.activeStudyEditId);
+  const title = $("#studyFormTitle");
+  const submitButton = $("#studySubmitBtn");
+  const cancelButton = $("#cancelStudyEditBtn");
+
+  if (title) title.textContent = isEditing ? "Editar tempo registrado" : "Registro manual";
+  if (submitButton) submitButton.textContent = isEditing ? "Salvar edicao" : "Registrar tempo";
+  if (cancelButton) cancelButton.classList.toggle("hidden", !isEditing);
+}
+
+function fillStudyLogForm(log) {
+  if (!log) return;
+  const subjectId = getEntrySubjectId(log);
+  state.ui.activeStudyEditId = log.id;
+  $("#studySubject").value = subjectId;
+  refreshSearchableSelect($("#studySubject"));
+  syncScopedTopicSelect("#studySubject", "#studyTopic");
+  $("#studyTopic").value = log.topicId || "";
+  refreshSearchableSelect($("#studyTopic"));
+  $("#studyMinutes").value = Math.max(1, Math.round(Number(log.minutes) || 30));
+  $("#studyDate").value = log.date || todayISO();
+  $("#studyNote").value = log.note || "";
+  updateStudyLogFormMode();
+}
+
 function renderPomodoro() {
   const activeTopicId = timer.topicId || $("#timerTopic").value;
   const activeSubjectId = timer.subjectId || getTopic(activeTopicId)?.subjectId || $("#timerSubject").value;
@@ -4081,6 +4751,7 @@ function renderPomodoro() {
   $("#skipTimerBtn").textContent = timer.mode === "focus" ? "Pular foco" : "Pular descanso";
   $("#tickLofiToggleBtn").textContent = state.settings.tickLofiEnabled ? "Desligar lofi" : "Ligar lofi";
   renderMusicPlayer();
+  updateStudyLogFormMode();
 
   const recent = [...state.studyLogs]
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
@@ -4090,11 +4761,16 @@ function renderPomodoro() {
         .map(
           (log) => `
         <tr>
-          <td>${formatDate(log.date)}</td>
+          <td>${formatShortDate(log.date)}</td>
           <td>${escapeHTML(getEntryScopeLabel(log))}</td>
           <td>${formatMinutes(log.minutes)}</td>
           <td>${escapeHTML(log.source || "Manual")}</td>
-          <td><button class="mini-button bad" data-action="deleteStudy" data-id="${log.id}" type="button">Excluir</button></td>
+          <td>
+            <div class="inline-actions table-actions">
+              <button class="mini-button" data-action="editStudy" data-id="${log.id}" type="button">Editar</button>
+              <button class="mini-button bad" data-action="deleteStudy" data-id="${log.id}" type="button">Excluir</button>
+            </div>
+          </td>
         </tr>
       `
         )
@@ -4635,6 +5311,20 @@ function attachEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const globalResult = event.target.closest("[data-global-result]");
+    if (globalResult) {
+      openGlobalSearchResult(globalResult);
+      return;
+    }
+
+    if (!event.target.closest("#globalSearchForm")) {
+      $("#globalSearchResults")?.classList.remove("open");
+    }
+
+    if (!event.target.closest(".searchable-select")) {
+      closeSearchableSelects();
+    }
+
     const viewButton = event.target.closest("[data-view]");
     if (viewButton) {
       setView(viewButton.dataset.view, { scrollTop: viewButton.dataset.scrollTop === "true" });
@@ -4702,7 +5392,33 @@ function attachEvents() {
 
   $("#profileForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    accessProfileByNameAndPin($("#profileName").value, $("#profilePin").value);
+    accessProfileByNameAndPin($("#profileName").value, $("#profilePin").value, { create: false });
+  });
+
+  $("#profileSignupBtn").addEventListener("click", () => {
+    accessProfileByNameAndPin($("#profileName").value, $("#profilePin").value, { create: true });
+  });
+
+  $("#globalSearchInput").addEventListener("input", (event) => {
+    state.ui.globalSearch = event.target.value;
+    renderGlobalSearch();
+  });
+
+  $("#globalSearchForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const firstResult = $("#globalSearchResults [data-global-result]");
+    if (firstResult) {
+      openGlobalSearchResult(firstResult);
+    } else {
+      renderGlobalSearch();
+    }
+  });
+
+  $("#globalSearchClearBtn").addEventListener("click", () => {
+    state.ui.globalSearch = "";
+    $("#globalSearchInput").value = "";
+    renderGlobalSearch();
+    $("#globalSearchInput").focus();
   });
 
   $("#logoutProfileBtn").addEventListener("click", () => {
@@ -4711,6 +5427,8 @@ function attachEvents() {
   $("#forgotPasswordBtn").addEventListener("click", () => {
     sendPasswordRecovery(getRecoveryEmail());
   });
+  $("#forceSyncBtn").addEventListener("click", forceSaveCurrentProfile);
+  $("#deleteAccountDataBtn").addEventListener("click", deleteCurrentProfileData);
   $("#scrollTopBtn").addEventListener("click", scrollToPageTop);
   window.addEventListener("scroll", updateScrollTopButton, { passive: true });
   updateScrollTopButton();
@@ -4945,6 +5663,29 @@ function attachEvents() {
 
   $("#editalImportPlanBtn").addEventListener("click", importEditalItemsToPlan);
 
+  $("#editalManualForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const subjectName = $("#editalManualSubject").value.trim();
+    const topicName = $("#editalManualTopic").value.trim();
+    if (!subjectName || !topicName) {
+      showToast("Informe materia e assunto para adicionar ao edital.");
+      return;
+    }
+    state.edital = normalizeEditalData(state.edital);
+    state.edital.items.push(
+      normalizeEditalItem({
+        subjectName,
+        topicName,
+        order: state.edital.items.length,
+      })
+    );
+    state.edital.scopeNote = state.edital.scopeNote || "Cronograma ajustado manualmente pelo usuario.";
+    saveState();
+    event.target.reset();
+    renderEdital();
+    showToast("Assunto adicionado ao edital.");
+  });
+
   $("#copyEditalScheduleBtn").addEventListener("click", async () => {
     const text = editalScheduleToText();
     if (!text) {
@@ -5083,16 +5824,29 @@ function attachEvents() {
     }
     const selectedDate = $("#studyDate").value || todayISO();
     const selectedNote = $("#studyNote").value.trim();
-    state.studyLogs.push({
-      id: uid(),
-      subjectId,
-      topicId,
-      minutes: Math.round(minutes),
-      date: selectedDate,
-      source: "Manual",
-      note: selectedNote,
-      createdAt: new Date().toISOString(),
-    });
+    const existing = state.studyLogs.find((log) => log.id === state.ui.activeStudyEditId);
+
+    if (existing) {
+      existing.subjectId = subjectId;
+      existing.topicId = topicId;
+      existing.minutes = Math.round(minutes);
+      existing.date = selectedDate;
+      existing.note = selectedNote;
+      existing.source = existing.source || "Manual";
+      existing.updatedAt = new Date().toISOString();
+      state.ui.activeStudyEditId = "";
+    } else {
+      state.studyLogs.push({
+        id: uid(),
+        subjectId,
+        topicId,
+        minutes: Math.round(minutes),
+        date: selectedDate,
+        source: "Manual",
+        note: selectedNote,
+        createdAt: new Date().toISOString(),
+      });
+    }
     saveState();
     $("#studySubject").value = subjectId;
     $("#studyTopic").value = topicId;
@@ -5100,7 +5854,17 @@ function attachEvents() {
     $("#studyDate").value = selectedDate;
     $("#studyNote").value = "";
     render();
-    showToast("Tempo registrado.");
+    showToast(existing ? "Tempo atualizado." : "Tempo registrado.");
+  });
+
+  $("#cancelStudyEditBtn").addEventListener("click", () => {
+    state.ui.activeStudyEditId = "";
+    saveState();
+    $("#studyMinutes").value = 30;
+    $("#studyDate").value = todayISO();
+    $("#studyNote").value = "";
+    updateStudyLogFormMode();
+    showToast("Edicao cancelada.");
   });
 
   $("#flashcardForm").addEventListener("submit", (event) => {
@@ -5175,7 +5939,7 @@ function attachEvents() {
     showToast("Edição do flashcard cancelada.");
   });
 
-  ["#flashcardReviewOrder", "#flashcardReviewScope", "#flashcardReviewSubject", "#flashcardReviewTopic"].forEach((selector) => {
+  ["#flashcardReviewOrder", "#flashcardReviewQueue", "#flashcardReviewScope", "#flashcardReviewSubject", "#flashcardReviewTopic"].forEach((selector) => {
     $(selector).addEventListener("change", () => updateFlashcardReviewSettings());
   });
 
@@ -5650,8 +6414,34 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "deleteEditalItem") {
+    state.edital = normalizeEditalData({
+      ...state.edital,
+      items: (state.edital.items || []).filter((item) => item.id !== id).map((item, index) => ({ ...item, order: index })),
+    });
+    saveState();
+    renderEdital();
+    renderDailyReview();
+    showToast("Assunto removido do edital.");
+    return;
+  }
+
+  if (type === "editStudy") {
+    const log = state.studyLogs.find((item) => item.id === id);
+    if (!log) return;
+    fillStudyLogForm(log);
+    saveState();
+    $("#studyLogForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Tempo carregado para edicao.");
+    return;
+  }
+
   if (type === "deleteStudy") {
     state.studyLogs = state.studyLogs.filter((log) => log.id !== id);
+    if (state.ui.activeStudyEditId === id) {
+      state.ui.activeStudyEditId = "";
+      updateStudyLogFormMode();
+    }
     saveState();
     render();
     showToast("Sessão removida.");

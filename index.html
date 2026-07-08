@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260707-scrollblocks" />
+    <link rel="stylesheet" href="styles.css?v=20260708-suite" />
   </head>
   <body>
     <div class="app-shell">
@@ -50,6 +50,7 @@
           </label>
           <div class="profile-actions">
             <button class="button secondary" id="profileAccessBtn" type="submit">Entrar</button>
+            <button class="button primary" id="profileSignupBtn" type="button">Criar conta</button>
             <button class="button ghost" id="logoutProfileBtn" type="button">Sair</button>
           </div>
           <div class="profile-recovery-actions">
@@ -73,7 +74,14 @@
             <p class="eyebrow">Rotina de estudos</p>
             <h1 id="pageTitle">Painel</h1>
           </div>
+          <form class="global-search" id="globalSearchForm" role="search">
+            <label class="sr-only" for="globalSearchInput">Buscar em todo o Estudos Track</label>
+            <input id="globalSearchInput" type="search" autocomplete="off" placeholder="Buscar em tudo..." />
+            <button class="mini-button" id="globalSearchClearBtn" type="button">Limpar</button>
+            <div class="global-search-results" id="globalSearchResults"></div>
+          </form>
           <div class="topbar-actions">
+            <span id="syncStatus" class="sync-status">Local</span>
             <button class="button ghost" id="themeToggleBtn" type="button" aria-pressed="false">Modo escuro</button>
             <span id="currentDate" class="date-pill"></span>
             <button class="button secondary" data-view="pomodoro" type="button">Abrir Pomodoro</button>
@@ -99,6 +107,17 @@
           </div>
 
           <div class="stat-grid" id="statGrid"></div>
+
+          <section class="panel daily-review-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Hoje</p>
+                <h2>Revisao diaria sugerida</h2>
+              </div>
+              <button class="button ghost" data-view="pomodoro" type="button">Estudar agora</button>
+            </div>
+            <div class="daily-review-grid" id="dailyReviewList"></div>
+          </section>
 
           <div class="content-grid two-columns">
             <section class="panel">
@@ -248,6 +267,19 @@
               <div class="edital-stat-grid" id="editalStats"></div>
               <div class="edital-alert" id="editalAdvice">Importe ou cole o edital para gerar um plano proporcional até a prova.</div>
               <div class="edital-detected-list" id="editalDetectedList"></div>
+              <form class="edital-manual-form" id="editalManualForm">
+                <div class="split-inputs">
+                  <label>
+                    Materia
+                    <input id="editalManualSubject" type="text" placeholder="Ex.: Direito Constitucional" />
+                  </label>
+                  <label>
+                    Assunto
+                    <input id="editalManualTopic" type="text" placeholder="Ex.: Controle de constitucionalidade" />
+                  </label>
+                </div>
+                <button class="button secondary" type="submit">Adicionar ao edital</button>
+              </form>
               <div class="inline-actions">
                 <button class="button ghost" id="copyEditalScheduleBtn" type="button">Copiar cronograma</button>
               </div>
@@ -649,7 +681,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Tempo</p>
-                  <h3>Registro manual</h3>
+                  <h3 id="studyFormTitle">Registro manual</h3>
                 </div>
               </div>
               <div class="split-inputs">
@@ -676,7 +708,10 @@
                 Nota
                 <input id="studyNote" type="text" placeholder="Ex.: leitura de lei seca" />
               </label>
-              <button class="button primary" type="submit">Registrar tempo</button>
+              <div class="inline-actions study-form-actions">
+                <button class="button primary" id="studySubmitBtn" type="submit">Registrar tempo</button>
+                <button class="button ghost hidden" id="cancelStudyEditBtn" type="button">Cancelar edicao</button>
+              </div>
             </form>
 
             <section class="panel form-panel media-panel">
@@ -715,7 +750,7 @@
                     <th>Assunto</th>
                     <th>Tempo</th>
                     <th>Origem</th>
-                    <th></th>
+                    <th>Acoes</th>
                   </tr>
                 </thead>
                 <tbody id="studyHistory"></tbody>
@@ -967,6 +1002,15 @@
                 </select>
               </label>
               <label>
+                Fila inteligente
+                <select id="flashcardReviewQueue">
+                  <option value="today">Revisar hoje</option>
+                  <option value="overdue">Atrasados</option>
+                  <option value="hard">Difíceis</option>
+                  <option value="allDue">Todos pendentes</option>
+                </select>
+              </label>
+              <label>
                 Estudar
                 <select id="flashcardReviewScope">
                   <option value="all">Todos os flashcards</option>
@@ -1185,6 +1229,21 @@
           </div>
 
           <div class="content-grid form-and-list">
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Status</p>
+                  <h3>Conta e sincronizacao</h3>
+                </div>
+              </div>
+              <div class="account-status-list" id="accountStatusList"></div>
+              <div class="profile-actions">
+                <button class="button secondary" id="forceSyncBtn" type="button">Salvar agora</button>
+                <button class="button ghost danger" id="deleteAccountDataBtn" type="button">Excluir meus dados</button>
+              </div>
+              <p class="music-note">A exclusao apaga os dados de estudo desta conta. A remocao definitiva do usuario de autenticacao deve ser feita no painel do Supabase, em Authentication &gt; Users.</p>
+            </section>
+
             <form class="panel form-panel" id="accountForm">
               <div class="panel-header">
                 <div>
@@ -1306,6 +1365,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="app.js?v=20260706-auth2"></script>
+    <script src="app.js?v=20260708-suite"></script>
   </body>
 </html>

@@ -707,6 +707,8 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeCaseEditId: candidate.ui?.activeCaseEditId || "",
       activeFlashcardEditId: candidate.ui?.activeFlashcardEditId || "",
       activeStudyEditId: candidate.ui?.activeStudyEditId || "",
+      activeSubjectEditId: candidate.ui?.activeSubjectEditId || "",
+      activeTopicEditId: candidate.ui?.activeTopicEditId || "",
     },
   };
 }
@@ -764,6 +766,8 @@ function createEmptyState(profile = {}) {
       activeCaseEditId: "",
       activeFlashcardEditId: "",
       activeStudyEditId: "",
+      activeSubjectEditId: "",
+      activeTopicEditId: "",
     },
   };
 }
@@ -2288,7 +2292,69 @@ function renderStrengthList() {
     : `<div class="empty-state">Lance questões para visualizar pontos fortes e fracos.</div>`;
 }
 
+function updatePlanFormModes() {
+  const subjectEditing = Boolean(state.ui.activeSubjectEditId);
+  const topicEditing = Boolean(state.ui.activeTopicEditId);
+  const subjectTitle = $("#subjectFormTitle");
+  const subjectSubmit = $("#subjectSubmitBtn");
+  const subjectCancel = $("#cancelSubjectEditBtn");
+  const topicTitle = $("#topicFormTitle");
+  const topicSubmit = $("#topicSubmitBtn");
+  const topicCancel = $("#cancelTopicEditBtn");
+
+  if (subjectTitle) subjectTitle.textContent = subjectEditing ? "Editar materia" : "Adicionar materia";
+  if (subjectSubmit) subjectSubmit.textContent = subjectEditing ? "Salvar materia" : "Adicionar materia";
+  if (subjectCancel) subjectCancel.classList.toggle("hidden", !subjectEditing);
+  if (topicTitle) topicTitle.textContent = topicEditing ? "Editar assunto" : "Adicionar assunto";
+  if (topicSubmit) topicSubmit.textContent = topicEditing ? "Salvar assunto" : "Adicionar assunto";
+  if (topicCancel) topicCancel.classList.toggle("hidden", !topicEditing);
+}
+
+function resetSubjectForm() {
+  state.ui.activeSubjectEditId = "";
+  $("#subjectForm")?.reset();
+  if ($("#subjectGoal")) $("#subjectGoal").value = 3;
+  if ($("#subjectColor")) $("#subjectColor").value = "#0f766e";
+  updatePlanFormModes();
+}
+
+function resetTopicForm() {
+  state.ui.activeTopicEditId = "";
+  $("#topicForm")?.reset();
+  const prioritySelect = $("#topicPriority");
+  if (prioritySelect) prioritySelect.selectedIndex = Math.min(1, Math.max(0, prioritySelect.options.length - 1));
+  updatePlanFormModes();
+}
+
+function fillSubjectForm(subject) {
+  if (!subject) return;
+  state.ui.activeSubjectEditId = subject.id;
+  $("#subjectName").value = subject.name || "";
+  $("#subjectGoal").value = Number(subject.goalHours || 0);
+  $("#subjectColor").value = subject.color || "#0f766e";
+  updatePlanFormModes();
+}
+
+function fillTopicForm(topic) {
+  if (!topic) return;
+  state.ui.activeTopicEditId = topic.id;
+  $("#topicSubject").value = topic.subjectId || "";
+  $("#topicName").value = topic.name || "";
+  const prioritySelect = $("#topicPriority");
+  const fallbackPriority = prioritySelect.options[1]?.value || prioritySelect.options[0]?.value || "";
+  prioritySelect.value = topic.priority || fallbackPriority;
+  if (prioritySelect.value !== (topic.priority || fallbackPriority)) prioritySelect.value = fallbackPriority;
+  updatePlanFormModes();
+}
+
 function renderPlan() {
+  if (state.ui.activeSubjectEditId && !state.subjects.some((subject) => subject.id === state.ui.activeSubjectEditId)) {
+    state.ui.activeSubjectEditId = "";
+  }
+  if (state.ui.activeTopicEditId && !state.topics.some((topic) => topic.id === state.ui.activeTopicEditId)) {
+    state.ui.activeTopicEditId = "";
+  }
+  updatePlanFormModes();
   $("#subjectBoard").innerHTML = state.subjects.length
     ? state.subjects.map(renderSubjectCard).join("")
     : `<div class="empty-state">Adicione uma matéria para começar sua planilha.</div>`;
@@ -2311,7 +2377,10 @@ function renderSubjectCard(subject) {
           <p class="eyebrow">Matéria</p>
           <h3>${escapeHTML(subject.name)}</h3>
         </div>
-        <button class="mini-button bad" data-action="deleteSubject" data-id="${subject.id}" type="button">Excluir</button>
+        <div class="inline-actions subject-card-actions">
+          <button class="mini-button" data-action="editSubject" data-id="${subject.id}" type="button">Editar</button>
+          <button class="mini-button bad" data-action="deleteSubject" data-id="${subject.id}" type="button">Excluir</button>
+        </div>
       </div>
       <div>
         <div class="insight-top">
@@ -2358,6 +2427,7 @@ function renderTopicItem(topic, color) {
         <button class="mini-button good" data-action="quickQuestion" data-result="correct" data-id="${topic.id}" type="button">+ acerto</button>
         <button class="mini-button bad" data-action="quickQuestion" data-result="wrong" data-id="${topic.id}" type="button">+ erro</button>
         <button class="mini-button" data-action="quickStudy" data-id="${topic.id}" type="button">+ 25 min</button>
+        <button class="mini-button" data-action="editTopic" data-id="${topic.id}" type="button">Editar</button>
         <button class="mini-button bad" data-action="deleteTopic" data-id="${topic.id}" type="button">Excluir</button>
       </div>
     </div>
@@ -5459,13 +5529,17 @@ function attachEvents() {
     const goalHours = Number($("#subjectGoal").value);
     const color = $("#subjectColor").value;
     if (!name) return;
-    state.subjects.push({ id: uid(), name, color, goalHours });
+    const existing = state.subjects.find((subject) => subject.id === state.ui.activeSubjectEditId);
+    if (existing) {
+      Object.assign(existing, { name, color, goalHours });
+    } else {
+      state.subjects.push({ id: uid(), name, color, goalHours });
+    }
+    state.ui.activeSubjectEditId = "";
     saveState();
-    event.target.reset();
-    $("#subjectGoal").value = 3;
-    $("#subjectColor").value = "#0f766e";
+    resetSubjectForm();
     render();
-    showToast("Matéria adicionada.");
+    showToast(existing ? "Materia atualizada." : "Materia adicionada.");
   });
 
   $("#topicForm").addEventListener("submit", (event) => {
@@ -5474,11 +5548,29 @@ function attachEvents() {
     const name = $("#topicName").value.trim();
     const priority = $("#topicPriority").value;
     if (!subjectId || !name) return;
-    state.topics.push({ id: uid(), subjectId, name, priority });
+    const existing = state.topics.find((topic) => topic.id === state.ui.activeTopicEditId);
+    if (existing) {
+      Object.assign(existing, { subjectId, name, priority });
+    } else {
+      state.topics.push({ id: uid(), subjectId, name, priority });
+    }
+    state.ui.activeTopicEditId = "";
     saveState();
-    event.target.reset();
+    resetTopicForm();
     render();
-    showToast("Assunto adicionado.");
+    showToast(existing ? "Assunto atualizado." : "Assunto adicionado.");
+  });
+
+  $("#cancelSubjectEditBtn").addEventListener("click", () => {
+    resetSubjectForm();
+    saveState();
+    showToast("Edicao de materia cancelada.");
+  });
+
+  $("#cancelTopicEditBtn").addEventListener("click", () => {
+    resetTopicForm();
+    saveState();
+    showToast("Edicao de assunto cancelada.");
   });
 
   $("#editalForm").addEventListener("submit", (event) => {
@@ -6223,8 +6315,33 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "editSubject") {
+    const subject = state.subjects.find((item) => item.id === id);
+    if (!subject) return;
+    state.ui.view = "plano";
+    fillSubjectForm(subject);
+    saveState();
+    $("#subjectForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Materia carregada para edicao.");
+    return;
+  }
+
+  if (type === "editTopic") {
+    const topic = state.topics.find((item) => item.id === id);
+    if (!topic) return;
+    state.ui.view = "plano";
+    fillTopicForm(topic);
+    saveState();
+    $("#topicForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Assunto carregado para edicao.");
+    return;
+  }
+
   if (type === "deleteSubject") {
     if (!window.confirm("Excluir esta matéria e seus assuntos?")) return;
+    const shouldResetSubjectForm = state.ui.activeSubjectEditId === id;
+    const shouldResetTopicForm = state.topics.some((topic) => topic.subjectId === id && topic.id === state.ui.activeTopicEditId);
+    if (shouldResetSubjectForm) state.ui.activeSubjectEditId = "";
     state.subjects = state.subjects.filter((subject) => subject.id !== id);
     state.topics = state.topics.filter((topic) => topic.subjectId !== id);
     state.questionLogs = state.questionLogs.filter((log) => getEntrySubjectId(log) !== id);
@@ -6232,10 +6349,13 @@ function handleAction(action) {
     state.flashcards = state.flashcards.filter((card) => getEntrySubjectId(card) !== id);
     state.legalMaterials = state.legalMaterials.map((item) => (getEntrySubjectId(item) === id ? { ...item, subjectId: "", topicId: "" } : item));
     if (state.flashcards.every((card) => card.id !== state.ui.activeFlashcardId)) state.ui.activeFlashcardId = "";
+    if (state.ui.activeTopicEditId && !state.topics.some((topic) => topic.id === state.ui.activeTopicEditId)) state.ui.activeTopicEditId = "";
     Object.keys(state.cases).forEach((court) => {
       state.cases[court] = state.cases[court].map((item) => (getEntrySubjectId(item) === id ? { ...item, subjectId: "", topicId: "" } : item));
     });
     saveState();
+    if (shouldResetSubjectForm) resetSubjectForm();
+    if (shouldResetTopicForm) resetTopicForm();
     render();
     showToast("Matéria excluída.");
     return;
@@ -6243,6 +6363,8 @@ function handleAction(action) {
 
   if (type === "deleteTopic") {
     if (!window.confirm("Excluir este assunto e seus lançamentos?")) return;
+    const shouldResetTopicForm = state.ui.activeTopicEditId === id;
+    if (shouldResetTopicForm) state.ui.activeTopicEditId = "";
     state.topics = state.topics.filter((topic) => topic.id !== id);
     state.questionLogs = state.questionLogs.filter((log) => log.topicId !== id);
     state.studyLogs = state.studyLogs.filter((log) => log.topicId !== id);
@@ -6253,6 +6375,7 @@ function handleAction(action) {
       state.cases[court] = state.cases[court].map((item) => (item.topicId === id ? { ...item, topicId: "" } : item));
     });
     saveState();
+    if (shouldResetTopicForm) resetTopicForm();
     render();
     showToast("Assunto excluído.");
     return;

@@ -1163,8 +1163,22 @@ button:focus-visible {
 .subject-card-header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
   min-width: 0;
+}
+
+.subject-card-header > div {
+  min-width: 0;
+}
+
+.subject-card-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.subject-card-actions .mini-button {
+  min-width: 72px;
 }
 
 .subject-card h3,
@@ -1236,6 +1250,11 @@ button:focus-visible {
   word-break: break-word;
 }
 
+.topic-item-top .tag {
+  justify-self: end;
+  white-space: nowrap;
+}
+
 .topic-meta,
 .case-meta,
 .inline-actions,
@@ -1248,6 +1267,20 @@ button:focus-visible {
 
 .inline-actions {
   justify-content: flex-end;
+}
+
+.form-actions {
+  justify-content: flex-start;
+}
+
+.topic-item .inline-actions {
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+.topic-item .inline-actions .mini-button {
+  flex: 1 1 94px;
+  min-width: 94px;
 }
 
 .control-row,
@@ -2599,6 +2632,20 @@ td {
   .music-actions,
   .flashcard-actions {
     align-items: stretch;
+  }
+
+  .topic-item-top {
+    grid-template-columns: 1fr;
+  }
+
+  .topic-item-top .tag {
+    justify-self: start;
+  }
+
+  .topic-item .inline-actions .mini-button,
+  .subject-card-actions .mini-button {
+    min-width: 0;
+    width: 100%;
   }
 
   .global-search {

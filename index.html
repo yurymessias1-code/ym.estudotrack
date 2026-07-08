@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260708-native-clean" />
+    <link rel="stylesheet" href="styles.css?v=20260708-plan-edit" />
   </head>
   <body>
     <div class="app-shell">
@@ -156,7 +156,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Matéria</p>
-                  <h3>Adicionar matéria</h3>
+                  <h3 id="subjectFormTitle">Adicionar materia</h3>
                 </div>
               </div>
               <label>
@@ -171,14 +171,17 @@
                 Cor
                 <input id="subjectColor" name="subjectColor" type="color" value="#0f766e" />
               </label>
-              <button class="button primary" type="submit">Adicionar matéria</button>
+              <div class="inline-actions form-actions">
+                <button class="button primary" id="subjectSubmitBtn" type="submit">Adicionar materia</button>
+                <button class="button ghost hidden" id="cancelSubjectEditBtn" type="button">Cancelar edicao</button>
+              </div>
             </form>
 
             <form class="panel form-panel" id="topicForm">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Assunto</p>
-                  <h3>Adicionar assunto</h3>
+                  <h3 id="topicFormTitle">Adicionar assunto</h3>
                 </div>
               </div>
               <label>
@@ -197,7 +200,10 @@
                   <option value="Baixa">Baixa</option>
                 </select>
               </label>
-              <button class="button primary" type="submit">Adicionar assunto</button>
+              <div class="inline-actions form-actions">
+                <button class="button primary" id="topicSubmitBtn" type="submit">Adicionar assunto</button>
+                <button class="button ghost hidden" id="cancelTopicEditBtn" type="button">Cancelar edicao</button>
+              </div>
             </form>
           </div>
 
@@ -1365,6 +1371,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="app.js?v=20260708-native-clean"></script>
+    <script src="app.js?v=20260708-plan-edit"></script>
   </body>
 </html>

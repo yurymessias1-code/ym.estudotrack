@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260708-competitions" />
+    <link rel="stylesheet" href="styles.css?v=20260708-color-presets" />
   </head>
   <body>
     <div class="app-shell">
@@ -172,6 +172,18 @@
                 Cor
                 <input id="subjectColor" name="subjectColor" type="color" value="#0f766e" />
               </label>
+              <div class="subject-color-palette" aria-label="Cores rapidas para materia">
+                <button class="subject-color-swatch" data-subject-color="#0f766e" style="--swatch:#0f766e" type="button" title="Verde estudo" aria-label="Selecionar verde estudo"></button>
+                <button class="subject-color-swatch" data-subject-color="#2563eb" style="--swatch:#2563eb" type="button" title="Azul" aria-label="Selecionar azul"></button>
+                <button class="subject-color-swatch" data-subject-color="#7c3aed" style="--swatch:#7c3aed" type="button" title="Roxo" aria-label="Selecionar roxo"></button>
+                <button class="subject-color-swatch" data-subject-color="#db2777" style="--swatch:#db2777" type="button" title="Rosa" aria-label="Selecionar rosa"></button>
+                <button class="subject-color-swatch" data-subject-color="#dc2626" style="--swatch:#dc2626" type="button" title="Vermelho" aria-label="Selecionar vermelho"></button>
+                <button class="subject-color-swatch" data-subject-color="#ea580c" style="--swatch:#ea580c" type="button" title="Laranja" aria-label="Selecionar laranja"></button>
+                <button class="subject-color-swatch" data-subject-color="#ca8a04" style="--swatch:#ca8a04" type="button" title="Amarelo escuro" aria-label="Selecionar amarelo escuro"></button>
+                <button class="subject-color-swatch" data-subject-color="#16a34a" style="--swatch:#16a34a" type="button" title="Verde" aria-label="Selecionar verde"></button>
+                <button class="subject-color-swatch" data-subject-color="#0891b2" style="--swatch:#0891b2" type="button" title="Ciano" aria-label="Selecionar ciano"></button>
+                <button class="subject-color-swatch" data-subject-color="#475569" style="--swatch:#475569" type="button" title="Grafite" aria-label="Selecionar grafite"></button>
+              </div>
               <div class="inline-actions form-actions">
                 <button class="button primary" id="subjectSubmitBtn" type="submit">Adicionar materia</button>
                 <button class="button ghost hidden" id="cancelSubjectEditBtn" type="button">Cancelar edicao</button>
@@ -1462,7 +1474,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260708-competitions"></script>
-    <script src="app.js?v=20260708-competitions"></script>
+    <script src="supabase-config.js?v=20260708-color-presets"></script>
+    <script src="app.js?v=20260708-color-presets"></script>
   </body>
 </html>

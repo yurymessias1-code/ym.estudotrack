@@ -2831,6 +2831,16 @@ function updatePlanFormModes() {
   if (topicTitle) topicTitle.textContent = topicEditing ? "Editar assunto" : "Adicionar assunto";
   if (topicSubmit) topicSubmit.textContent = topicEditing ? "Salvar assunto" : "Adicionar assunto";
   if (topicCancel) topicCancel.classList.toggle("hidden", !topicEditing);
+  updateSubjectColorPresetState();
+}
+
+function updateSubjectColorPresetState() {
+  const selectedColor = ($("#subjectColor")?.value || "").toLowerCase();
+  $$("[data-subject-color]").forEach((button) => {
+    const isActive = String(button.dataset.subjectColor || "").toLowerCase() === selectedColor;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
 }
 
 function resetSubjectForm() {
@@ -6157,6 +6167,17 @@ function attachEvents() {
     render();
     showToast(existing ? "Materia atualizada." : "Materia adicionada.");
   });
+
+  $$("[data-subject-color]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const color = button.dataset.subjectColor;
+      if (!color || !$("#subjectColor")) return;
+      $("#subjectColor").value = color;
+      updateSubjectColorPresetState();
+    });
+  });
+
+  $("#subjectColor").addEventListener("input", updateSubjectColorPresetState);
 
   $("#topicForm").addEventListener("submit", (event) => {
     event.preventDefault();

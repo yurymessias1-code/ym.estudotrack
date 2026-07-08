@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260708-competitions"), "Cache do HTML nao foi atualizado para concursos.");
-assert(html.includes("supabase-config.js?v=20260708-competitions"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260708-color-presets"), "Cache do HTML nao foi atualizado para cores rapidas.");
+assert(html.includes("supabase-config.js?v=20260708-color-presets"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes("unpkg.com/@supabase/supabase-js@2"), "CDN alternativo do SDK Supabase ausente.");
 assert(html.includes("cancelSubjectEditBtn"), "Cancelamento de edicao de materia ausente.");
 assert(html.includes("cancelTopicEditBtn"), "Cancelamento de edicao de assunto ausente.");
@@ -32,6 +32,7 @@ assert(html.includes("data-view=\"concursos\""), "Aba Concursos ausente.");
 assert(html.includes("competitionForm"), "Formulario de concursos ausente.");
 assert(html.includes("timerCompetition"), "Seletor de concurso no Pomodoro ausente.");
 assert(html.includes("studyCompetition"), "Seletor de concurso no registro manual ausente.");
+assert(html.includes("data-subject-color"), "Cores rapidas de materia ausentes.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -50,6 +51,7 @@ assert(app.includes("parseExternalStudyImport"), "Parser de estudos externos aus
 assert(app.includes("function normalizeCompetition"), "Normalizacao de concursos ausente.");
 assert(app.includes("function renderCompetitions"), "Renderizacao de concursos ausente.");
 assert(app.includes("competitionId"), "Vinculo de estudo com concurso ausente.");
+assert(app.includes("updateSubjectColorPresetState"), "Controle das cores rapidas de materia ausente.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
@@ -59,6 +61,7 @@ assert(css.includes(".subject-card-actions"), "Layout das acoes de materia nao f
 assert(css.includes("#logoutProfileBtn"), "Layout do painel de login nao foi ajustado.");
 assert(css.includes(".external-import-preview"), "CSS do importador externo ausente.");
 assert(css.includes(".competition-board"), "CSS da aba concursos ausente.");
+assert(css.includes(".subject-color-palette"), "CSS da paleta de cores de materia ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

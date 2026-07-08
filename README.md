@@ -7,6 +7,8 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - controle de questões, acertos e erros;
 - logo "Estudos Track" aplicada no layout, clicável para voltar ao Painel, e configurada como ícone da aba do navegador;
 - controle por dia, semana, mês e ano com seleção de período específico;
+- importador de histórico externo do Aprovado por JSON/CSV, com coletor por bookmarklet;
+- aba Concursos para vincular matérias a provas específicas e acompanhar horas por matéria usando a cor escolhida em cada matéria;
 - objetivos com data-alvo e contagem regressiva;
 - jurisprudências separadas por STJ e STF, com busca por texto, matéria e assunto;
 - editor avançado em jurisprudências, leis e tabelas, com negrito, itálico, sublinhado, cores rápidas, marca-texto, alinhamento, parágrafos, tabelas editáveis e imagens;
@@ -132,6 +134,28 @@ A aba **Controle** permite selecionar:
 
 Os dados exibidos mudam de acordo com o período escolhido.
 Na mesma aba é possível cadastrar objetivos, como data de prova, revisão final ou qualquer meta pessoal, com contagem de dias restantes.
+
+## Importar histórico do Aprovado
+
+A aba **Controle** tem um painel **Importar do Aprovado**.
+Use o arquivo `bookmarklet-aprovado.txt` para criar um favorito no navegador chamado `Exportar Aprovado`.
+Depois:
+
+1. Entre no Aprovado.
+2. Abra a linha do tempo.
+3. Role a página até carregar o período desejado.
+4. Clique no favorito `Exportar Aprovado`.
+5. Importe o JSON baixado no painel **Importar do Aprovado**.
+
+O app cria matérias e assuntos que ainda não existirem e adiciona os períodos ao histórico de tempo.
+Veja também `IMPORTAR-APROVADO.md`.
+
+## Concursos e cores por matéria
+
+Na aba **Matérias**, cada matéria tem uma cor própria editável no cadastro.
+Na aba **Concursos**, cadastre a prova e vincule as matérias que pertencem a ela.
+Ao usar o Pomodoro ou registrar tempo manualmente, selecione também o concurso.
+O card do concurso mostra o total de horas por matéria, usando a cor da matéria para separar visualmente o tempo estudado em cada prova.
 
 ## Jurisprudências
 

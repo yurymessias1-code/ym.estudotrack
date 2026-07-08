@@ -16,6 +16,7 @@ const titles = {
   dashboard: "Painel",
   controle: "Controle",
   plano: "Matérias",
+  concursos: "Concursos",
   edital: "Edital",
   questoes: "Questões",
   flashcards: "Flashcards",
@@ -45,6 +46,7 @@ let timer = {
   cycle: 1,
   subjectId: "",
   topicId: "",
+  competitionId: "",
 };
 const syncingSources = new Set();
 let pomodoroAudioContext = null;
@@ -887,6 +889,22 @@ function normalizeEditalData(edital = {}) {
   };
 }
 
+function normalizeCompetition(item = {}) {
+  const subjectIds = Array.isArray(item.subjectIds)
+    ? [...new Set(item.subjectIds.map((subjectId) => String(subjectId || "").trim()).filter(Boolean))]
+    : [];
+  const name = typeof item.name === "string" ? item.name.trim() : "";
+  return {
+    id: item.id || uid(),
+    name: name || "Concurso sem nome",
+    date: typeof item.date === "string" ? item.date : "",
+    notes: typeof item.notes === "string" ? item.notes.trim() : "",
+    subjectIds,
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
+  };
+}
+
 function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
   return {
@@ -901,6 +919,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
     notes: Array.isArray(candidate.notes) ? candidate.notes : empty.notes,
     categories: Array.isArray(candidate.categories) ? candidate.categories.map(normalizeCategoryName).filter(Boolean) : empty.categories,
     goals: Array.isArray(candidate.goals) ? candidate.goals : empty.goals,
+    competitions: Array.isArray(candidate.competitions) ? candidate.competitions.map(normalizeCompetition) : empty.competitions,
     cases: {
       STJ: Array.isArray(candidate.cases?.STJ) ? candidate.cases.STJ.map(normalizeCaseItem) : [],
       STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF.map(normalizeCaseItem) : [],
@@ -979,6 +998,7 @@ function createEmptyState(profile = {}) {
     notes: [],
     categories: [],
     goals: [],
+    competitions: [],
     cases: { STJ: [], STF: [] },
     legalMaterials: [],
     edital: normalizeEditalData(),
@@ -1179,6 +1199,14 @@ function saveState(options = {}) {
 
 function getSubject(id) {
   return state.subjects.find((subject) => subject.id === id);
+}
+
+function getCompetition(id) {
+  return state.competitions.find((competition) => competition.id === id);
+}
+
+function getCompetitionLabel(id) {
+  return getCompetition(id)?.name || "Sem concurso";
 }
 
 function getTopic(id) {
@@ -1566,6 +1594,23 @@ function populateSubjectSelect(select, { includeEmpty = false, emptyLabel = "Sem
   }
 }
 
+function populateCompetitionSelect(select, { includeEmpty = true, emptyLabel = "Sem concurso" } = {}) {
+  if (!select) return;
+  const current = select.value;
+  const options = state.competitions
+    .map((competition) => {
+      const label = compactSelectLabel(competition.name, 52);
+      return `<option value="${competition.id}" title="${escapeHTML(competition.name)}">${escapeHTML(label)}</option>`;
+    })
+    .join("");
+  select.innerHTML = `${includeEmpty ? `<option value="">${escapeHTML(emptyLabel)}</option>` : ""}${options}`;
+  if (state.competitions.some((competition) => competition.id === current)) {
+    select.value = current;
+  } else if (includeEmpty) {
+    select.value = "";
+  }
+}
+
 function populateFlashcardReviewSelectors() {
   const orderSelect = $("#flashcardReviewOrder");
   const queueSelect = $("#flashcardReviewQueue");
@@ -1727,6 +1772,7 @@ function render() {
   renderControl();
   renderGoals();
   renderPlan();
+  renderCompetitions();
   renderEdital();
   renderQuestions();
   renderFlashcards();
@@ -2080,6 +2126,10 @@ function renderSelectors() {
   populateSubjectSelect($("#flashcardSubject"));
   populateSubjectSelect($("#caseSubject"), { includeEmpty: true, emptyLabel: "Sem matéria" });
   populateSubjectSelect($("#legalMaterialSubject"), { includeEmpty: true, emptyLabel: "Sem matéria" });
+  populateSubjectSelect($("#competitionSubjectSelect"));
+  populateCompetitionSelect($("#timerCompetition"));
+  populateCompetitionSelect($("#studyCompetition"));
+  populateCompetitionSelect($("#competitionSelect"), { includeEmpty: false });
 
   populateTopicSelect($("#questionTopic"));
   populateTopicSelect($("#timerTopic"), { includeEmpty: true, subjectId: $("#timerSubject")?.value || "", emptyLabel: "Sem assunto específico" });
@@ -2102,6 +2152,11 @@ function renderSelectors() {
   $("#caseSubject").disabled = subjectsDisabled;
   $("#legalMaterialSubject").disabled = subjectsDisabled;
   $("#topicSubject").disabled = state.subjects.length === 0;
+  if ($("#competitionSubjectSelect")) $("#competitionSubjectSelect").disabled = subjectsDisabled;
+  if ($("#competitionSelect")) $("#competitionSelect").disabled = state.competitions.length === 0;
+  ["#timerCompetition", "#studyCompetition"].forEach((selector) => {
+    if ($(selector)) $(selector).disabled = state.competitions.length === 0;
+  });
 }
 
 function syncScopedTopicSelect(subjectSelector, topicSelector) {
@@ -2475,6 +2530,211 @@ function renderControlHistory(studyLogs, questionLogs) {
     : `<tr><td colspan="4">Nenhuma atividade registrada neste período.</td></tr>`;
 }
 
+function normalizeExternalKey(value) {
+  return normalizeSearchText(value).replace(/\s+/g, " ").trim();
+}
+
+function findOrCreateSubjectByName(name) {
+  const cleanName = String(name || "").trim() || "Importado";
+  const key = normalizeExternalKey(cleanName);
+  let subject = state.subjects.find((item) => normalizeExternalKey(item.name) === key);
+  if (!subject) {
+    subject = { id: uid(), name: cleanName, color: "#0f766e", goalHours: 0 };
+    state.subjects.push(subject);
+  }
+  return subject;
+}
+
+function findOrCreateTopicByName(subjectId, name) {
+  const cleanName = String(name || "").trim();
+  if (!cleanName) return "";
+  const key = normalizeExternalKey(cleanName);
+  let topic = state.topics.find((item) => item.subjectId === subjectId && normalizeExternalKey(item.name) === key);
+  if (!topic) {
+    topic = { id: uid(), subjectId, name: cleanName, priority: "MÃ©dia" };
+    state.topics.push(topic);
+  }
+  return topic.id;
+}
+
+function parseExternalDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return todayISO();
+  const iso = text.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  const br = text.match(/\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?\b/);
+  if (br) {
+    const year = br[3] ? Number(br[3].length === 2 ? `20${br[3]}` : br[3]) : new Date().getFullYear();
+    const month = String(clamp(Number(br[2]) || 1, 1, 12)).padStart(2, "0");
+    const day = String(clamp(Number(br[1]) || 1, 1, 31)).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return todayISO();
+}
+
+function parseExternalMinutes(value) {
+  const text = String(value || "").toLowerCase().replace(",", ".");
+  if (!text) return 0;
+  const clock = text.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  const hours = text.match(/(\d+(?:\.\d+)?)\s*(?:h|hora|horas)\b/);
+  const minutes = text.match(/(\d+)\s*(?:m|min|mins|minuto|minutos)\b/);
+  const total = (hours ? Math.round(Number(hours[1]) * 60) : 0) + (minutes ? Number(minutes[1]) : 0);
+  if (total > 0) return total;
+  if (/\d{1,2}[\/.-]\d{1,2}/.test(text)) return 0;
+  const onlyNumber = text.trim().match(/^(\d{1,4})$/);
+  return onlyNumber ? Number(onlyNumber[1]) : 0;
+}
+
+function getExternalField(row, names) {
+  const entries = Object.entries(row || {});
+  for (const [key, value] of entries) {
+    const normalized = normalizeExternalKey(key);
+    if (names.some((name) => normalized === normalizeExternalKey(name))) return value;
+  }
+  return "";
+}
+
+function guessExternalStudyRow(row) {
+  const rawText = String(row.rawText || row.text || row.linha || Object.values(row || {}).join(" | ")).trim();
+  const subject = getExternalField(row, ["subject", "subjectName", "materia", "matÃ©ria", "disciplina"]) || row.subject || "";
+  const topic = getExternalField(row, ["topic", "topicName", "assunto", "conteudo", "conteÃºdo", "atividade"]) || row.topic || "";
+  const date = getExternalField(row, ["date", "data", "dia", "startedAt", "inicio", "inÃ­cio"]) || rawText;
+  const duration = getExternalField(row, ["minutes", "minutos", "duration", "duracao", "duraÃ§Ã£o", "tempo", "time"]) || rawText;
+  const note = getExternalField(row, ["note", "nota", "observacao", "observaÃ§Ã£o"]) || rawText;
+  const fallbackParts = rawText
+    .split(/\n|\|| - | - | -- /)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !parseExternalMinutes(part) && !/\d{1,2}[\/.-]\d{1,2}/.test(part));
+
+  return {
+    externalId: String(row.id || row.externalId || row.hash || rawText).slice(0, 220),
+    date: parseExternalDate(date),
+    minutes: parseExternalMinutes(duration),
+    subjectName: String(subject || fallbackParts[0] || "Aprovado").trim(),
+    topicName: String(topic || fallbackParts[1] || "").trim(),
+    note: String(note || rawText || "Importado do Aprovado").trim().slice(0, 500),
+    rawText,
+  };
+}
+
+function parseDelimitedExternalRows(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+  const delimiter = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
+  const split = (line) => line.split(delimiter).map((part) => part.replace(/^"|"$/g, "").trim());
+  const headers = split(lines[0]);
+  return lines.slice(1).map((line) => {
+    const values = split(line);
+    return headers.reduce((row, header, index) => {
+      row[header || `campo${index + 1}`] = values[index] || "";
+      return row;
+    }, {});
+  });
+}
+
+function parseExternalStudyImport(text, fileName = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : Array.isArray(parsed.rawRows) ? parsed.rawRows.map((rawText) => ({ rawText })) : [];
+    return items.map(guessExternalStudyRow).filter((item) => item.minutes > 0);
+  } catch {
+    const rows = /\.csv$/i.test(fileName) || raw.includes(";") || raw.includes(",") ? parseDelimitedExternalRows(raw) : raw.split(/\r?\n/).map((rawText) => ({ rawText }));
+    return rows.map(guessExternalStudyRow).filter((item) => item.minutes > 0);
+  }
+}
+
+function externalImportDuplicateKey(item, subjectId, topicId) {
+  return [item.externalId || "", item.date, item.minutes, subjectId, topicId, normalizeExternalKey(item.note)].join("::");
+}
+
+function importExternalStudyRows(rows, source = "Aprovado") {
+  const existingKeys = new Set(
+    state.studyLogs.map((log) =>
+      [log.externalId || "", log.date, Number(log.minutes || 0), log.subjectId || "", log.topicId || "", normalizeExternalKey(log.note || "")].join("::")
+    )
+  );
+  const imported = [];
+  let skipped = 0;
+
+  rows.forEach((item) => {
+    const subject = findOrCreateSubjectByName(item.subjectName);
+    const topicId = findOrCreateTopicByName(subject.id, item.topicName);
+    const key = externalImportDuplicateKey(item, subject.id, topicId);
+    if (existingKeys.has(key)) {
+      skipped += 1;
+      return;
+    }
+    existingKeys.add(key);
+    const log = {
+      id: uid(),
+      subjectId: subject.id,
+      topicId,
+      minutes: Math.round(item.minutes),
+      date: item.date,
+      source,
+      note: item.note || `Importado de ${source}`,
+      externalId: item.externalId,
+      createdAt: new Date().toISOString(),
+    };
+    state.studyLogs.push(log);
+    imported.push({ ...log, subjectName: subject.name, topicName: getTopic(topicId)?.name || "" });
+  });
+
+  return { imported, skipped };
+}
+
+function renderExternalImportPreview(result) {
+  const preview = $("#externalImportPreview");
+  if (!preview) return;
+  if (!result) {
+    preview.textContent = "Nenhum arquivo importado ainda.";
+    return;
+  }
+  preview.innerHTML = `
+    <strong>${result.imported.length} registros importados</strong>
+    <span>${result.skipped ? ` - ${result.skipped} duplicados ignorados` : ""}</span>
+    <ul>
+      ${result.imported
+        .slice(0, 8)
+        .map((item) => `<li>${formatDate(item.date)} - ${escapeHTML(item.subjectName)}${item.topicName ? `: ${escapeHTML(item.topicName)}` : ""} - ${formatMinutes(item.minutes)}</li>`)
+        .join("")}
+    </ul>
+  `;
+}
+
+function importExternalStudyFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const rows = parseExternalStudyImport(String(reader.result || ""), file.name);
+      if (!rows.length) {
+        renderExternalImportPreview({ imported: [], skipped: 0 });
+        showToast("Nenhum periodo de estudo foi identificado no arquivo.");
+        return;
+      }
+      const result = importExternalStudyRows(rows, /aprovado/i.test(file.name) ? "Aprovado" : "Importado");
+      saveState();
+      render();
+      renderExternalImportPreview(result);
+      showToast(`${result.imported.length} registros importados.`);
+    } catch (error) {
+      console.warn("Falha ao importar estudos externos:", error);
+      showToast("Nao foi possivel importar este arquivo.");
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+}
+
 function renderWeekChart() {
   const today = parseISODate(todayISO());
   const days = Array.from({ length: 7 }, (_, index) => {
@@ -2694,6 +2954,89 @@ function renderTopicItem(topic, color) {
         <button class="mini-button bad" data-action="deleteTopic" data-id="${topic.id}" type="button">Excluir</button>
       </div>
     </div>
+  `;
+}
+
+function getCompetitionSubjectIds(competition) {
+  const linkedIds = Array.isArray(competition.subjectIds) ? competition.subjectIds : [];
+  const studiedIds = state.studyLogs
+    .filter((log) => log.competitionId === competition.id)
+    .map((log) => getEntrySubjectId(log))
+    .filter(Boolean);
+  return [...new Set([...linkedIds, ...studiedIds])].filter((subjectId) => getSubject(subjectId));
+}
+
+function renderCompetitions() {
+  const board = $("#competitionBoard");
+  if (!board) return;
+  board.innerHTML = state.competitions.length
+    ? state.competitions.map(renderCompetitionCard).join("")
+    : `<div class="empty-state">Cadastre um concurso para acompanhar quantas horas foram estudadas em cada matéria dessa prova.</div>`;
+}
+
+function renderCompetitionCard(competition) {
+  const logs = state.studyLogs.filter((log) => log.competitionId === competition.id);
+  const totalMinutes = logs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+  const subjectIds = getCompetitionSubjectIds(competition);
+  const rows = subjectIds
+    .map((subjectId) => {
+      const subject = getSubject(subjectId);
+      const minutes = logs.filter((log) => getEntrySubjectId(log) === subjectId).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+      return { subject, minutes, linked: competition.subjectIds.includes(subjectId) };
+    })
+    .sort((a, b) => b.minutes - a.minutes || a.subject.name.localeCompare(b.subject.name));
+  const maxMinutes = Math.max(1, ...rows.map((row) => row.minutes));
+
+  return `
+    <article class="competition-card">
+      <div class="competition-card-top">
+        <div>
+          <p class="eyebrow">Concurso</p>
+          <h3>${escapeHTML(competition.name)}</h3>
+          <small>${competition.date ? `Prova em ${formatShortDate(competition.date)}` : "Sem data de prova"}</small>
+        </div>
+        <div class="inline-actions subject-card-actions">
+          <button class="mini-button bad" data-action="deleteCompetition" data-id="${competition.id}" type="button">Excluir</button>
+        </div>
+      </div>
+      ${competition.notes ? `<p class="competition-note">${escapeHTML(competition.notes)}</p>` : ""}
+      <div class="topic-meta">
+        <span class="tag">${formatMinutes(totalMinutes)}</span>
+        <span class="tag">${subjectIds.length} matérias</span>
+        <span class="tag">${logs.length} sessões</span>
+      </div>
+      <div class="competition-subject-list">
+        ${
+          rows.length
+            ? rows
+                .map((row) => {
+                  const progress = clamp((row.minutes / maxMinutes) * 100, 0, 100);
+                  return `
+                    <div class="competition-subject-row" style="--subject-color:${row.subject.color}">
+                      <div class="competition-subject-main">
+                        <span class="subject-color-dot" aria-hidden="true"></span>
+                        <strong>${escapeHTML(row.subject.name)}</strong>
+                        <small>${formatMinutes(row.minutes)} estudados</small>
+                      </div>
+                      <div class="progress-track">
+                        <div class="progress-fill" style="--progress:${progress}%; --fill:${row.subject.color}"></div>
+                      </div>
+                      <div class="inline-actions">
+                        <span class="tag">${row.linked ? "Vinculada" : "Registrada"}</span>
+                        ${
+                          row.linked
+                            ? `<button class="mini-button" data-action="unlinkCompetitionSubject" data-id="${competition.id}" data-subject-id="${row.subject.id}" type="button">Remover vínculo</button>`
+                            : ""
+                        }
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("")
+            : `<div class="empty-state">Vincule matérias ou registre um estudo selecionando este concurso.</div>`
+        }
+      </div>
+    </article>
   `;
 }
 
@@ -4918,6 +5261,7 @@ function fillStudyLogForm(log) {
   $("#studySubject").value = subjectId;
   syncScopedTopicSelect("#studySubject", "#studyTopic");
   $("#studyTopic").value = log.topicId || "";
+  if ($("#studyCompetition")) $("#studyCompetition").value = log.competitionId || "";
   $("#studyMinutes").value = Math.max(1, Math.round(Number(log.minutes) || 30));
   $("#studyDate").value = log.date || todayISO();
   $("#studyNote").value = log.note || "";
@@ -4927,9 +5271,11 @@ function fillStudyLogForm(log) {
 function renderPomodoro() {
   const activeTopicId = timer.topicId || $("#timerTopic").value;
   const activeSubjectId = timer.subjectId || getTopic(activeTopicId)?.subjectId || $("#timerSubject").value;
+  const activeCompetitionId = timer.competitionId || $("#timerCompetition")?.value || "";
+  const activeScopeLabel = activeSubjectId ? getEntryScopeLabel({ subjectId: activeSubjectId, topicId: activeTopicId }) : "Selecione uma matéria";
   const timerFace = $(".timer-face");
   const modeLabel = timer.mode === "focus" ? "Foco" : timer.mode === "longBreak" ? "Descanso longo" : "Pausa curta";
-  $("#timerTopicLabel").textContent = activeSubjectId ? getEntryScopeLabel({ subjectId: activeSubjectId, topicId: activeTopicId }) : "Selecione uma matéria";
+  $("#timerTopicLabel").textContent = activeCompetitionId ? `${activeScopeLabel} • ${getCompetitionLabel(activeCompetitionId)}` : activeScopeLabel;
   $("#timerMode").textContent = modeLabel;
   $("#cycleCounter").textContent = `Ciclo ${timer.cycle} de ${state.settings.cycles}`;
   $("#timerDisplay").textContent = secondsToClock(timer.remaining);
@@ -4954,6 +5300,7 @@ function renderPomodoro() {
           <td>${escapeHTML(getEntryScopeLabel(log))}</td>
           <td>${formatMinutes(log.minutes)}</td>
           <td>${escapeHTML(log.source || "Manual")}</td>
+          <td>${escapeHTML(log.competitionId ? getCompetitionLabel(log.competitionId) : "-")}</td>
           <td>
             <div class="inline-actions table-actions">
               <button class="mini-button" data-action="editStudy" data-id="${log.id}" type="button">Editar</button>
@@ -4964,7 +5311,7 @@ function renderPomodoro() {
       `
         )
         .join("")
-    : `<tr><td colspan="5">Nenhuma sessão registrada.</td></tr>`;
+    : `<tr><td colspan="6">Nenhuma sessão registrada.</td></tr>`;
 }
 
 function updatePomodoroPageTitle(modeLabel = "") {
@@ -5252,6 +5599,7 @@ function resetTimer() {
   timer.cycle = 1;
   timer.subjectId = "";
   timer.topicId = "";
+  timer.competitionId = "";
   renderPomodoro();
 }
 
@@ -5361,6 +5709,7 @@ function toggleLofiTick() {
 function startTimer() {
   if (timer.running) return;
   const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
+  const competitionId = $("#timerCompetition")?.value || "";
   if (!subjectId) {
     showToast("Cadastre e selecione uma matéria para usar o Pomodoro.");
     return;
@@ -5368,6 +5717,7 @@ function startTimer() {
   unlockPomodoroAlarm();
   if (!timer.subjectId) timer.subjectId = subjectId;
   if (!timer.topicId) timer.topicId = topicId;
+  if (!timer.competitionId) timer.competitionId = competitionId;
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
   startLofiTick();
@@ -5455,6 +5805,7 @@ function skipTimerStep() {
     }
     timer.subjectId = subjectId;
     timer.topicId = topicId;
+    timer.competitionId = $("#timerCompetition")?.value || "";
   }
   completeTimerBlock({ skipped: true });
   renderPomodoro();
@@ -5466,12 +5817,14 @@ function logPomodoroFocus() {
   const selected = resolveSubjectTopic("#timerSubject", "#timerTopic");
   const subjectId = timer.subjectId || selected.subjectId;
   const topicId = timer.topicId || selected.topicId;
+  const competitionId = timer.competitionId || $("#timerCompetition")?.value || "";
   const minutes = Math.max(1, Math.round(timer.elapsedFocusSeconds / 60));
   if (!subjectId || !minutes) return;
   state.studyLogs.push({
     id: uid(),
     subjectId,
     topicId,
+    competitionId,
     minutes,
     date: todayISO(),
     source: "Pomodoro",
@@ -5824,6 +6177,43 @@ function attachEvents() {
     showToast(existing ? "Assunto atualizado." : "Assunto adicionado.");
   });
 
+  $("#competitionForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = $("#competitionName").value.trim();
+    if (!name) {
+      showToast("Informe o nome do concurso.");
+      return;
+    }
+    state.competitions.push(normalizeCompetition({
+      name,
+      date: $("#competitionDate").value,
+      notes: $("#competitionNotes").value,
+    }));
+    saveState();
+    event.target.reset();
+    render();
+    showToast("Concurso cadastrado.");
+  });
+
+  $("#competitionSubjectForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const competition = getCompetition($("#competitionSelect").value);
+    const subjectId = $("#competitionSubjectSelect").value;
+    if (!competition || !subjectId) {
+      showToast("Selecione um concurso e uma matéria.");
+      return;
+    }
+    if (!competition.subjectIds.includes(subjectId)) {
+      competition.subjectIds.push(subjectId);
+      competition.updatedAt = new Date().toISOString();
+      saveState();
+      render();
+      showToast("Matéria vinculada ao concurso.");
+      return;
+    }
+    showToast("Esta matéria já está vinculada a esse concurso.");
+  });
+
   $("#cancelSubjectEditBtn").addEventListener("click", () => {
     resetSubjectForm();
     saveState();
@@ -6031,11 +6421,13 @@ function attachEvents() {
     }
     const selectedDate = $("#studyDate").value || todayISO();
     const selectedNote = $("#studyNote").value.trim();
+    const selectedCompetitionId = $("#studyCompetition")?.value || "";
     const existing = state.studyLogs.find((log) => log.id === state.ui.activeStudyEditId);
 
     if (existing) {
       existing.subjectId = subjectId;
       existing.topicId = topicId;
+      existing.competitionId = selectedCompetitionId;
       existing.minutes = Math.round(minutes);
       existing.date = selectedDate;
       existing.note = selectedNote;
@@ -6047,6 +6439,7 @@ function attachEvents() {
         id: uid(),
         subjectId,
         topicId,
+        competitionId: selectedCompetitionId,
         minutes: Math.round(minutes),
         date: selectedDate,
         source: "Manual",
@@ -6057,6 +6450,7 @@ function attachEvents() {
     saveState();
     $("#studySubject").value = subjectId;
     $("#studyTopic").value = topicId;
+    if ($("#studyCompetition")) $("#studyCompetition").value = selectedCompetitionId;
     $("#studyMinutes").value = 30;
     $("#studyDate").value = selectedDate;
     $("#studyNote").value = "";
@@ -6070,6 +6464,7 @@ function attachEvents() {
     $("#studyMinutes").value = 30;
     $("#studyDate").value = todayISO();
     $("#studyNote").value = "";
+    if ($("#studyCompetition")) $("#studyCompetition").value = "";
     updateStudyLogFormMode();
     showToast("Edicao cancelada.");
   });
@@ -6311,6 +6706,7 @@ function attachEvents() {
     });
   });
   $("#timerTopic").addEventListener("change", renderPomodoro);
+  $("#timerCompetition").addEventListener("change", renderPomodoro);
   $("#themeToggleBtn").addEventListener("click", () => {
     state.ui.theme = state.ui.theme === "dark" ? "light" : "dark";
     saveState();
@@ -6319,6 +6715,11 @@ function attachEvents() {
   });
   $("#exportBtn").addEventListener("click", exportData);
   $("#importInput").addEventListener("change", importData);
+  $("#externalStudyImportInput").addEventListener("change", importExternalStudyFile);
+  $("#clearExternalImportPreviewBtn").addEventListener("click", () => {
+    renderExternalImportPreview(null);
+    showToast("Previa limpa.");
+  });
   $("#resetDemoBtn").addEventListener("click", () => {
     if (!window.confirm("Restaurar os dados de exemplo e substituir os dados atuais?")) return;
     state = createSeedState(state.profile);
@@ -6578,6 +6979,28 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "deleteCompetition") {
+    if (!window.confirm("Excluir este concurso? Os tempos registrados serão mantidos sem vínculo de concurso.")) return;
+    state.competitions = state.competitions.filter((competition) => competition.id !== id);
+    state.studyLogs = state.studyLogs.map((log) => (log.competitionId === id ? { ...log, competitionId: "" } : log));
+    saveState();
+    render();
+    showToast("Concurso excluído.");
+    return;
+  }
+
+  if (type === "unlinkCompetitionSubject") {
+    const competition = getCompetition(id);
+    const subjectId = action.dataset.subjectId || "";
+    if (!competition || !subjectId) return;
+    competition.subjectIds = competition.subjectIds.filter((item) => item !== subjectId);
+    competition.updatedAt = new Date().toISOString();
+    saveState();
+    render();
+    showToast("Vínculo removido.");
+    return;
+  }
+
   if (type === "editSubject") {
     const subject = state.subjects.find((item) => item.id === id);
     if (!subject) return;
@@ -6610,6 +7033,10 @@ function handleAction(action) {
     state.questionLogs = state.questionLogs.filter((log) => getEntrySubjectId(log) !== id);
     state.studyLogs = state.studyLogs.filter((log) => getEntrySubjectId(log) !== id);
     state.flashcards = state.flashcards.filter((card) => getEntrySubjectId(card) !== id);
+    state.competitions = state.competitions.map((competition) => ({
+      ...competition,
+      subjectIds: competition.subjectIds.filter((subjectId) => subjectId !== id),
+    }));
     state.legalMaterials = state.legalMaterials.map((item) => (getEntrySubjectId(item) === id ? { ...item, subjectId: "", topicId: "" } : item));
     if (state.flashcards.every((card) => card.id !== state.ui.activeFlashcardId)) state.ui.activeFlashcardId = "";
     if (state.ui.activeTopicEditId && !state.topics.some((topic) => topic.id === state.ui.activeTopicEditId)) state.ui.activeTopicEditId = "";

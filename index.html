@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260708-sdk-fallback" />
+    <link rel="stylesheet" href="styles.css?v=20260708-competitions" />
   </head>
   <body>
     <div class="app-shell">
@@ -21,6 +21,7 @@
           <button class="nav-button active" data-view="dashboard">Painel</button>
           <button class="nav-button" data-view="controle">Controle</button>
           <button class="nav-button" data-view="plano">Matérias</button>
+          <button class="nav-button" data-view="concursos">Concursos</button>
           <button class="nav-button" data-view="edital">Edital</button>
           <button class="nav-button" data-view="questoes">Questões</button>
           <button class="nav-button" data-view="flashcards">Flashcards</button>
@@ -208,6 +209,60 @@
           </div>
 
           <div class="subject-board" id="subjectBoard"></div>
+        </section>
+
+        <section class="view" id="concursos" aria-labelledby="concursosTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Foco por prova</p>
+              <h2 id="concursosTitle">Concursos</h2>
+            </div>
+            <button class="button secondary" data-view="pomodoro" type="button">Estudar para concurso</button>
+          </div>
+
+          <div class="content-grid two-columns">
+            <form class="panel form-panel" id="competitionForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Concurso</p>
+                  <h3>Cadastrar concurso</h3>
+                </div>
+              </div>
+              <label>
+                Nome do concurso
+                <input id="competitionName" type="text" placeholder="Ex.: TJSP, TRT, INSS..." required />
+              </label>
+              <label>
+                Data da prova
+                <input id="competitionDate" type="date" />
+              </label>
+              <label>
+                Observações
+                <textarea id="competitionNotes" rows="3" placeholder="Cargo, banca, edital ou meta principal"></textarea>
+              </label>
+              <button class="button primary" type="submit">Salvar concurso</button>
+            </form>
+
+            <form class="panel form-panel" id="competitionSubjectForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matérias</p>
+                  <h3>Vincular matéria ao concurso</h3>
+                </div>
+              </div>
+              <label>
+                Concurso
+                <select id="competitionSelect" required></select>
+              </label>
+              <label>
+                Matéria
+                <select id="competitionSubjectSelect" required></select>
+              </label>
+              <button class="button secondary" type="submit">Vincular matéria</button>
+            </form>
+          </div>
+
+          <div class="competition-board" id="competitionBoard"></div>
         </section>
 
         <section class="view" id="edital" aria-labelledby="editalTitle">
@@ -656,6 +711,10 @@
                   <select id="timerTopic"></select>
                 </label>
               </div>
+              <label>
+                Concurso
+                <select id="timerCompetition"></select>
+              </label>
               <div class="split-inputs">
                 <label>
                   Foco
@@ -700,6 +759,10 @@
                   <select id="studyTopic"></select>
                 </label>
               </div>
+              <label>
+                Concurso
+                <select id="studyCompetition"></select>
+              </label>
               <div class="split-inputs">
                 <label>
                   Minutos
@@ -756,6 +819,7 @@
                     <th>Assunto</th>
                     <th>Tempo</th>
                     <th>Origem</th>
+                    <th>Concurso</th>
                     <th>Acoes</th>
                   </tr>
                 </thead>
@@ -803,6 +867,29 @@
                 Ano
                 <input id="controlYearInput" type="number" min="2000" max="2100" />
               </label>
+            </div>
+          </section>
+
+          <section class="panel external-import-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Historico externo</p>
+                <h3>Importar do Aprovado</h3>
+              </div>
+              <a class="button ghost" href="bookmarklet-aprovado.txt" download>Baixar coletor</a>
+            </div>
+            <div class="external-import-grid">
+              <div>
+                <p class="music-note">No Aprovado, abra a linha do tempo, role ate carregar o periodo desejado e use o coletor. Depois importe aqui o JSON ou CSV gerado.</p>
+                <div class="inline-actions form-actions">
+                  <label class="button secondary import-label" for="externalStudyImportInput">
+                    Importar arquivo
+                    <input id="externalStudyImportInput" type="file" accept=".json,.csv,application/json,text/csv,text/plain" />
+                  </label>
+                  <button class="button ghost" id="clearExternalImportPreviewBtn" type="button">Limpar previa</button>
+                </div>
+              </div>
+              <div class="external-import-preview" id="externalImportPreview">Nenhum arquivo importado ainda.</div>
             </div>
           </section>
 
@@ -1375,7 +1462,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260708-sdk-fallback"></script>
-    <script src="app.js?v=20260708-sdk-fallback"></script>
+    <script src="supabase-config.js?v=20260708-competitions"></script>
+    <script src="app.js?v=20260708-competitions"></script>
   </body>
 </html>

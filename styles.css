@@ -614,6 +614,7 @@ button:disabled {
 .stat-card,
 .panel,
 .subject-card,
+.competition-card,
 .case-card,
 .legal-material-card,
 .performance-row {
@@ -716,6 +717,7 @@ button:disabled {
 
 #pomodoro .table-wrap,
 #jurisprudencias .case-list,
+#concursos .competition-board,
 #plano .subject-board {
   max-height: min(68vh, 720px);
   overflow-x: hidden;
@@ -757,6 +759,18 @@ button:disabled {
 #pomodoro td:nth-child(4) {
   width: 92px;
   white-space: nowrap;
+}
+
+#pomodoro th:nth-child(5),
+#pomodoro td:nth-child(5) {
+  width: 132px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#pomodoro th:nth-child(6),
+#pomodoro td:nth-child(6) {
+  width: 132px;
 }
 
 #pomodoro th:nth-child(5),
@@ -1217,6 +1231,89 @@ button:focus-visible {
   scrollbar-gutter: stable;
 }
 
+.competition-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.competition-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.competition-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.competition-card-top > div {
+  min-width: 0;
+}
+
+.competition-card h3,
+.competition-note,
+.competition-subject-main strong,
+.competition-subject-main small {
+  overflow-wrap: anywhere;
+}
+
+.competition-card small,
+.competition-note {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.competition-subject-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(48vh, 520px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.competition-subject-row {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--subject-color, var(--teal));
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.competition-subject-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 9px;
+  min-width: 0;
+}
+
+.competition-subject-main small {
+  grid-column: 2;
+}
+
+.subject-color-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: var(--subject-color, var(--teal));
+}
+
 .source-library {
   max-height: min(44vh, 520px);
   overflow-y: auto;
@@ -1626,6 +1723,41 @@ button:focus-visible {
 
 .control-period-panel {
   margin-bottom: 18px;
+}
+
+.external-import-panel {
+  margin-bottom: 18px;
+}
+
+.external-import-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.external-import-preview {
+  min-height: 88px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+.external-import-preview strong {
+  color: var(--ink);
+}
+
+.external-import-preview ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 .period-picker-grid {
@@ -2292,6 +2424,8 @@ td {
 .theme-dark .account-status-row,
 .theme-dark .edital-manual-form,
 .theme-dark .subject-card,
+.theme-dark .competition-card,
+.theme-dark .competition-subject-row,
 .theme-dark .edital-subject-group,
 .theme-dark .edital-week-card,
 .theme-dark .edital-task-list li,
@@ -2307,6 +2441,7 @@ td {
 .theme-dark .category-card,
 .theme-dark .goal-card,
 .theme-dark .legal-material-card,
+.theme-dark .external-import-preview,
 .theme-dark .empty-state {
   background: #131920;
 }
@@ -2558,7 +2693,8 @@ td {
 
   .stat-grid,
   .daily-review-grid,
-  .subject-board {
+  .subject-board,
+  .competition-board {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2625,7 +2761,9 @@ td {
   .daily-review-grid,
   .edital-stat-grid,
   .subject-board,
+  .competition-board,
   .period-picker-grid,
+  .external-import-grid,
   .split-inputs {
     grid-template-columns: 1fr;
   }

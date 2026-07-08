@@ -9,26 +9,6 @@ const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
 const GLOBAL_SEARCH_LIMIT = 10;
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const SEARCHABLE_SELECT_IDS = [
-  "topicSubject",
-  "questionTopic",
-  "timerSubject",
-  "timerTopic",
-  "studySubject",
-  "studyTopic",
-  "flashcardSubject",
-  "flashcardTopic",
-  "caseSubject",
-  "caseTopic",
-  "caseSubjectFilter",
-  "caseTopicFilter",
-  "legalMaterialSubject",
-  "legalMaterialTopic",
-  "legalMaterialSubjectFilter",
-  "legalMaterialTopicFilter",
-  "flashcardReviewSubject",
-  "flashcardReviewTopic",
-];
 
 const titles = {
   dashboard: "Painel",
@@ -1329,126 +1309,6 @@ function populateSubjectSelect(select, { includeEmpty = false, emptyLabel = "Sem
   }
 }
 
-function getSearchableSelect(select) {
-  return select?.id ? $(`.searchable-select[data-for="${select.id}"]`) : null;
-}
-
-function getSelectDisplayText(select) {
-  const selected = select?.selectedOptions?.[0];
-  return selected ? selected.textContent.trim() : "Selecione";
-}
-
-function closeSearchableSelects(except = null) {
-  $$(".searchable-select.open").forEach((control) => {
-    if (control === except) return;
-    control.classList.remove("open");
-    const menu = $(".searchable-select-menu", control);
-    const button = $(".searchable-select-button", control);
-    if (menu) menu.hidden = true;
-    if (button) button.setAttribute("aria-expanded", "false");
-  });
-}
-
-function renderSearchableOptions(select) {
-  const control = getSearchableSelect(select);
-  if (!control) return;
-  const input = $(".searchable-select-input", control);
-  const list = $(".searchable-select-options", control);
-  const query = normalizeSearchText(input?.value || "");
-  const options = Array.from(select.options || []).filter((option) => {
-    const text = option.title || option.textContent || "";
-    return !query || normalizeSearchText(text).includes(query);
-  });
-
-  list.innerHTML = options.length
-    ? options
-        .map((option) => {
-          const selected = option.value === select.value;
-          const label = option.title || option.textContent || "Opcao";
-          return `
-            <button class="searchable-select-option${selected ? " active" : ""}" data-value="${escapeHTML(option.value)}" type="button" role="option" aria-selected="${selected}">
-              ${escapeHTML(label)}
-            </button>
-          `;
-        })
-        .join("")
-    : `<div class="searchable-select-empty">Nenhuma opcao encontrada.</div>`;
-}
-
-function refreshSearchableSelect(select) {
-  const control = getSearchableSelect(select);
-  if (!control || !select) return;
-  const button = $(".searchable-select-button", control);
-  const text = getSelectDisplayText(select);
-  button.textContent = text || "Selecione";
-  button.title = text || "";
-  button.disabled = select.disabled;
-  control.classList.toggle("disabled", select.disabled);
-  if (control.classList.contains("open")) renderSearchableOptions(select);
-}
-
-function enhanceSearchableSelect(select) {
-  if (!select || !select.id) return;
-  if (select.dataset.searchableEnhanced === "true") {
-    refreshSearchableSelect(select);
-    return;
-  }
-
-  select.dataset.searchableEnhanced = "true";
-  if (select.required) {
-    select.dataset.wasRequired = "true";
-    select.required = false;
-  }
-  select.classList.add("native-select-hidden");
-
-  const control = document.createElement("div");
-  control.className = "searchable-select";
-  control.dataset.for = select.id;
-  control.innerHTML = `
-    <button class="searchable-select-button" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
-    <div class="searchable-select-menu" hidden>
-      <input class="searchable-select-input" type="search" placeholder="Buscar..." autocomplete="off" />
-      <div class="searchable-select-options" role="listbox"></div>
-    </div>
-  `;
-  select.insertAdjacentElement("afterend", control);
-
-  const button = $(".searchable-select-button", control);
-  const menu = $(".searchable-select-menu", control);
-  const input = $(".searchable-select-input", control);
-  const list = $(".searchable-select-options", control);
-
-  button.addEventListener("click", () => {
-    if (select.disabled) return;
-    const willOpen = !control.classList.contains("open");
-    closeSearchableSelects(control);
-    control.classList.toggle("open", willOpen);
-    menu.hidden = !willOpen;
-    button.setAttribute("aria-expanded", String(willOpen));
-    if (willOpen) {
-      input.value = "";
-      renderSearchableOptions(select);
-      input.focus();
-    }
-  });
-
-  input.addEventListener("input", () => renderSearchableOptions(select));
-  list.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-value]");
-    if (!option) return;
-    select.value = option.dataset.value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    refreshSearchableSelect(select);
-    closeSearchableSelects();
-  });
-
-  refreshSearchableSelect(select);
-}
-
-function enhanceSearchableSelects() {
-  SEARCHABLE_SELECT_IDS.forEach((id) => enhanceSearchableSelect($(`#${id}`)));
-}
-
 function populateFlashcardReviewSelectors() {
   const orderSelect = $("#flashcardReviewOrder");
   const queueSelect = $("#flashcardReviewQueue");
@@ -1985,7 +1845,6 @@ function syncScopedTopicSelect(subjectSelector, topicSelector) {
 function syncScopedTopicSelect(subjectSelector, topicSelector) {
   const subjectId = $(subjectSelector)?.value || "";
   populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto especifico" });
-  refreshSearchableSelect($(topicSelector));
 }
 
 function renderDashboard() {
@@ -2483,8 +2342,8 @@ function renderTopicItem(topic, color) {
   const stats = getTopicStats(topic.id);
   return `
     <div class="topic-item">
-      <div class="insight-top">
-        <strong>${escapeHTML(topic.name)}</strong>
+      <div class="topic-item-top">
+        <strong class="topic-title">${escapeHTML(topic.name)}</strong>
         <span class="tag">${escapeHTML(topic.priority)}</span>
       </div>
       <div class="progress-track">
@@ -4724,10 +4583,8 @@ function fillStudyLogForm(log) {
   const subjectId = getEntrySubjectId(log);
   state.ui.activeStudyEditId = log.id;
   $("#studySubject").value = subjectId;
-  refreshSearchableSelect($("#studySubject"));
   syncScopedTopicSelect("#studySubject", "#studyTopic");
   $("#studyTopic").value = log.topicId || "";
-  refreshSearchableSelect($("#studyTopic"));
   $("#studyMinutes").value = Math.max(1, Math.round(Number(log.minutes) || 30));
   $("#studyDate").value = log.date || todayISO();
   $("#studyNote").value = log.note || "";
@@ -5318,10 +5175,6 @@ function attachEvents() {
 
     if (!event.target.closest("#globalSearchForm")) {
       $("#globalSearchResults")?.classList.remove("open");
-    }
-
-    if (!event.target.closest(".searchable-select")) {
-      closeSearchableSelects();
     }
 
     const viewButton = event.target.closest("[data-view]");

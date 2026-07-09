@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260708-color-presets" />
+    <link rel="stylesheet" href="styles.css?v=20260708-report-timeline" />
   </head>
   <body>
     <div class="app-shell">
@@ -1427,13 +1427,66 @@
               <p class="eyebrow">Análise</p>
               <h2 id="relatoriosTitle">Relatórios por período</h2>
             </div>
-            <div class="segmented" aria-label="Período">
+          </div>
+
+          <section class="panel report-workbench">
+            <div class="report-view-tabs" aria-label="Tipo de relatório">
+              <button class="report-view-tab active" data-report-mode="timeline" type="button">Linha do tempo</button>
+              <button class="report-view-tab" data-report-mode="time" type="button">Tempo de estudo</button>
+            </div>
+
+            <div class="report-options">
+              <label class="report-radio">
+                <input data-report-group="subjects" name="reportGroup" type="radio" value="subjects" checked />
+                <span>
+                  <strong>Matérias</strong>
+                  <small>Veja a duração agrupada por matérias.</small>
+                </span>
+              </label>
+              <label class="report-radio">
+                <input data-report-group="topics" name="reportGroup" type="radio" value="topics" />
+                <span>
+                  <strong>Conteúdos</strong>
+                  <small>Veja a duração agrupada por assuntos e matéria.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="report-stage">
+              <button class="report-nav-button" data-report-shift="-1" type="button" aria-label="Período anterior">◀</button>
+              <div class="report-chart-card">
+                <h3 id="reportPeriodTitle">Hoje</h3>
+                <div class="report-timeline-chart" id="reportTimelineChart"></div>
+              </div>
+              <button class="report-nav-button" data-report-shift="1" type="button" aria-label="Próximo período">▶</button>
+              <aside class="report-total-card">
+                <strong id="reportTotalMinutes">0min</strong>
+                <span id="reportPeriodCaption">Tempo total no período selecionado.</span>
+                <div class="report-legend" id="reportTimelineLegend"></div>
+              </aside>
+            </div>
+
+            <form class="report-custom-form hidden" id="reportCustomForm">
+              <label>
+                Início
+                <input id="reportCustomStart" type="date" />
+              </label>
+              <label>
+                Fim
+                <input id="reportCustomEnd" type="date" />
+              </label>
+              <button class="button secondary" type="submit">Aplicar período</button>
+            </form>
+
+            <div class="segmented report-range-segments" aria-label="Período do relatório">
               <button class="segment active" data-report-range="day" type="button">Dia</button>
               <button class="segment" data-report-range="week" type="button">Semana</button>
               <button class="segment" data-report-range="month" type="button">Mês</button>
               <button class="segment" data-report-range="year" type="button">Ano</button>
+              <button class="segment" data-report-range="total" type="button">Total</button>
+              <button class="segment" data-report-range="custom" type="button">Customizar</button>
             </div>
-          </div>
+          </section>
 
           <div class="stat-grid" id="reportStats"></div>
 
@@ -1474,7 +1527,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260708-color-presets"></script>
-    <script src="app.js?v=20260708-color-presets"></script>
+    <script src="supabase-config.js?v=20260708-report-timeline"></script>
+    <script src="app.js?v=20260708-report-timeline"></script>
   </body>
 </html>

@@ -960,7 +960,12 @@ function normalizeState(candidate, fallbackProfileId = "") {
         globalSearch: typeof candidate.ui?.globalSearch === "string" ? candidate.ui.globalSearch : "",
         legalMaterialSubjectFilter: typeof candidate.ui?.legalMaterialSubjectFilter === "string" ? candidate.ui.legalMaterialSubjectFilter : "",
         legalMaterialTopicFilter: typeof candidate.ui?.legalMaterialTopicFilter === "string" ? candidate.ui.legalMaterialTopicFilter : "",
-        reportRange: candidate.ui?.reportRange || "day",
+        reportRange: ["day", "week", "month", "year", "total", "custom"].includes(candidate.ui?.reportRange) ? candidate.ui.reportRange : "week",
+        reportMode: ["timeline", "time"].includes(candidate.ui?.reportMode) ? candidate.ui.reportMode : "timeline",
+        reportGroup: ["subjects", "topics"].includes(candidate.ui?.reportGroup) ? candidate.ui.reportGroup : "subjects",
+        reportReferenceDate: candidate.ui?.reportReferenceDate || todayISO(),
+        reportCustomStart: candidate.ui?.reportCustomStart || todayISO(),
+        reportCustomEnd: candidate.ui?.reportCustomEnd || todayISO(),
       controlRange: candidate.ui?.controlRange || "week",
       controlDayDate: candidate.ui?.controlDayDate || todayISO(),
       controlWeekDate: candidate.ui?.controlWeekDate || todayISO(),
@@ -1020,7 +1025,12 @@ function createEmptyState(profile = {}) {
         globalSearch: "",
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
-        reportRange: "day",
+        reportRange: "week",
+        reportMode: "timeline",
+        reportGroup: "subjects",
+        reportReferenceDate: todayISO(),
+        reportCustomStart: todayISO(),
+        reportCustomEnd: todayISO(),
       controlRange: "week",
       controlDayDate: todayISO(),
       controlWeekDate: todayISO(),
@@ -1156,7 +1166,12 @@ function createSeedState() {
         globalSearch: "",
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
-        reportRange: "day",
+        reportRange: "week",
+        reportMode: "timeline",
+        reportGroup: "subjects",
+        reportReferenceDate: todayISO(),
+        reportCustomStart: todayISO(),
+        reportCustomEnd: todayISO(),
       controlRange: "week",
       activeFlashcardId: "",
       flashcardAnswerOpen: false,
@@ -5436,28 +5451,354 @@ function secondsToClock(value) {
   return `${minutes}:${seconds}`;
 }
 
-function renderReports() {
-  const range = state.ui.reportRange;
-  $$(".segment[data-report-range]").forEach((button) => button.classList.toggle("active", button.dataset.reportRange === range));
+function daysBetween(start, end) {
+  return Math.max(0, Math.round((parseISODate(end) - parseISODate(start)) / 86400000));
+}
 
-  const predicate = getRangePredicate(range);
-  const studyLogs = state.studyLogs.filter(predicate);
-  const questionLogs = state.questionLogs.filter(predicate);
+function sameOrBefore(a, b) {
+  return parseISODate(a) <= parseISODate(b);
+}
+
+function monthShortLabel(date) {
+  return date.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+}
+
+function getReportReferenceDate() {
+  const value = state.ui.reportReferenceDate || todayISO();
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseISODate(value) : parseISODate(todayISO());
+}
+
+function getEndOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function addMonths(date, amount) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function getReportAllDates() {
+  return [...state.studyLogs, ...state.questionLogs].map((log) => log.date).filter(Boolean).sort();
+}
+
+function getReportPeriodMeta() {
+  const range = state.ui.reportRange || "week";
+  const reference = getReportReferenceDate();
+  const today = parseISODate(todayISO());
+
+  if (range === "day") {
+    const iso = toISODate(reference);
+    return {
+      range,
+      start: iso,
+      end: iso,
+      title: formatDate(iso),
+      caption: `Tempo total em ${formatDate(iso)}`,
+      buckets: [{ key: iso, label: reference.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""), start: iso, end: iso }],
+    };
+  }
+
+  if (range === "week") {
+    const monday = addDays(reference, -((reference.getDay() + 6) % 7));
+    const sunday = addDays(monday, 6);
+    const buckets = Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(monday, index);
+      const iso = toISODate(date);
+      return { key: iso, label: date.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""), start: iso, end: iso };
+    });
+    return {
+      range,
+      start: toISODate(monday),
+      end: toISODate(sunday),
+      title: `${formatDate(toISODate(monday))} a ${formatDate(toISODate(sunday))}`,
+      caption: `Tempo total em ${formatDate(toISODate(monday))} a ${formatDate(toISODate(sunday))}`,
+      buckets,
+    };
+  }
+
+  if (range === "month") {
+    const start = new Date(reference.getFullYear(), reference.getMonth(), 1);
+    const end = getEndOfMonth(reference);
+    const length = end.getDate();
+    const buckets = Array.from({ length }, (_, index) => {
+      const date = new Date(reference.getFullYear(), reference.getMonth(), index + 1);
+      const iso = toISODate(date);
+      return { key: iso, label: String(index + 1), start: iso, end: iso };
+    });
+    return {
+      range,
+      start: toISODate(start),
+      end: toISODate(end),
+      title: reference.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }),
+      caption: `Tempo total em ${reference.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}`,
+      buckets,
+    };
+  }
+
+  if (range === "year") {
+    const year = reference.getFullYear();
+    const buckets = Array.from({ length: 12 }, (_, index) => {
+      const start = new Date(year, index, 1);
+      const end = getEndOfMonth(start);
+      return { key: `${year}-${String(index + 1).padStart(2, "0")}`, label: monthShortLabel(start), start: toISODate(start), end: toISODate(end) };
+    });
+    return {
+      range,
+      start: `${year}-01-01`,
+      end: `${year}-12-31`,
+      title: String(year),
+      caption: `Tempo total em ${year}`,
+      buckets,
+    };
+  }
+
+  if (range === "total") {
+    const dates = getReportAllDates();
+    const startYear = dates.length ? parseISODate(dates[0]).getFullYear() : today.getFullYear();
+    const endYear = dates.length ? parseISODate(dates[dates.length - 1]).getFullYear() : today.getFullYear();
+    const buckets = Array.from({ length: endYear - startYear + 1 }, (_, index) => {
+      const year = startYear + index;
+      return { key: String(year), label: String(year), start: `${year}-01-01`, end: `${year}-12-31` };
+    });
+    return {
+      range,
+      start: `${startYear}-01-01`,
+      end: `${endYear}-12-31`,
+      title: "Total",
+      caption: "Tempo total em todo o histórico",
+      buckets,
+    };
+  }
+
+  const fallbackStart = toISODate(addDays(today, -6));
+  const customStart = state.ui.reportCustomStart || fallbackStart;
+  const customEnd = state.ui.reportCustomEnd || todayISO();
+  const start = sameOrBefore(customStart, customEnd) ? customStart : customEnd;
+  const end = sameOrBefore(customStart, customEnd) ? customEnd : customStart;
+  const span = daysBetween(start, end);
+  let buckets = [];
+  if (span <= 31) {
+    buckets = Array.from({ length: span + 1 }, (_, index) => {
+      const date = addDays(parseISODate(start), index);
+      const iso = toISODate(date);
+      return { key: iso, label: formatShortDate(iso), start: iso, end: iso };
+    });
+  } else if (span <= 180) {
+    let cursor = parseISODate(start);
+    let index = 1;
+    while (cursor <= parseISODate(end)) {
+      const bucketStart = toISODate(cursor);
+      const bucketEnd = toISODate(addDays(cursor, Math.min(6, daysBetween(bucketStart, end))));
+      buckets.push({ key: `${bucketStart}-${bucketEnd}`, label: `S${index}`, start: bucketStart, end: bucketEnd });
+      cursor = addDays(cursor, 7);
+      index += 1;
+    }
+  } else {
+    let cursor = new Date(parseISODate(start).getFullYear(), parseISODate(start).getMonth(), 1);
+    while (cursor <= parseISODate(end)) {
+      const bucketStart = toISODate(cursor) < start ? start : toISODate(cursor);
+      const monthEnd = toISODate(getEndOfMonth(cursor));
+      const bucketEnd = monthEnd > end ? end : monthEnd;
+      buckets.push({ key: `${bucketStart}-${bucketEnd}`, label: `${monthShortLabel(cursor)}/${String(cursor.getFullYear()).slice(2)}`, start: bucketStart, end: bucketEnd });
+      cursor = addMonths(cursor, 1);
+    }
+  }
+  return {
+    range,
+    start,
+    end,
+    title: `${formatDate(start)} a ${formatDate(end)}`,
+    caption: `Tempo total em ${formatDate(start)} a ${formatDate(end)}`,
+    buckets,
+  };
+}
+
+function reportLogIsInBucket(log, bucket) {
+  return log.date && log.date >= bucket.start && log.date <= bucket.end;
+}
+
+function reportLogIsInPeriod(log, meta) {
+  return log.date && log.date >= meta.start && log.date <= meta.end;
+}
+
+function shiftReportPeriod(direction) {
+  if (!direction || state.ui.reportRange === "total") return;
+  const range = state.ui.reportRange || "week";
+  const reference = getReportReferenceDate();
+  if (range === "day") {
+    state.ui.reportReferenceDate = toISODate(addDays(reference, direction));
+  } else if (range === "week") {
+    state.ui.reportReferenceDate = toISODate(addDays(reference, direction * 7));
+  } else if (range === "month") {
+    state.ui.reportReferenceDate = toISODate(addMonths(reference, direction));
+  } else if (range === "year") {
+    state.ui.reportReferenceDate = toISODate(new Date(reference.getFullYear() + direction, reference.getMonth(), 1));
+  } else if (range === "custom") {
+    const meta = getReportPeriodMeta();
+    const span = daysBetween(meta.start, meta.end) + 1;
+    state.ui.reportCustomStart = toISODate(addDays(parseISODate(meta.start), direction * span));
+    state.ui.reportCustomEnd = toISODate(addDays(parseISODate(meta.end), direction * span));
+    state.ui.reportReferenceDate = state.ui.reportCustomEnd;
+  }
+  saveState();
+  renderReports();
+}
+
+function renderReports() {
+  const range = state.ui.reportRange || "week";
+  state.ui.reportMode = ["timeline", "time"].includes(state.ui.reportMode) ? state.ui.reportMode : "timeline";
+  state.ui.reportGroup = ["subjects", "topics"].includes(state.ui.reportGroup) ? state.ui.reportGroup : "subjects";
+  $$(".segment[data-report-range]").forEach((button) => button.classList.toggle("active", button.dataset.reportRange === range));
+  $$("[data-report-mode]").forEach((button) => button.classList.toggle("active", button.dataset.reportMode === state.ui.reportMode));
+  $$("[data-report-group]").forEach((input) => {
+    input.checked = input.value === state.ui.reportGroup;
+  });
+
+  const meta = getReportPeriodMeta();
+  const studyLogs = state.studyLogs.filter((log) => reportLogIsInPeriod(log, meta));
+  const questionLogs = state.questionLogs.filter((log) => reportLogIsInPeriod(log, meta));
   const minutes = studyLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
   const correct = questionLogs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
   const wrong = questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const total = correct + wrong;
   const accuracy = total ? (correct / total) * 100 : 0;
 
+  $("#reportCustomForm")?.classList.toggle("hidden", range !== "custom");
+  if ($("#reportCustomStart")) $("#reportCustomStart").value = state.ui.reportCustomStart || meta.start;
+  if ($("#reportCustomEnd")) $("#reportCustomEnd").value = state.ui.reportCustomEnd || meta.end;
+  $("#reportPeriodTitle").textContent = meta.title;
+  $("#reportTotalMinutes").textContent = formatMinutes(minutes);
+  $("#reportPeriodCaption").textContent = meta.caption;
+
   $("#reportStats").innerHTML = [
-    statCard("Tempo", formatMinutes(minutes), getRangeLabel(range)),
+    statCard("Tempo", formatMinutes(minutes), meta.caption),
     statCard("Questões", String(total), `${correct} acertos e ${wrong} erros`),
     statCard("Precisão", percent(accuracy), "no período selecionado"),
     statCard("Sessões", String(studyLogs.length), "registros de estudo"),
   ].join("");
 
+  renderReportTimeline(meta, studyLogs);
   renderSubjectTimeChart(studyLogs);
   renderSubjectAccuracyList(questionLogs);
+}
+
+function getReportGroups(studyLogs) {
+  const byGroup = new Map();
+  studyLogs.forEach((log) => {
+    const subjectId = getEntrySubjectId(log);
+    const subject = getSubject(subjectId);
+    const topic = getTopic(log.topicId);
+    const topicMode = state.ui.reportGroup === "topics";
+    const key = topicMode ? (topic ? `topic-${topic.id}` : `subject-${subjectId || "none"}-no-topic`) : subjectId || "none";
+    const label = topicMode ? topic?.name || "Sem assunto específico" : subject?.name || "Sem matéria";
+    const subjectName = subject?.name || "Sem matéria";
+    const color = subject?.color || "#64748b";
+    if (!byGroup.has(key)) {
+      byGroup.set(key, {
+        key,
+        label,
+        subjectId,
+        subjectName,
+        color,
+        logs: [],
+        minutes: 0,
+      });
+    }
+    const group = byGroup.get(key);
+    group.logs.push(log);
+    group.minutes += Number(log.minutes || 0);
+  });
+  return [...byGroup.values()].sort((a, b) => b.minutes - a.minutes || a.label.localeCompare(b.label));
+}
+
+function renderReportTimeline(meta, studyLogs) {
+  const chart = $("#reportTimelineChart");
+  const legend = $("#reportTimelineLegend");
+  if (!chart || !legend) return;
+
+  const groups = getReportGroups(studyLogs);
+  const bucketData = meta.buckets.map((bucket) => {
+    const segments = groups
+      .map((group) => {
+        const minutes = group.logs.filter((log) => reportLogIsInBucket(log, bucket)).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+        return { ...group, minutes };
+      })
+      .filter((segment) => segment.minutes > 0);
+    return {
+      ...bucket,
+      segments,
+      total: segments.reduce((sum, segment) => sum + segment.minutes, 0),
+    };
+  });
+  const maxBucketMinutes = Math.max(1, ...bucketData.map((bucket) => bucket.total));
+  const axisMax = Math.max(60, Math.ceil(maxBucketMinutes / 60) * 60);
+  const axisLabels = [axisMax, Math.round(axisMax * 0.75), Math.round(axisMax * 0.5), Math.round(axisMax * 0.25)];
+  const hasData = studyLogs.some((log) => Number(log.minutes || 0) > 0);
+  const minColumnWidth = meta.range === "month" || meta.buckets.length > 14 ? 36 : 54;
+
+  chart.innerHTML = `
+    <div class="report-chart-scroll">
+      <div class="report-y-axis">
+        ${axisLabels.map((value) => `<span>${formatMinutes(value)}</span>`).join("")}
+      </div>
+      <div class="report-bars" style="grid-template-columns: repeat(${meta.buckets.length}, minmax(${minColumnWidth}px, 1fr));">
+        ${bucketData
+          .map(
+            (bucket) => `
+              <div class="report-bar-column">
+                <div class="report-stacked-bar" aria-label="${escapeHTML(bucket.label)}: ${formatMinutes(bucket.total)}">
+                  ${
+                    bucket.segments.length
+                      ? bucket.segments
+                          .map((segment) => {
+                            const height = clamp((segment.minutes / axisMax) * 100, 2, 100);
+                            const tooltipLabel = state.ui.reportGroup === "topics"
+                              ? `${segment.subjectName}: ${segment.label}`
+                              : segment.subjectName;
+                            return `
+                              <div class="report-stack-segment" tabindex="0" style="--segment-color:${segment.color}; --segment-height:${height}%;" title="${escapeHTML(`${tooltipLabel} - ${formatMinutes(segment.minutes)}`)}">
+                                <span class="report-segment-tooltip">
+                                  <span class="report-legend-dot" style="--legend-color:${segment.color}"></span>
+                                  <strong>${escapeHTML(tooltipLabel)}</strong>
+                                  <small>${formatMinutes(segment.minutes)}</small>
+                                </span>
+                              </div>
+                            `;
+                          })
+                          .join("")
+                      : `<span class="report-empty-bar"></span>`
+                  }
+                </div>
+                <span class="report-bar-label">${escapeHTML(bucket.label)}</span>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </div>
+    ${hasData ? "" : `<div class="empty-state report-chart-empty">Você não possui atividades cadastradas nesse período.</div>`}
+  `;
+
+  const subjectTotals = state.subjects
+    .map((subject) => {
+      const minutes = studyLogs.filter((log) => getEntrySubjectId(log) === subject.id).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+      return { ...subject, minutes };
+    })
+    .filter((subject) => subject.minutes > 0)
+    .sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
+
+  legend.innerHTML = subjectTotals.length
+    ? subjectTotals
+        .map(
+          (subject) => `
+            <div class="report-legend-item">
+              <span class="report-legend-dot" style="--legend-color:${subject.color}"></span>
+              <span>${escapeHTML(subject.name)}</span>
+              <strong>${formatMinutes(subject.minutes)}</strong>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="empty-state">As cores das matérias aparecerão aqui quando houver tempo registrado.</div>`;
 }
 
 function renderSubjectTimeChart(studyLogs) {
@@ -5890,8 +6231,26 @@ function attachEvents() {
     const reportTab = event.target.closest("[data-report-range]");
     if (reportTab) {
       state.ui.reportRange = reportTab.dataset.reportRange;
+      if (state.ui.reportRange === "custom" && (!state.ui.reportCustomStart || !state.ui.reportCustomEnd)) {
+        state.ui.reportCustomStart = toISODate(addDays(parseISODate(todayISO()), -6));
+        state.ui.reportCustomEnd = todayISO();
+      }
       saveState();
       renderReports();
+      return;
+    }
+
+    const reportModeTab = event.target.closest("[data-report-mode]");
+    if (reportModeTab) {
+      state.ui.reportMode = reportModeTab.dataset.reportMode;
+      saveState();
+      renderReports();
+      return;
+    }
+
+    const reportShift = event.target.closest("[data-report-shift]");
+    if (reportShift) {
+      shiftReportPeriod(Number(reportShift.dataset.reportShift || 0));
       return;
     }
 
@@ -5997,6 +6356,27 @@ function attachEvents() {
     state.ui.caseTopicFilter = "";
     saveState();
     renderCases();
+  });
+
+  $$("[data-report-group]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      state.ui.reportGroup = event.target.value === "topics" ? "topics" : "subjects";
+      saveState();
+      renderReports();
+    });
+  });
+
+  $("#reportCustomForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const start = $("#reportCustomStart").value || todayISO();
+    const end = $("#reportCustomEnd").value || start;
+    state.ui.reportRange = "custom";
+    state.ui.reportCustomStart = sameOrBefore(start, end) ? start : end;
+    state.ui.reportCustomEnd = sameOrBefore(start, end) ? end : start;
+    state.ui.reportReferenceDate = state.ui.reportCustomEnd;
+    saveState();
+    renderReports();
+    showToast("Período personalizado aplicado.");
   });
 
   $("#caseTopicFilter").addEventListener("change", (event) => {

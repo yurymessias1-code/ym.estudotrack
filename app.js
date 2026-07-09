@@ -5896,11 +5896,15 @@ function drawStudyCanvas() {
   state.subjects.slice(0, 6).forEach((subject, index) => {
     const x = 54 + index * 34;
     const bookHeight = 95 + ((getSubjectStats(subject.id).minutes % 90) || index * 12);
+    const bookBottom = 214;
+    const bookTop = bookBottom - bookHeight;
     ctx.fillStyle = subject.color;
-    roundRect(ctx, x, 218 - bookHeight, 22, bookHeight, 5);
+    roundRect(ctx, x, bookTop, 22, bookHeight, 5);
     ctx.fill();
+    const shineTop = bookTop + Math.max(28, bookHeight * 0.34);
+    const shineHeight = Math.max(10, bookBottom - shineTop - 8);
     ctx.fillStyle = canvasColors.shine;
-    ctx.fillRect(x + 6, 132, 10, Math.max(12, bookHeight - 40));
+    ctx.fillRect(x + 6, shineTop, 10, shineHeight);
   });
 
   ctx.strokeStyle = canvasColors.track;
@@ -5925,15 +5929,15 @@ function drawStudyCanvas() {
   ctx.fillStyle = canvasColors.text;
   ctx.textAlign = "left";
   ctx.font = "800 18px system-ui, sans-serif";
-  ctx.fillText(formatMinutes(totalMinutes), 48, 258);
+  ctx.fillText(formatMinutes(totalMinutes), 48, 270);
   ctx.font = "700 13px system-ui, sans-serif";
   ctx.fillStyle = canvasColors.muted;
-  ctx.fillText("registrados no histórico", 48, 278);
+  ctx.fillText("registrados no histórico", 48, 292);
 
   ctx.fillStyle = canvasColors.stamp;
   for (let i = 0; i < 12; i += 1) {
     const x = 354 + (i % 6) * 32;
-    const y = 210 + Math.floor(i / 6) * 24;
+    const y = 202 + Math.floor(i / 6) * 24;
     ctx.globalAlpha = i < Math.round(accuracy * 12) ? 0.9 : 0.22;
     roundRect(ctx, x, y, 18, 14, 4);
     ctx.fill();

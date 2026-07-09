@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260708-report-timeline"), "Cache do HTML nao foi atualizado para relatorios.");
-assert(html.includes("supabase-config.js?v=20260708-report-timeline"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260708-report-layout-fix"), "Cache do HTML nao foi atualizado para o layout dos relatorios.");
+assert(html.includes("supabase-config.js?v=20260708-report-layout-fix"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes("unpkg.com/@supabase/supabase-js@2"), "CDN alternativo do SDK Supabase ausente.");
 assert(html.includes("cancelSubjectEditBtn"), "Cancelamento de edicao de materia ausente.");
 assert(html.includes("cancelTopicEditBtn"), "Cancelamento de edicao de assunto ausente.");
@@ -70,6 +70,7 @@ assert(css.includes(".competition-board"), "CSS da aba concursos ausente.");
 assert(css.includes(".subject-color-palette"), "CSS da paleta de cores de materia ausente.");
 assert(css.includes(".report-stacked-bar"), "CSS das barras empilhadas dos relatorios ausente.");
 assert(css.includes(".report-legend-item"), "CSS da legenda de materias dos relatorios ausente.");
+assert(css.includes("overflow: hidden"), "Grafico dos relatorios nao deve criar rolagem interna.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

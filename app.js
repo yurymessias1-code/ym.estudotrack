@@ -1783,6 +1783,7 @@ function render() {
   renderProfilePanel();
   renderSelectors();
   renderDashboard();
+  drawStudyCanvas();
   renderDailyReview();
   renderControl();
   renderGoals();
@@ -1796,7 +1797,6 @@ function render() {
   renderPomodoro();
   renderReports();
   renderAccountPanel();
-  drawStudyCanvas();
 }
 
 function renderNavigation() {
@@ -5665,16 +5665,18 @@ function renderReports() {
   $("#reportCustomForm")?.classList.toggle("hidden", range !== "custom");
   if ($("#reportCustomStart")) $("#reportCustomStart").value = state.ui.reportCustomStart || meta.start;
   if ($("#reportCustomEnd")) $("#reportCustomEnd").value = state.ui.reportCustomEnd || meta.end;
-  $("#reportPeriodTitle").textContent = meta.title;
-  $("#reportTotalMinutes").textContent = formatMinutes(minutes);
-  $("#reportPeriodCaption").textContent = meta.caption;
+  if ($("#reportPeriodTitle")) $("#reportPeriodTitle").textContent = meta.title;
+  if ($("#reportTotalMinutes")) $("#reportTotalMinutes").textContent = formatMinutes(minutes);
+  if ($("#reportPeriodCaption")) $("#reportPeriodCaption").textContent = meta.caption;
 
-  $("#reportStats").innerHTML = [
+  if ($("#reportStats")) {
+    $("#reportStats").innerHTML = [
     statCard("Tempo", formatMinutes(minutes), meta.caption),
     statCard("Questões", String(total), `${correct} acertos e ${wrong} erros`),
     statCard("Precisão", percent(accuracy), "no período selecionado"),
     statCard("Sessões", String(studyLogs.length), "registros de estudo"),
-  ].join("");
+    ].join("");
+  }
 
   renderReportTimeline(meta, studyLogs);
   renderSubjectTimeChart(studyLogs);
@@ -5733,14 +5735,13 @@ function renderReportTimeline(meta, studyLogs) {
   const axisMax = Math.max(60, Math.ceil(maxBucketMinutes / 60) * 60);
   const axisLabels = [axisMax, Math.round(axisMax * 0.75), Math.round(axisMax * 0.5), Math.round(axisMax * 0.25)];
   const hasData = studyLogs.some((log) => Number(log.minutes || 0) > 0);
-  const minColumnWidth = meta.range === "month" || meta.buckets.length > 14 ? 36 : 54;
 
   chart.innerHTML = `
     <div class="report-chart-scroll">
       <div class="report-y-axis">
         ${axisLabels.map((value) => `<span>${formatMinutes(value)}</span>`).join("")}
       </div>
-      <div class="report-bars" style="grid-template-columns: repeat(${meta.buckets.length}, minmax(${minColumnWidth}px, 1fr));">
+      <div class="report-bars" style="grid-template-columns: repeat(${meta.buckets.length}, minmax(0, 1fr));">
         ${bucketData
           .map(
             (bucket) => `
@@ -5868,15 +5869,27 @@ function drawStudyCanvas() {
   const wrong = state.questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const totalQuestions = correct + wrong;
   const accuracy = totalQuestions ? correct / totalQuestions : 0;
+  const isDark = state.ui.theme === "dark";
+  const canvasColors = {
+    background: isDark ? "#131920" : "#f8fbfc",
+    blockA: isDark ? "#10251f" : "#edf8f6",
+    blockB: isDark ? "#2a2218" : "#fff7ed",
+    track: isDark ? "#405064" : "#9fb0bf",
+    text: isDark ? "#f8fafc" : "#17202a",
+    muted: isDark ? "#9fb4c8" : "#64717f",
+    shine: isDark ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.78)",
+    accent: isDark ? "#2dd4bf" : "#0f766e",
+    stamp: isDark ? "#f97316" : "#c2410c",
+  };
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#f8fbfc";
+  ctx.fillStyle = canvasColors.background;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.fillStyle = "#edf8f6";
+  ctx.fillStyle = canvasColors.blockA;
   roundRect(ctx, 26, 24, 260, 230, 8);
   ctx.fill();
-  ctx.fillStyle = "#fff7ed";
+  ctx.fillStyle = canvasColors.blockB;
   roundRect(ctx, 312, 42, 278, 204, 8);
   ctx.fill();
 
@@ -5886,38 +5899,38 @@ function drawStudyCanvas() {
     ctx.fillStyle = subject.color;
     roundRect(ctx, x, 218 - bookHeight, 22, bookHeight, 5);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.fillStyle = canvasColors.shine;
     ctx.fillRect(x + 6, 132, 10, Math.max(12, bookHeight - 40));
   });
 
-  ctx.strokeStyle = "#9fb0bf";
+  ctx.strokeStyle = canvasColors.track;
   ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.arc(448, 136, 58, -Math.PI / 2, Math.PI * 1.5);
   ctx.stroke();
-  ctx.strokeStyle = "#0f766e";
+  ctx.strokeStyle = canvasColors.accent;
   ctx.lineWidth = 10;
   ctx.beginPath();
   ctx.arc(448, 136, 58, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * accuracy);
   ctx.stroke();
 
-  ctx.fillStyle = "#17202a";
+  ctx.fillStyle = canvasColors.text;
   ctx.font = "700 34px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(percent(accuracy * 100), 448, 132);
   ctx.font = "700 14px system-ui, sans-serif";
-  ctx.fillStyle = "#64717f";
+  ctx.fillStyle = canvasColors.muted;
   ctx.fillText("precisão", 448, 158);
 
-  ctx.fillStyle = "#17202a";
+  ctx.fillStyle = canvasColors.text;
   ctx.textAlign = "left";
   ctx.font = "800 18px system-ui, sans-serif";
   ctx.fillText(formatMinutes(totalMinutes), 48, 258);
   ctx.font = "700 13px system-ui, sans-serif";
-  ctx.fillStyle = "#64717f";
+  ctx.fillStyle = canvasColors.muted;
   ctx.fillText("registrados no histórico", 48, 278);
 
-  ctx.fillStyle = "#c2410c";
+  ctx.fillStyle = canvasColors.stamp;
   for (let i = 0; i < 12; i += 1) {
     const x = 354 + (i % 6) * 32;
     const y = 210 + Math.floor(i / 6) * 24;

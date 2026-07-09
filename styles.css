@@ -601,7 +601,7 @@ button:disabled {
   width: 100%;
   height: auto;
   border-radius: var(--radius);
-  background: #f9fbfc;
+  background: var(--panel-soft);
 }
 
 .stat-grid {
@@ -1913,9 +1913,9 @@ button:focus-visible {
 
 .report-workbench {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 18px;
-  padding: 16px;
+  padding: 14px;
 }
 
 .report-view-tabs,
@@ -1973,15 +1973,15 @@ button:focus-visible {
 
 .report-stage {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 54px minmax(220px, 320px);
-  gap: 14px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(220px, 300px);
+  gap: 10px;
   align-items: center;
   min-width: 0;
 }
 
 .report-nav-button {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #ffffff;
@@ -1994,30 +1994,29 @@ button:focus-visible {
 .report-chart-card {
   position: relative;
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
 .report-chart-card h3 {
+  margin: 0;
   text-align: center;
-  font-size: 1.45rem;
+  font-size: 1.25rem;
 }
 
 .report-chart-scroll {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
-  gap: 10px;
-  min-height: 320px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-gutter: stable;
+  gap: 8px;
+  min-height: 248px;
+  overflow: hidden;
 }
 
 .report-y-axis {
   display: grid;
   grid-template-rows: repeat(4, 1fr);
   align-items: start;
-  min-height: 260px;
+  min-height: 208px;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 800;
@@ -2026,16 +2025,16 @@ button:focus-visible {
 .report-bars {
   display: grid;
   align-items: end;
-  gap: 10px;
-  min-height: 282px;
-  min-width: max-content;
+  gap: 6px;
+  min-height: 230px;
+  min-width: 0;
 }
 
 .report-bar-column {
   display: grid;
-  grid-template-rows: minmax(240px, 1fr) auto;
+  grid-template-rows: minmax(204px, 1fr) auto;
   align-items: end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -2045,7 +2044,7 @@ button:focus-visible {
   flex-direction: column-reverse;
   justify-content: flex-start;
   align-items: stretch;
-  min-height: 240px;
+  min-height: 204px;
   width: 100%;
   border-radius: 4px 4px 0 0;
 }
@@ -2142,11 +2141,10 @@ button:focus-visible {
 
 .report-legend {
   display: grid;
-  gap: 8px;
-  max-height: 240px;
-  overflow-y: auto;
-  padding-right: 4px;
-  scrollbar-gutter: stable;
+  gap: 7px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .report-legend-item {

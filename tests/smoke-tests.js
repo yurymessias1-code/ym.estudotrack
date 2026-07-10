@@ -21,9 +21,13 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260708-dashboard-canvas-fix"), "Cache do HTML nao foi atualizado para o canvas do painel.");
-assert(html.includes("supabase-config.js?v=20260708-dashboard-canvas-fix"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260709-edit-all-materials"), "Cache do HTML nao foi atualizado para edicao completa.");
+assert(html.includes("supabase-config.js?v=20260709-edit-all-materials"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
+assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
+assert(html.includes('<option value="note">'), "Tipo Anotacao nos materiais de apoio ausente.");
+assert(html.includes('id="legalMaterialCancelEditBtn"'), "Cancelamento de edicao de leis/tabelas/anotacoes ausente.");
+assert(html.includes('id="noteCancelEditBtn"'), "Cancelamento de edicao de anotacoes ausente.");
 assert(html.includes("unpkg.com/@supabase/supabase-js@2"), "CDN alternativo do SDK Supabase ausente.");
 assert(html.includes("cancelSubjectEditBtn"), "Cancelamento de edicao de materia ausente.");
 assert(html.includes("cancelTopicEditBtn"), "Cancelamento de edicao de assunto ausente.");
@@ -59,6 +63,9 @@ assert(app.includes("updateSubjectColorPresetState"), "Controle das cores rapida
 assert(app.includes("function renderReportTimeline"), "Renderizacao do grafico empilhado dos relatorios ausente.");
 assert(app.includes("function getReportPeriodMeta"), "Calculo de periodo dos relatorios ausente.");
 assert(app.includes("reportGroup"), "Agrupamento por materias/conteudos nos relatorios ausente.");
+assert(app.includes("activeQuestionEditId"), "Edicao de questoes ausente no estado.");
+assert(app.includes("editLegalMaterial"), "Edicao de materiais de apoio ausente.");
+assert(app.includes("renderLegalMaterialGroups"), "Separacao de leis, tabelas, anotacoes e imagens ausente.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
@@ -72,6 +79,7 @@ assert(css.includes(".subject-color-palette"), "CSS da paleta de cores de materi
 assert(css.includes(".report-stacked-bar"), "CSS das barras empilhadas dos relatorios ausente.");
 assert(css.includes(".report-legend-item"), "CSS da legenda de materias dos relatorios ausente.");
 assert(css.includes("overflow: hidden"), "Grafico dos relatorios nao deve criar rolagem interna.");
+assert(css.includes(".legal-material-group-title"), "CSS da separacao por tipo de material ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

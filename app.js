@@ -836,7 +836,7 @@ function normalizeSource(source = {}) {
 }
 
 function normalizeLegalMaterial(item = {}) {
-  const validTypes = ["law", "table", "image"];
+  const validTypes = ["law", "table", "note", "image"];
   const title = typeof item.title === "string" ? item.title.trim() : "";
   const type = validTypes.includes(item.type) ? item.type : "law";
   const rawContent = typeof item.content === "string" ? item.content.trim() : "";
@@ -984,6 +984,8 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeCaseEditId: candidate.ui?.activeCaseEditId || "",
       activeFlashcardEditId: candidate.ui?.activeFlashcardEditId || "",
       activeStudyEditId: candidate.ui?.activeStudyEditId || "",
+      activeQuestionEditId: candidate.ui?.activeQuestionEditId || "",
+      activeLegalMaterialEditId: candidate.ui?.activeLegalMaterialEditId || "",
       activeSubjectEditId: candidate.ui?.activeSubjectEditId || "",
       activeTopicEditId: candidate.ui?.activeTopicEditId || "",
     },
@@ -1049,6 +1051,8 @@ function createEmptyState(profile = {}) {
       activeCaseEditId: "",
       activeFlashcardEditId: "",
       activeStudyEditId: "",
+      activeQuestionEditId: "",
+      activeLegalMaterialEditId: "",
       activeSubjectEditId: "",
       activeTopicEditId: "",
     },
@@ -3694,6 +3698,7 @@ function editalScheduleToText() {
 }
 
 function renderQuestions() {
+  updateQuestionFormMode();
   const recent = [...state.questionLogs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
   $("#questionHistory").innerHTML = recent.length
     ? recent
@@ -3707,7 +3712,12 @@ function renderQuestions() {
               <td>${Number(log.correct || 0)}</td>
               <td>${Number(log.wrong || 0)}</td>
               <td>${percent(accuracy)}</td>
-              <td><button class="mini-button bad" data-action="deleteQuestion" data-id="${log.id}" type="button">Excluir</button></td>
+              <td>
+                <div class="inline-actions table-actions">
+                  <button class="mini-button" data-action="editQuestion" data-id="${log.id}" type="button">Editar</button>
+                  <button class="mini-button bad" data-action="deleteQuestion" data-id="${log.id}" type="button">Excluir</button>
+                </div>
+              </td>
             </tr>
           `;
         })
@@ -3740,6 +3750,36 @@ function renderQuestions() {
         )
         .join("")
     : `<div class="empty-state">Cadastre assuntos para acompanhar precisão.</div>`;
+}
+
+function updateQuestionFormMode() {
+  const isEditing = Boolean(state.ui.activeQuestionEditId);
+  const title = $("#questionFormTitle");
+  const submitButton = $("#questionSubmitBtn");
+  const cancelButton = $("#questionCancelEditBtn");
+  if (title) title.textContent = isEditing ? "Editar lançamento" : "Novo lançamento";
+  if (submitButton) submitButton.textContent = isEditing ? "Salvar edição" : "Salvar questões";
+  if (cancelButton) cancelButton.classList.toggle("hidden", !isEditing);
+}
+
+function resetQuestionForm() {
+  state.ui.activeQuestionEditId = "";
+  $("#questionForm").reset();
+  $("#questionCorrect").value = 0;
+  $("#questionWrong").value = 0;
+  $("#questionDate").value = todayISO();
+  updateQuestionFormMode();
+}
+
+function fillQuestionForm(log) {
+  if (!log) return;
+  state.ui.activeQuestionEditId = log.id;
+  $("#questionTopic").value = log.topicId || "";
+  $("#questionCorrect").value = Number(log.correct || 0);
+  $("#questionWrong").value = Number(log.wrong || 0);
+  $("#questionDate").value = log.date || todayISO();
+  $("#questionNotes").value = log.notes || "";
+  updateQuestionFormMode();
 }
 
 function renderFlashcards() {
@@ -4301,12 +4341,30 @@ async function importCurrentSourceUrlToForm() {
 function renderNotes() {
   renderCategorySelectors();
   renderCategoryList();
+  updateNoteFormMode();
   renderSourceFormState();
   renderSourceSelectors();
   renderSourceLibrary();
   renderSourcePreview();
   renderNoteLibrary();
   queueAutoSyncSources();
+}
+
+function updateNoteFormMode() {
+  const isEditing = Boolean(state.ui.activeNoteId);
+  const title = $("#noteFormTitle");
+  const submitButton = $("#noteSubmitBtn");
+  const cancelButton = $("#noteCancelEditBtn");
+  if (title) title.textContent = isEditing ? "Editar anotação" : "Nova anotação";
+  if (submitButton) submitButton.textContent = isEditing ? "Salvar edição" : "Salvar anotação";
+  if (cancelButton) cancelButton.classList.toggle("hidden", !isEditing);
+}
+
+function resetNoteForm() {
+  state.ui.activeNoteId = "";
+  $("#noteForm").reset();
+  $("#noteEditor").innerHTML = "";
+  updateNoteFormMode();
 }
 
 function renderCategorySelectors() {
@@ -4779,6 +4837,7 @@ function renderCaseCard(item, court) {
 
 function legalMaterialTypeLabel(type) {
   if (type === "table") return "Tabela";
+  if (type === "note") return "Anotação";
   if (type === "image") return "Imagem/foto";
   return "Lei";
 }
@@ -4985,10 +5044,35 @@ function getLegalMaterialFormContent(type) {
   return html;
 }
 
-function resetLegalMaterialForm() {
+function resetLegalMaterialForm({ clearEdit = true } = {}) {
+  if (clearEdit) state.ui.activeLegalMaterialEditId = "";
   $("#legalMaterialForm").reset();
   $("#legalMaterialContent").value = "";
   $("#legalMaterialContentEditor").innerHTML = "";
+  updateLegalMaterialFormMode();
+}
+
+function updateLegalMaterialFormMode() {
+  const isEditing = Boolean(state.ui.activeLegalMaterialEditId);
+  const submitButton = $("#legalMaterialSubmitBtn");
+  const cancelButton = $("#legalMaterialCancelEditBtn");
+  if (submitButton) submitButton.textContent = isEditing ? "Salvar edição" : "Salvar material";
+  if (cancelButton) cancelButton.classList.toggle("hidden", !isEditing);
+}
+
+function fillLegalMaterialForm(item) {
+  if (!item) return;
+  state.ui.activeLegalMaterialEditId = item.id;
+  $("#legalMaterialType").value = item.type || "law";
+  $("#legalMaterialSubject").value = getEntrySubjectId(item) || "";
+  syncScopedTopicSelect("#legalMaterialSubject", "#legalMaterialTopic");
+  $("#legalMaterialTopic").value = item.topicId || "";
+  $("#legalMaterialTitle").value = item.title || "";
+  $("#legalMaterialReference").value = item.reference || "";
+  $("#legalMaterialSource").value = item.source || "";
+  $("#legalMaterialContent").value = item.content || "";
+  $("#legalMaterialContentEditor").innerHTML = legalMaterialContentForEditor(item.content || "", item.type || "law");
+  updateLegalMaterialFormMode();
 }
 
 function insertTextIntoTextarea(textarea, text) {
@@ -5178,6 +5262,7 @@ function renderLegalMaterials() {
   const list = $("#legalMaterialList");
   if (!list) return;
   populateLegalMaterialFilterSelectors();
+  updateLegalMaterialFormMode();
 
   const allItems = Array.isArray(state.legalMaterials) ? [...state.legalMaterials] : [];
   const items = allItems
@@ -5193,19 +5278,43 @@ function renderLegalMaterials() {
     const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
     summary.textContent = `${items.length} de ${allItems.length} materiais${suffix}.`;
     const filterSummary = $("#legalMaterialFilterSummary");
-    if (filterSummary) filterSummary.textContent = `${items.length} de ${allItems.length} leis, tabelas e imagens${suffix}.`;
+    if (filterSummary) filterSummary.textContent = `${items.length} de ${allItems.length} leis, tabelas, anotações e imagens${suffix}.`;
   }
 
   list.innerHTML = items.length
-    ? items.map(renderLegalMaterialCard).join("")
-    : `<div class="empty-state">${allItems.length ? "Nenhuma lei ou tabela encontrada com esses filtros." : "Nenhuma lei ou tabela cadastrada."}</div>`;
+    ? renderLegalMaterialGroups(items)
+    : `<div class="empty-state">${allItems.length ? "Nenhum material encontrado com esses filtros." : "Nenhuma lei, tabela ou anotação cadastrada."}</div>`;
+}
+
+function renderLegalMaterialGroups(items) {
+  const groups = [
+    ["law", "Leis"],
+    ["table", "Tabelas"],
+    ["note", "Anotações"],
+    ["image", "Imagens"],
+  ];
+  return groups
+    .map(([type, title]) => {
+      const groupItems = items.filter((item) => item.type === type);
+      if (!groupItems.length) return "";
+      return `
+        <section class="legal-material-group" aria-label="${escapeHTML(title)}">
+          <div class="legal-material-group-title">
+            <span class="tag">${escapeHTML(title)}</span>
+            <span>${groupItems.length} ${groupItems.length === 1 ? "item" : "itens"}</span>
+          </div>
+          ${groupItems.map(renderLegalMaterialCard).join("")}
+        </section>
+      `;
+    })
+    .join("");
 }
 
 function renderLegalMaterialCard(item) {
   const safeSource = getSafeExternalUrl(item.source);
   const topicLabel = getEntrySubjectId(item) || item.topicId ? getEntryScopeLabel(item) : "";
-  const copyLabel = item.type === "table" ? "Copiar tabela" : item.type === "image" ? "Copiar foto" : "Copiar documento";
-  const downloadLabel = item.type === "table" ? "Baixar CSV" : item.type === "image" ? "Baixar foto" : "Baixar TXT";
+  const copyLabel = item.type === "table" ? "Copiar tabela" : item.type === "image" ? "Copiar foto" : item.type === "note" ? "Copiar anotação" : "Copiar documento";
+  const downloadLabel = item.type === "table" ? "Baixar CSV" : item.type === "image" ? "Baixar foto" : item.type === "note" ? "Baixar anotação" : "Baixar TXT";
   return `
     <article class="legal-material-card">
       <div class="legal-material-card-top">
@@ -5220,6 +5329,7 @@ function renderLegalMaterialCard(item) {
           <button class="mini-button" data-action="copyLegalMaterial" data-id="${item.id}" type="button">${copyLabel}</button>
           ${item.type === "table" ? `<button class="mini-button" data-action="copyLegalMaterialText" data-id="${item.id}" type="button">Copiar texto</button>` : ""}
           <button class="mini-button" data-action="downloadLegalMaterial" data-id="${item.id}" type="button">${downloadLabel}</button>
+          <button class="mini-button" data-action="editLegalMaterial" data-id="${item.id}" type="button">Editar</button>
           <button class="mini-button bad" data-action="deleteLegalMaterial" data-id="${item.id}" type="button">Excluir</button>
         </div>
       </div>
@@ -6724,21 +6834,31 @@ function attachEvents() {
       showToast("Informe ao menos uma questão.");
       return;
     }
-    state.questionLogs.push({
-      id: uid(),
+    const existing = state.questionLogs.find((log) => log.id === state.ui.activeQuestionEditId);
+    const payload = {
+      id: existing?.id || uid(),
       topicId,
       correct,
       wrong,
       date: $("#questionDate").value || todayISO(),
       notes: $("#questionNotes").value.trim(),
-    });
+      updatedAt: new Date().toISOString(),
+    };
+    if (existing) {
+      Object.assign(existing, payload);
+    } else {
+      state.questionLogs.push(payload);
+    }
     saveState();
-    event.target.reset();
-    $("#questionCorrect").value = 0;
-    $("#questionWrong").value = 0;
-    $("#questionDate").value = todayISO();
+    resetQuestionForm();
     render();
-    showToast("Questões salvas.");
+    showToast(existing ? "Lançamento de questões atualizado." : "Questões salvas.");
+  });
+
+  $("#questionCancelEditBtn").addEventListener("click", () => {
+    resetQuestionForm();
+    saveState();
+    showToast("Edição de questões cancelada.");
   });
 
   $("#caseForm").addEventListener("submit", (event) => {
@@ -6779,8 +6899,9 @@ function attachEvents() {
     event.preventDefault();
     const { subjectId, topicId } = resolveSubjectTopic("#legalMaterialSubject", "#legalMaterialTopic");
     const materialType = $("#legalMaterialType").value;
+    const existing = state.legalMaterials.find((item) => item.id === state.ui.activeLegalMaterialEditId);
     const material = normalizeLegalMaterial({
-      id: uid(),
+      id: existing?.id || uid(),
       type: materialType,
       subjectId,
       topicId,
@@ -6788,20 +6909,30 @@ function attachEvents() {
       reference: $("#legalMaterialReference").value,
       content: getLegalMaterialFormContent(materialType),
       source: $("#legalMaterialSource").value,
-      createdAt: todayISO(),
+      createdAt: existing?.createdAt || todayISO(),
       updatedAt: new Date().toISOString(),
     });
-    state.legalMaterials.push(material);
+    if (existing) {
+      Object.assign(existing, material);
+    } else {
+      state.legalMaterials.push(material);
+    }
     saveState();
     resetLegalMaterialForm();
     render();
-    showToast(`${legalMaterialTypeLabel(material.type)} salva.`);
+    showToast(existing ? `${legalMaterialTypeLabel(material.type)} atualizada.` : `${legalMaterialTypeLabel(material.type)} salva.`);
   });
 
   $("#legalMaterialImage").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (file) await setLegalMaterialImageFromFile(file);
     event.target.value = "";
+  });
+
+  $("#legalMaterialCancelEditBtn").addEventListener("click", () => {
+    resetLegalMaterialForm();
+    saveState();
+    showToast("Edição do material cancelada.");
   });
 
   $("#legalMaterialContentEditor").addEventListener("paste", (event) => {
@@ -7082,12 +7213,16 @@ function attachEvents() {
       });
     }
 
-    state.ui.activeNoteId = "";
     saveState();
-    event.target.reset();
-    $("#noteEditor").innerHTML = "";
+    resetNoteForm();
     renderNotes();
-    showToast("Anotação salva.");
+    showToast(existing ? "Anotação atualizada." : "Anotação salva.");
+  });
+
+  $("#noteCancelEditBtn").addEventListener("click", () => {
+    resetNoteForm();
+    saveState();
+    showToast("Edição da anotação cancelada.");
   });
 
   $("#musicForm").addEventListener("submit", (event) => {
@@ -7375,14 +7510,16 @@ function handleAction(action) {
     setCategoryFields("note", note.category);
     $("#noteSource").value = note.sourceId || "";
     $("#noteEditor").innerHTML = sanitizeNoteHTML(note.content || "");
+    updateNoteFormMode();
     saveState();
+    $("#noteForm").scrollIntoView({ behavior: "smooth", block: "start" });
     showToast("Anotação carregada para edição.");
     return;
   }
 
   if (type === "deleteNote") {
     state.notes = state.notes.filter((note) => note.id !== id);
-    if (state.ui.activeNoteId === id) state.ui.activeNoteId = "";
+    if (state.ui.activeNoteId === id) resetNoteForm();
     saveState();
     renderNotes();
     showToast("Anotação excluída.");
@@ -7491,9 +7628,22 @@ function handleAction(action) {
 
   if (type === "deleteQuestion") {
     state.questionLogs = state.questionLogs.filter((log) => log.id !== id);
+    if (state.ui.activeQuestionEditId === id) resetQuestionForm();
     saveState();
     render();
     showToast("Lançamento removido.");
+    return;
+  }
+
+  if (type === "editQuestion") {
+    const log = state.questionLogs.find((item) => item.id === id);
+    if (!log) return;
+    state.ui.view = "questoes";
+    saveState();
+    render();
+    fillQuestionForm(log);
+    $("#questionForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast("Lançamento carregado para edição.");
     return;
   }
 
@@ -7574,9 +7724,23 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "editLegalMaterial") {
+    const item = getLegalMaterial(id);
+    if (!item) return;
+    state.ui.view = "jurisprudencias";
+    saveState();
+    render();
+    fillLegalMaterialForm(item);
+    saveState();
+    $("#legalMaterialForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    showToast(`${legalMaterialTypeLabel(item.type)} carregada para edição.`);
+    return;
+  }
+
   if (type === "deleteLegalMaterial") {
-    if (!window.confirm("Excluir esta lei ou tabela?")) return;
+    if (!window.confirm("Excluir este material?")) return;
     state.legalMaterials = state.legalMaterials.filter((item) => item.id !== id);
+    if (state.ui.activeLegalMaterialEditId === id) resetLegalMaterialForm();
     saveState();
     renderCases();
     showToast("Material removido.");

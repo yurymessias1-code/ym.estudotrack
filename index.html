@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260708-dashboard-canvas-fix" />
+    <link rel="stylesheet" href="styles.css?v=20260709-edit-all-materials" />
   </head>
   <body>
     <div class="app-shell">
@@ -383,7 +383,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Questões</p>
-                  <h3>Novo lançamento</h3>
+                  <h3 id="questionFormTitle">Novo lançamento</h3>
                 </div>
               </div>
               <label>
@@ -408,7 +408,10 @@
                 Observações
                 <textarea id="questionNotes" rows="4" placeholder="Ex.: revisar prazos e competência"></textarea>
               </label>
-              <button class="button primary" type="submit">Salvar questões</button>
+              <div class="inline-actions">
+                <button class="button primary" id="questionSubmitBtn" type="submit">Salvar questões</button>
+                <button class="button ghost hidden" id="questionCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
             </form>
 
             <section class="panel">
@@ -581,6 +584,7 @@
                     <select id="legalMaterialType">
                       <option value="law">Lei</option>
                       <option value="table">Tabela</option>
+                      <option value="note">Anotação</option>
                       <option value="image">Imagem/foto</option>
                     </select>
                   </label>
@@ -636,7 +640,10 @@
                   Fonte
                   <input id="legalMaterialSource" type="url" placeholder="https://..." />
                 </label>
-                <button class="button primary" type="submit">Salvar material</button>
+                <div class="inline-actions">
+                  <button class="button primary" id="legalMaterialSubmitBtn" type="submit">Salvar material</button>
+                  <button class="button ghost hidden" id="legalMaterialCancelEditBtn" type="button">Cancelar edição</button>
+                </div>
               </form>
 
               <section class="legal-material-results" aria-label="Leis e tabelas salvas">
@@ -1279,7 +1286,7 @@
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Anotação</p>
-                  <h3>Nova anotação</h3>
+                  <h3 id="noteFormTitle">Nova anotação</h3>
                 </div>
               </div>
               <label>
@@ -1310,7 +1317,10 @@
                 <button class="mini-button marker-clear" data-highlight="clear" type="button">Limpar</button>
               </div>
               <div id="noteEditor" class="note-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
-              <button class="button primary" type="submit">Salvar anotação</button>
+              <div class="inline-actions">
+                <button class="button primary" id="noteSubmitBtn" type="submit">Salvar anotação</button>
+                <button class="button ghost hidden" id="noteCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
             </form>
 
             <section class="panel notebook-library-panel">
@@ -1527,7 +1537,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260708-dashboard-canvas-fix"></script>
-    <script src="app.js?v=20260708-dashboard-canvas-fix"></script>
+    <script src="supabase-config.js?v=20260709-edit-all-materials"></script>
+    <script src="app.js?v=20260709-edit-all-materials"></script>
   </body>
 </html>

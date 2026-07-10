@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260709-edit-all-materials" />
+    <link rel="stylesheet" href="styles.css?v=20260710-question-precision" />
   </head>
   <body>
     <div class="app-shell">
@@ -446,7 +446,17 @@
                 <h3>Precisão por assunto</h3>
               </div>
             </div>
+            <div class="question-precision-tools">
+              <div class="segmented" role="tablist" aria-label="Periodo da precisao">
+                <button class="segment" data-question-precision-range="day" type="button">Dia</button>
+                <button class="segment active" data-question-precision-range="week" type="button">Semana</button>
+                <button class="segment" data-question-precision-range="month" type="button">Mês</button>
+                <button class="segment" data-question-precision-range="year" type="button">Ano</button>
+              </div>
+              <p class="question-precision-summary" id="questionPrecisionSummary">Sem questões no período.</p>
+            </div>
             <div class="topic-performance" id="topicPerformance"></div>
+            <div class="review-reminder-list" id="questionReviewReminders"></div>
           </section>
         </section>
 
@@ -1537,7 +1547,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260709-edit-all-materials"></script>
-    <script src="app.js?v=20260709-edit-all-materials"></script>
+    <script src="supabase-config.js?v=20260710-question-precision"></script>
+    <script src="app.js?v=20260710-question-precision"></script>
   </body>
 </html>

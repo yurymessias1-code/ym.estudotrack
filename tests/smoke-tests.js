@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260709-edit-all-materials"), "Cache do HTML nao foi atualizado para edicao completa.");
-assert(html.includes("supabase-config.js?v=20260709-edit-all-materials"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260710-question-precision"), "Cache do HTML nao foi atualizado para precisao por periodo.");
+assert(html.includes("supabase-config.js?v=20260710-question-precision"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('<option value="note">'), "Tipo Anotacao nos materiais de apoio ausente.");
@@ -41,6 +41,9 @@ assert(html.includes("data-subject-color"), "Cores rapidas de materia ausentes."
 assert(html.includes("reportTimelineChart"), "Grafico de linha do tempo dos relatorios ausente.");
 assert(html.includes("reportTimelineLegend"), "Legenda de cores dos relatorios ausente.");
 assert(html.includes("reportCustomForm"), "Periodo customizado dos relatorios ausente.");
+assert(html.includes("data-question-precision-range=\"day\""), "Filtro diario de precisao ausente.");
+assert(html.includes("questionPrecisionSummary"), "Resumo de precisao por periodo ausente.");
+assert(html.includes("questionReviewReminders"), "Lembretes de revisao por pior desempenho ausentes.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -66,6 +69,8 @@ assert(app.includes("reportGroup"), "Agrupamento por materias/conteudos nos rela
 assert(app.includes("activeQuestionEditId"), "Edicao de questoes ausente no estado.");
 assert(app.includes("editLegalMaterial"), "Edicao de materiais de apoio ausente.");
 assert(app.includes("renderLegalMaterialGroups"), "Separacao de leis, tabelas, anotacoes e imagens ausente.");
+assert(app.includes("questionPrecisionRange"), "Estado do periodo de precisao ausente.");
+assert(app.includes("renderQuestionReviewReminders"), "Renderizacao dos lembretes de revisao ausente.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
@@ -80,6 +85,7 @@ assert(css.includes(".report-stacked-bar"), "CSS das barras empilhadas dos relat
 assert(css.includes(".report-legend-item"), "CSS da legenda de materias dos relatorios ausente.");
 assert(css.includes("overflow: hidden"), "Grafico dos relatorios nao deve criar rolagem interna.");
 assert(css.includes(".legal-material-group-title"), "CSS da separacao por tipo de material ausente.");
+assert(css.includes(".review-reminder-card"), "CSS dos lembretes de revisao ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

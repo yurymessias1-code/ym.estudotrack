@@ -961,6 +961,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
         legalMaterialSubjectFilter: typeof candidate.ui?.legalMaterialSubjectFilter === "string" ? candidate.ui.legalMaterialSubjectFilter : "",
         legalMaterialTopicFilter: typeof candidate.ui?.legalMaterialTopicFilter === "string" ? candidate.ui.legalMaterialTopicFilter : "",
         reportRange: ["day", "week", "month", "year", "total", "custom"].includes(candidate.ui?.reportRange) ? candidate.ui.reportRange : "week",
+        questionPrecisionRange: ["day", "week", "month", "year"].includes(candidate.ui?.questionPrecisionRange) ? candidate.ui.questionPrecisionRange : "week",
         reportMode: ["timeline", "time"].includes(candidate.ui?.reportMode) ? candidate.ui.reportMode : "timeline",
         reportGroup: ["subjects", "topics"].includes(candidate.ui?.reportGroup) ? candidate.ui.reportGroup : "subjects",
         reportReferenceDate: candidate.ui?.reportReferenceDate || todayISO(),
@@ -1028,6 +1029,7 @@ function createEmptyState(profile = {}) {
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
         reportRange: "week",
+        questionPrecisionRange: "week",
         reportMode: "timeline",
         reportGroup: "subjects",
         reportReferenceDate: todayISO(),
@@ -1171,6 +1173,7 @@ function createSeedState() {
         legalMaterialSubjectFilter: "",
         legalMaterialTopicFilter: "",
         reportRange: "week",
+        questionPrecisionRange: "week",
         reportMode: "timeline",
         reportGroup: "subjects",
         reportReferenceDate: todayISO(),
@@ -1264,8 +1267,8 @@ function getTopicColor(topicId) {
   return subject?.color || "#0f766e";
 }
 
-function getTopicStats(topicId) {
-  const logs = state.questionLogs.filter((log) => log.topicId === topicId);
+function getTopicStats(topicId, questionLogs = state.questionLogs) {
+  const logs = questionLogs.filter((log) => log.topicId === topicId);
   const correct = logs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
   const wrong = logs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const total = correct + wrong;
@@ -2778,10 +2781,10 @@ function renderWeekChart() {
     .join("");
 }
 
-function getRankedTopics() {
+function getRankedTopics(questionLogs = state.questionLogs) {
   return state.topics
     .map((topic) => {
-      const stats = getTopicStats(topic.id);
+      const stats = getTopicStats(topic.id, questionLogs);
       const subject = getSubject(topic.subjectId);
       return {
         ...topic,
@@ -3724,7 +3727,27 @@ function renderQuestions() {
         .join("")
     : `<tr><td colspan="6">Nenhum lançamento de questões.</td></tr>`;
 
-  const ranked = getRankedTopics();
+  const precisionRange = ["day", "week", "month", "year"].includes(state.ui.questionPrecisionRange)
+    ? state.ui.questionPrecisionRange
+    : "week";
+  state.ui.questionPrecisionRange = precisionRange;
+  $$(".segment[data-question-precision-range]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.questionPrecisionRange === precisionRange);
+  });
+
+  const precisionLogs = state.questionLogs.filter(getRangePredicate(precisionRange));
+  const precisionCorrect = precisionLogs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
+  const precisionWrong = precisionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
+  const precisionTotal = precisionCorrect + precisionWrong;
+  const precisionAccuracy = precisionTotal ? (precisionCorrect / precisionTotal) * 100 : 0;
+  const summary = $("#questionPrecisionSummary");
+  if (summary) {
+    summary.textContent = precisionTotal
+      ? `${percent(precisionAccuracy)} de precisão ${getRangeLabel(precisionRange)} (${precisionCorrect} acertos e ${precisionWrong} erros).`
+      : `Sem questões ${getRangeLabel(precisionRange)}.`;
+  }
+
+  const ranked = getRankedTopics(precisionLogs).filter((topic) => topic.total > 0);
   $("#topicPerformance").innerHTML = ranked.length
     ? ranked
         .map(
@@ -3749,7 +3772,69 @@ function renderQuestions() {
       `
         )
         .join("")
-    : `<div class="empty-state">Cadastre assuntos para acompanhar precisão.</div>`;
+    : `<div class="empty-state">Nenhum lançamento de questões ${getRangeLabel(precisionRange)}.</div>`;
+  renderQuestionReviewReminders(precisionLogs, precisionRange);
+}
+
+function getWeakQuestionSubjects(questionLogs) {
+  return state.subjects
+    .map((subject) => {
+      const logs = questionLogs.filter((log) => getEntrySubjectId(log) === subject.id);
+      const correct = logs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
+      const wrong = logs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
+      const total = correct + wrong;
+      const accuracy = total ? (correct / total) * 100 : 0;
+      const topics = state.topics
+        .filter((topic) => topic.subjectId === subject.id)
+        .map((topic) => ({ ...topic, ...getTopicStats(topic.id, questionLogs) }))
+        .filter((topic) => topic.total > 0)
+        .sort((a, b) => a.accuracy - b.accuracy || b.wrong - a.wrong || b.total - a.total)
+        .slice(0, 3);
+      return { subject, correct, wrong, total, accuracy, topics };
+    })
+    .filter((item) => item.total > 0 && item.wrong > 0)
+    .sort((a, b) => a.accuracy - b.accuracy || b.wrong - a.wrong || b.total - a.total)
+    .slice(0, 4);
+}
+
+function renderQuestionReviewReminders(questionLogs, range) {
+  const container = $("#questionReviewReminders");
+  if (!container) return;
+
+  const reminders = getWeakQuestionSubjects(questionLogs);
+  if (!reminders.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma matéria com erro ${getRangeLabel(range)} para revisar.</div>`;
+    return;
+  }
+
+  container.innerHTML = reminders
+    .map((item) => {
+      const targets = item.topics.length
+        ? item.topics.map((topic) => `${escapeHTML(topic.name)} (${percent(topic.accuracy)})`).join("; ")
+        : "Revise os erros gerais dessa matéria";
+      const priority = item.accuracy < 50 ? "Prioridade alta" : item.accuracy < 75 ? "Reforço recomendado" : "Revisão leve";
+      return `
+        <article class="review-reminder-card">
+          <div class="performance-top">
+            <div>
+              <strong>${escapeHTML(item.subject.name)}</strong>
+              <small>${priority} ${getRangeLabel(range)}</small>
+            </div>
+            <strong>${percent(item.accuracy)}</strong>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" style="--progress:${clamp(item.accuracy, 0, 100)}%; --fill:${item.subject.color || "#0f766e"}"></div>
+          </div>
+          <div class="topic-meta">
+            <span>${item.correct} acertos</span>
+            <span>${item.wrong} erros</span>
+            <span>${item.total} questões</span>
+          </div>
+          <p class="review-reminder-note">Revisar: ${targets}</p>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function updateQuestionFormMode() {
@@ -6387,6 +6472,14 @@ function attachEvents() {
       saveState();
       renderControl();
       renderGoals();
+      return;
+    }
+
+    const questionPrecisionTab = event.target.closest("[data-question-precision-range]");
+    if (questionPrecisionTab) {
+      state.ui.questionPrecisionRange = questionPrecisionTab.dataset.questionPrecisionRange;
+      saveState();
+      renderQuestions();
       return;
     }
 

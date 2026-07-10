@@ -618,7 +618,8 @@ button:disabled {
 .competition-card,
 .case-card,
 .legal-material-card,
-.performance-row {
+.performance-row,
+.review-reminder-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -1212,6 +1213,7 @@ button:focus-visible {
 .legal-material-list,
 .insight-list,
 .topic-performance,
+.review-reminder-list,
 .control-list,
 .flashcard-library,
 .source-library,
@@ -2177,10 +2179,40 @@ button:focus-visible {
 }
 
 .insight-item,
-.performance-row {
+.performance-row,
+.review-reminder-card {
   display: grid;
   gap: 9px;
   padding: 12px;
+}
+
+.question-precision-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.question-precision-summary {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.review-reminder-list {
+  margin-top: 14px;
+}
+
+.review-reminder-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .insight-top,
@@ -2748,6 +2780,7 @@ td {
 .theme-dark .topic-item,
 .theme-dark .case-card,
 .theme-dark .performance-row,
+.theme-dark .review-reminder-card,
 .theme-dark .control-row,
 .theme-dark .flashcard-review,
 .theme-dark .flashcard-library-card,

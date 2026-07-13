@@ -21,10 +21,11 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260710-question-precision"), "Cache do HTML nao foi atualizado para precisao por periodo.");
-assert(html.includes("supabase-config.js?v=20260710-question-precision"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260712-preserve-topic-records"), "Cache do HTML nao foi atualizado para preservar registros ao excluir assunto.");
+assert(html.includes("supabase-config.js?v=20260712-preserve-topic-records"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
+assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
 assert(html.includes('<option value="note">'), "Tipo Anotacao nos materiais de apoio ausente.");
 assert(html.includes('id="legalMaterialCancelEditBtn"'), "Cancelamento de edicao de leis/tabelas/anotacoes ausente.");
 assert(html.includes('id="noteCancelEditBtn"'), "Cancelamento de edicao de anotacoes ausente.");
@@ -71,6 +72,10 @@ assert(app.includes("editLegalMaterial"), "Edicao de materiais de apoio ausente.
 assert(app.includes("renderLegalMaterialGroups"), "Separacao de leis, tabelas, anotacoes e imagens ausente.");
 assert(app.includes("questionPrecisionRange"), "Estado do periodo de precisao ausente.");
 assert(app.includes("renderQuestionReviewReminders"), "Renderizacao dos lembretes de revisao ausente.");
+assert(app.includes("syncScopedTopicSelect(\"#questionSubject\", \"#questionTopic\""), "Assuntos de questoes nao estao vinculados a materia.");
+assert(app.includes("[\"#questionSubject\", \"#questionTopic\", null, { includeEmpty: false }]"), "Evento de materia em questoes ausente.");
+assert(app.includes("state.studyLogs = state.studyLogs.map((log) => (log.topicId === id"), "Estudos devem ser preservados na materia ao excluir assunto.");
+assert(!app.includes("state.studyLogs = state.studyLogs.filter((log) => log.topicId !== id)"), "Excluir assunto nao pode apagar estudos registrados.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");

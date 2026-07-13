@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260710-question-precision" />
+    <link rel="stylesheet" href="styles.css?v=20260712-preserve-topic-records" />
   </head>
   <body>
     <div class="app-shell">
@@ -386,10 +386,16 @@
                   <h3 id="questionFormTitle">Novo lançamento</h3>
                 </div>
               </div>
-              <label>
-                Assunto
-                <select id="questionTopic" required></select>
-              </label>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="questionSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="questionTopic" required></select>
+                </label>
+              </div>
               <div class="split-inputs">
                 <label>
                   Acertos
@@ -1547,7 +1553,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260710-question-precision"></script>
-    <script src="app.js?v=20260710-question-precision"></script>
+    <script src="supabase-config.js?v=20260712-preserve-topic-records"></script>
+    <script src="app.js?v=20260712-preserve-topic-records"></script>
   </body>
 </html>

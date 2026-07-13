@@ -2143,6 +2143,7 @@ async function logoutProfile() {
 
 function renderSelectors() {
   populateSubjectSelect($("#topicSubject"));
+  populateSubjectSelect($("#questionSubject"));
   populateSubjectSelect($("#timerSubject"));
   populateSubjectSelect($("#studySubject"));
   populateSubjectSelect($("#flashcardSubject"));
@@ -2153,7 +2154,7 @@ function renderSelectors() {
   populateCompetitionSelect($("#studyCompetition"));
   populateCompetitionSelect($("#competitionSelect"), { includeEmpty: false });
 
-  populateTopicSelect($("#questionTopic"));
+  populateTopicSelect($("#questionTopic"), { subjectId: $("#questionSubject")?.value || "" });
   populateTopicSelect($("#timerTopic"), { includeEmpty: true, subjectId: $("#timerSubject")?.value || "", emptyLabel: "Sem assunto específico" });
   populateTopicSelect($("#studyTopic"), { includeEmpty: true, subjectId: $("#studySubject")?.value || "", emptyLabel: "Sem assunto específico" });
   populateTopicSelect($("#flashcardTopic"), { includeEmpty: true, subjectId: $("#flashcardSubject")?.value || "", emptyLabel: "Sem assunto específico" });
@@ -2164,7 +2165,8 @@ function renderSelectors() {
 
   const subjectsDisabled = state.subjects.length === 0;
   const topicsDisabled = state.topics.length === 0;
-  $("#questionTopic").disabled = topicsDisabled;
+  $("#questionSubject").disabled = subjectsDisabled;
+  $("#questionTopic").disabled = topicsDisabled || !state.topics.some((topic) => topic.subjectId === $("#questionSubject")?.value);
   ["#timerSubject", "#studySubject", "#flashcardSubject"].forEach((selector) => {
     $(selector).disabled = subjectsDisabled;
   });
@@ -2181,14 +2183,17 @@ function renderSelectors() {
   });
 }
 
-function syncScopedTopicSelect(subjectSelector, topicSelector) {
+function syncScopedTopicSelect(subjectSelector, topicSelector, options = {}) {
   const subjectId = $(subjectSelector)?.value || "";
-  populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto específico" });
-}
-
-function syncScopedTopicSelect(subjectSelector, topicSelector) {
-  const subjectId = $(subjectSelector)?.value || "";
-  populateTopicSelect($(topicSelector), { includeEmpty: true, subjectId, emptyLabel: "Sem assunto especifico" });
+  const topicSelect = $(topicSelector);
+  populateTopicSelect(topicSelect, {
+    includeEmpty: options.includeEmpty !== false,
+    subjectId,
+    emptyLabel: options.emptyLabel || "Sem assunto específico",
+  });
+  if (options.includeEmpty === false && topicSelect) {
+    topicSelect.disabled = !state.topics.some((topic) => topic.subjectId === subjectId);
+  }
 }
 
 function renderDashboard() {
@@ -3850,6 +3855,7 @@ function updateQuestionFormMode() {
 function resetQuestionForm() {
   state.ui.activeQuestionEditId = "";
   $("#questionForm").reset();
+  syncScopedTopicSelect("#questionSubject", "#questionTopic", { includeEmpty: false });
   $("#questionCorrect").value = 0;
   $("#questionWrong").value = 0;
   $("#questionDate").value = todayISO();
@@ -3859,6 +3865,8 @@ function resetQuestionForm() {
 function fillQuestionForm(log) {
   if (!log) return;
   state.ui.activeQuestionEditId = log.id;
+  $("#questionSubject").value = getEntrySubjectId(log) || getTopic(log.topicId)?.subjectId || "";
+  syncScopedTopicSelect("#questionSubject", "#questionTopic", { includeEmpty: false });
   $("#questionTopic").value = log.topicId || "";
   $("#questionCorrect").value = Number(log.correct || 0);
   $("#questionWrong").value = Number(log.wrong || 0);
@@ -6920,16 +6928,17 @@ function attachEvents() {
 
   $("#questionForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const topicId = $("#questionTopic").value;
+    const { subjectId, topicId } = resolveSubjectTopic("#questionSubject", "#questionTopic");
     const correct = Number($("#questionCorrect").value);
     const wrong = Number($("#questionWrong").value);
-    if (!topicId || correct + wrong <= 0) {
+    if (!subjectId || !topicId || correct + wrong <= 0) {
       showToast("Informe ao menos uma questão.");
       return;
     }
     const existing = state.questionLogs.find((log) => log.id === state.ui.activeQuestionEditId);
     const payload = {
       id: existing?.id || uid(),
+      subjectId,
       topicId,
       correct,
       wrong,
@@ -7340,14 +7349,15 @@ function attachEvents() {
   $("#resetTimerBtn").addEventListener("click", resetTimer);
   $("#finishTimerBtn").addEventListener("click", finishTimerManually);
   [
+    ["#questionSubject", "#questionTopic", null, { includeEmpty: false }],
     ["#timerSubject", "#timerTopic", renderPomodoro],
     ["#studySubject", "#studyTopic"],
     ["#flashcardSubject", "#flashcardTopic"],
     ["#caseSubject", "#caseTopic"],
     ["#legalMaterialSubject", "#legalMaterialTopic"],
-  ].forEach(([subjectSelector, topicSelector, afterSync]) => {
+  ].forEach(([subjectSelector, topicSelector, afterSync, syncOptions]) => {
     $(subjectSelector).addEventListener("change", () => {
-      syncScopedTopicSelect(subjectSelector, topicSelector);
+      syncScopedTopicSelect(subjectSelector, topicSelector, syncOptions || {});
       if (afterSync) afterSync();
     });
   });
@@ -7700,17 +7710,19 @@ function handleAction(action) {
   }
 
   if (type === "deleteTopic") {
-    if (!window.confirm("Excluir este assunto e seus lançamentos?")) return;
+    const topic = state.topics.find((item) => item.id === id);
+    if (!topic) return;
+    if (!window.confirm("Excluir este assunto? Os estudos, questões e flashcards vinculados serão mantidos na matéria.")) return;
     const shouldResetTopicForm = state.ui.activeTopicEditId === id;
     if (shouldResetTopicForm) state.ui.activeTopicEditId = "";
     state.topics = state.topics.filter((topic) => topic.id !== id);
-    state.questionLogs = state.questionLogs.filter((log) => log.topicId !== id);
-    state.studyLogs = state.studyLogs.filter((log) => log.topicId !== id);
-    state.flashcards = state.flashcards.filter((card) => card.topicId !== id);
-    state.legalMaterials = state.legalMaterials.map((item) => (item.topicId === id ? { ...item, topicId: "" } : item));
+    state.questionLogs = state.questionLogs.map((log) => (log.topicId === id ? { ...log, subjectId: log.subjectId || topic.subjectId, topicId: "" } : log));
+    state.studyLogs = state.studyLogs.map((log) => (log.topicId === id ? { ...log, subjectId: log.subjectId || topic.subjectId, topicId: "" } : log));
+    state.flashcards = state.flashcards.map((card) => (card.topicId === id ? { ...card, subjectId: card.subjectId || topic.subjectId, topicId: "" } : card));
+    state.legalMaterials = state.legalMaterials.map((item) => (item.topicId === id ? { ...item, subjectId: getEntrySubjectId(item) || topic.subjectId, topicId: "" } : item));
     if (state.flashcards.every((card) => card.id !== state.ui.activeFlashcardId)) state.ui.activeFlashcardId = "";
     Object.keys(state.cases).forEach((court) => {
-      state.cases[court] = state.cases[court].map((item) => (item.topicId === id ? { ...item, topicId: "" } : item));
+      state.cases[court] = state.cases[court].map((item) => (item.topicId === id ? { ...item, subjectId: getEntrySubjectId(item) || topic.subjectId, topicId: "" } : item));
     });
     saveState();
     if (shouldResetTopicForm) resetTopicForm();

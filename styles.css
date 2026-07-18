@@ -2359,6 +2359,27 @@ td {
   border-bottom: 1px solid var(--line);
 }
 
+.case-search-scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.case-search-scope-row .segmented {
+  padding: 3px;
+}
+
+.case-search-scope-row .segment {
+  min-width: auto;
+  padding: 6px 9px;
+  font-size: 0.82rem;
+}
+
 .filter-footer {
   display: flex;
   align-items: center;

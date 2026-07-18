@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260712-preserve-topic-records"), "Cache do HTML nao foi atualizado para preservar registros ao excluir assunto.");
-assert(html.includes("supabase-config.js?v=20260712-preserve-topic-records"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260717-case-court-search"), "Cache do HTML nao foi atualizado para busca/cadastro de jurisprudencias.");
+assert(html.includes("supabase-config.js?v=20260717-case-court-search"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -45,6 +45,8 @@ assert(html.includes("reportCustomForm"), "Periodo customizado dos relatorios au
 assert(html.includes("data-question-precision-range=\"day\""), "Filtro diario de precisao ausente.");
 assert(html.includes("questionPrecisionSummary"), "Resumo de precisao por periodo ausente.");
 assert(html.includes("questionReviewReminders"), "Lembretes de revisao por pior desempenho ausentes.");
+assert(html.includes("caseCourtSelect"), "Seletor de tribunal no cadastro de jurisprudencia ausente.");
+assert(html.includes("data-case-search-scope=\"all\""), "Busca geral STJ + STF ausente.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -76,6 +78,15 @@ assert(app.includes("syncScopedTopicSelect(\"#questionSubject\", \"#questionTopi
 assert(app.includes("[\"#questionSubject\", \"#questionTopic\", null, { includeEmpty: false }]"), "Evento de materia em questoes ausente.");
 assert(app.includes("state.studyLogs = state.studyLogs.map((log) => (log.topicId === id"), "Estudos devem ser preservados na materia ao excluir assunto.");
 assert(!app.includes("state.studyLogs = state.studyLogs.filter((log) => log.topicId !== id)"), "Excluir assunto nao pode apagar estudos registrados.");
+assert(app.includes("function looksLikeLegalArticleText"), "Deteccao de texto juridico para evitar tabela automatica ausente.");
+assert(app.includes("function parsePlainTextTableRows"), "Deteccao criteriosa de tabela em texto ausente.");
+assert(app.includes("bindRichPasteGuards"), "Protecao de colagem em todos os editores ricos ausente.");
+assert(app.includes("FORM_DRAFT_KEY_PREFIX"), "Rascunho local dos formularios ausente.");
+assert(app.includes("STATE_BACKUP_KEY_PREFIX"), "Backup local defensivo do estado ausente.");
+assert(app.includes("bindUnsavedDraftTracking"), "Monitoramento de rascunhos nao foi instalado.");
+assert(app.includes("caseFormCourt"), "Tribunal do formulario de jurisprudencia nao foi separado da aba ativa.");
+assert(app.includes("caseSearchScope"), "Escopo da busca de jurisprudencias ausente.");
+assert(app.includes("activeCaseEditCourt"), "Edicao de jurisprudencia deve preservar o tribunal original.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");

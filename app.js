@@ -3,6 +3,7 @@ const PROFILE_KEY_PREFIX = "ymEstudos.profile.";
 const ACTIVE_SESSION_PROFILE_KEY = "ymEstudos.activeSessionProfile.v1";
 const SUPABASE_PROFILE_PREFIX = "supabase-";
 const REMOTE_SAVE_DEBOUNCE_MS = 900;
+const FORM_DRAFT_DEBOUNCE_MS = 500;
 const SOURCE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TEXT_LIMIT = 180000;
 const LEGAL_IMAGE_MAX_BYTES = 2_500_000;
@@ -11,6 +12,8 @@ const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.mi
 const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minuscula, numero e simbolo.";
 const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
+const STATE_BACKUP_KEY_PREFIX = "ymEstudos.stateBackup.";
+const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
 
 const titles = {
   dashboard: "Painel",
@@ -36,6 +39,9 @@ const uid = () => {
 };
 
 let state = loadState();
+let formDraftTimer = null;
+let restoringFormDraft = false;
+let draftRestoreNoticeShown = false;
 let timer = {
   interval: null,
   running: false,
@@ -718,6 +724,24 @@ function profileStorageKey(profileId) {
   return `${PROFILE_KEY_PREFIX}${profileId}.v1`;
 }
 
+function stateBackupStorageKey(profileId) {
+  return `${STATE_BACKUP_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
+}
+
+function formDraftStorageKey(profileId = state.profile?.id) {
+  return `${FORM_DRAFT_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
+}
+
+function safeStorageSet(storage, key, value) {
+  try {
+    storage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn("Falha ao gravar armazenamento local:", error);
+    return false;
+  }
+}
+
 function normalizeProfileLogin(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -952,7 +976,9 @@ function normalizeState(candidate, fallbackProfileId = "") {
       ui: {
         view: candidate.ui?.view || "dashboard",
         theme: candidate.ui?.theme === "dark" ? "dark" : "light",
-        caseCourt: candidate.ui?.caseCourt || "STJ",
+        caseCourt: ["STJ", "STF"].includes(candidate.ui?.caseCourt) ? candidate.ui.caseCourt : "STJ",
+        caseFormCourt: ["STJ", "STF"].includes(candidate.ui?.caseFormCourt) ? candidate.ui.caseFormCourt : ["STJ", "STF"].includes(candidate.ui?.caseCourt) ? candidate.ui.caseCourt : "STJ",
+        caseSearchScope: ["current", "all"].includes(candidate.ui?.caseSearchScope) ? candidate.ui.caseSearchScope : "current",
         caseSearch: typeof candidate.ui?.caseSearch === "string" ? candidate.ui.caseSearch : "",
         caseSubjectFilter: typeof candidate.ui?.caseSubjectFilter === "string" ? candidate.ui.caseSubjectFilter : "",
         caseTopicFilter: typeof candidate.ui?.caseTopicFilter === "string" ? candidate.ui.caseTopicFilter : "",
@@ -983,6 +1009,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeSourceEditId: candidate.ui?.activeSourceEditId || "",
       activeNoteId: candidate.ui?.activeNoteId || "",
       activeCaseEditId: candidate.ui?.activeCaseEditId || "",
+      activeCaseEditCourt: ["STJ", "STF"].includes(candidate.ui?.activeCaseEditCourt) ? candidate.ui.activeCaseEditCourt : "",
       activeFlashcardEditId: candidate.ui?.activeFlashcardEditId || "",
       activeStudyEditId: candidate.ui?.activeStudyEditId || "",
       activeQuestionEditId: candidate.ui?.activeQuestionEditId || "",
@@ -1021,6 +1048,8 @@ function createEmptyState(profile = {}) {
         view: "dashboard",
         theme: "light",
         caseCourt: "STJ",
+        caseFormCourt: "STJ",
+        caseSearchScope: "current",
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
@@ -1051,6 +1080,7 @@ function createEmptyState(profile = {}) {
       activeSourceEditId: "",
       activeNoteId: "",
       activeCaseEditId: "",
+      activeCaseEditCourt: "",
       activeFlashcardEditId: "",
       activeStudyEditId: "",
       activeQuestionEditId: "",
@@ -1165,6 +1195,8 @@ function createSeedState() {
         view: "dashboard",
         theme: state?.ui?.theme === "dark" ? "dark" : "light",
         caseCourt: "STJ",
+        caseFormCourt: "STJ",
+        caseSearchScope: "current",
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
@@ -1212,9 +1244,20 @@ function saveState(options = {}) {
   profiles.push(profileRecord);
   profiles.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-  sessionStorage.setItem(ACTIVE_SESSION_PROFILE_KEY, state.profile.id);
-  localStorage.setItem(profileStorageKey(state.profile.id), JSON.stringify(state));
-  localStorage.setItem(PROFILE_ROOT_KEY, JSON.stringify({ activeProfileId: "", profiles }));
+  const serializedState = JSON.stringify(state);
+  const serializedRoot = JSON.stringify({ activeProfileId: "", profiles });
+  const profileKey = profileStorageKey(state.profile.id);
+  const backupKey = stateBackupStorageKey(state.profile.id);
+  const sessionWritten = safeStorageSet(sessionStorage, ACTIVE_SESSION_PROFILE_KEY, state.profile.id);
+  const stateWritten = safeStorageSet(localStorage, profileKey, serializedState);
+  const rootWritten = safeStorageSet(localStorage, PROFILE_ROOT_KEY, serializedRoot);
+  safeStorageSet(sessionStorage, backupKey, serializedState);
+  safeStorageSet(localStorage, backupKey, serializedState);
+  if (!sessionWritten || !stateWritten || !rootWritten) {
+    setSyncStatus("error", "Falha ao salvar localmente. Uma copia de seguranca foi tentada nesta sessao.");
+    showToast("Falha ao salvar localmente. Confira espaco do navegador; tente exportar um backup.");
+    return;
+  }
   if (options.syncRemote !== false) queueRemoteSave();
   else if (!isRemoteSessionActive()) setSyncStatus("local");
 }
@@ -1555,6 +1598,7 @@ function openGlobalSearchResult(button) {
 
   if (type === "case") {
     state.ui.caseCourt = button.dataset.court || state.ui.caseCourt || "STJ";
+    state.ui.caseSearchScope = "current";
     state.ui.caseSearch = "";
     state.ui.caseSubjectFilter = button.dataset.subjectId || "";
     state.ui.caseTopicFilter = button.dataset.topicId || "";
@@ -1804,6 +1848,7 @@ function render() {
   renderPomodoro();
   renderReports();
   renderAccountPanel();
+  restoreUnsavedFormDrafts();
 }
 
 function renderNavigation() {
@@ -2160,6 +2205,10 @@ function renderSelectors() {
   populateTopicSelect($("#flashcardTopic"), { includeEmpty: true, subjectId: $("#flashcardSubject")?.value || "", emptyLabel: "Sem assunto específico" });
   populateTopicSelect($("#caseTopic"), { includeEmpty: true, subjectId: $("#caseSubject")?.value || "", emptyLabel: "Sem assunto específico" });
   populateTopicSelect($("#legalMaterialTopic"), { includeEmpty: true, subjectId: $("#legalMaterialSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  if ($("#caseCourtSelect") && !state.ui.activeCaseEditId) {
+    $("#caseCourtSelect").value = normalizeCaseCourtValue(state.ui.caseFormCourt || state.ui.caseCourt);
+    updateCaseCourtFormLabel();
+  }
   populateFlashcardReviewSelectors();
   populateCaseFilterSelectors();
 
@@ -4798,23 +4847,60 @@ function sanitizeNoteHTML(html) {
   return wrapper.innerHTML;
 }
 
+function normalizeCaseCourtValue(value) {
+  return ["STJ", "STF"].includes(value) ? value : "STJ";
+}
+
+function updateCaseCourtFormLabel() {
+  const label = $("#caseCourtLabel");
+  if (!label) return;
+  const selectedCourt = normalizeCaseCourtValue($("#caseCourtSelect")?.value || state.ui.activeCaseEditCourt || state.ui.caseFormCourt || state.ui.caseCourt);
+  label.textContent = state.ui.activeCaseEditId ? `Editando ${selectedCourt}` : `Salvar em ${selectedCourt}`;
+}
+
 function renderCases() {
-  const court = state.ui.caseCourt;
-  $$(".segment[data-case-tab]").forEach((button) => button.classList.toggle("active", button.dataset.caseTab === court));
-  $("#caseCourtLabel").textContent = court;
-  $("#caseListTitle").textContent = court;
+  const court = normalizeCaseCourtValue(state.ui.caseCourt);
+  const scope = state.ui.caseSearchScope === "all" ? "all" : "current";
+  state.ui.caseCourt = court;
+  state.ui.caseSearchScope = scope;
+
+  $$(".segment[data-case-tab]").forEach((button) => {
+    const active = button.dataset.caseTab === court;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $$("[data-case-search-scope]").forEach((button) => {
+    const active = button.dataset.caseSearchScope === scope;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  updateCaseCourtFormLabel();
+  $("#caseListScopeLabel").textContent = scope === "all" ? "Pesquisa geral" : "Aba atual";
+  $("#caseListTitle").textContent = scope === "all" ? "STJ + STF" : court;
   populateCaseFilterSelectors();
 
-  const allItems = [...state.cases[court]];
-  const items = allItems.filter(caseMatchesFilters).sort((a, b) => b.date.localeCompare(a.date));
+  const allItems =
+    scope === "all"
+      ? ["STJ", "STF"].flatMap((courtName) => (state.cases[courtName] || []).map((item) => ({ item, court: courtName })))
+      : (state.cases[court] || []).map((item) => ({ item, court }));
+  const items = allItems
+    .filter(({ item, court: itemCourt }) => caseMatchesFilters(item, itemCourt))
+    .sort((a, b) => String(b.item.date || "").localeCompare(String(a.item.date || "")));
   const summary = $("#caseFilterSummary");
   if (summary) {
-    summary.textContent = caseFilterSummary(items.length, allItems.length, court);
+    summary.textContent = caseFilterSummary(items.length, allItems.length, scope === "all" ? "STJ + STF" : court);
   }
   updateCaseFormMode();
   $("#caseList").innerHTML = items.length
-    ? items.map((item) => renderCaseCard(item, court)).join("")
-    : `<div class="empty-state">${allItems.length ? "Nenhuma jurisprudência encontrada com esses filtros." : "Nenhuma jurisprudência cadastrada nesta aba."}</div>`;
+    ? items.map(({ item, court: itemCourt }) => renderCaseCard(item, itemCourt)).join("")
+    : `<div class="empty-state">${
+        allItems.length
+          ? "Nenhuma jurisprudência encontrada com esses filtros."
+          : scope === "all"
+            ? "Nenhuma jurisprudência cadastrada em STJ ou STF."
+            : "Nenhuma jurisprudência cadastrada nesta aba."
+      }</div>`;
   renderLegalMaterials();
 }
 
@@ -4826,7 +4912,7 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-function caseMatchesFilters(item) {
+function caseMatchesFilters(item, court = state.ui.caseCourt) {
   const topic = getTopic(item.topicId);
   const subjectId = getEntrySubjectId(item);
   const subject = getSubject(subjectId);
@@ -4844,6 +4930,7 @@ function caseMatchesFilters(item) {
       item.theme,
       richTextToPlain(item.summary),
       item.source,
+      court,
       topic?.name,
       subject?.name,
       getEntryScopeLabel(item),
@@ -4878,19 +4965,27 @@ function updateCaseFormMode() {
   if (cancel) cancel.classList.toggle("hidden", !editing);
 }
 
-function resetCaseForm() {
+function resetCaseForm(options = {}) {
+  const nextCourt = normalizeCaseCourtValue(options.preserveCourt ? $("#caseCourtSelect")?.value || state.ui.caseFormCourt || state.ui.caseCourt : state.ui.caseCourt);
   $("#caseForm").reset();
   $("#caseSummaryEditor").innerHTML = "";
   $("#caseTags").value = "";
   $("#caseDate").value = todayISO();
+  $("#caseCourtSelect").value = nextCourt;
+  state.ui.caseFormCourt = nextCourt;
   state.ui.activeCaseEditId = "";
+  state.ui.activeCaseEditCourt = "";
+  updateCaseCourtFormLabel();
   updateCaseFormMode();
 }
 
 function fillCaseForm(item, court) {
-  state.ui.caseCourt = court;
+  const selectedCourt = normalizeCaseCourtValue(court);
   state.ui.activeCaseEditId = item.id;
+  state.ui.activeCaseEditCourt = selectedCourt;
+  state.ui.caseFormCourt = selectedCourt;
   $("#caseTitle").value = item.title || "";
+  $("#caseCourtSelect").value = selectedCourt;
   $("#caseSubject").value = getEntrySubjectId(item);
   syncScopedTopicSelect("#caseSubject", "#caseTopic");
   $("#caseTopic").value = item.topicId || "";
@@ -4899,6 +4994,7 @@ function fillCaseForm(item, court) {
   $("#caseSummaryEditor").innerHTML = renderRichText(item.summary || "");
   $("#caseTags").value = hashtagsToInput(item.tags || []);
   $("#caseSource").value = item.source || "";
+  updateCaseCourtFormLabel();
   updateCaseFormMode();
 }
 
@@ -5027,13 +5123,67 @@ function extractTablesHTML(html) {
   return tables.length ? sanitizeNoteHTML(tables.map((table) => table.outerHTML).join("")) : "";
 }
 
-function plainTextTableToHTML(text) {
-  const rows = String(text || "")
+function normalizeTableDetectionText(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function looksLikeLegalArticleText(text) {
+  const normalized = normalizeTableDetectionText(text);
+  return (
+    /\b(art\.?|artigo|arts\.?|lei|codigo|constituicao|caput|inciso|alineas?|paragrafo)\b/.test(normalized) ||
+    /§+\s*\d*/.test(normalized) ||
+    /\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx)\s*,\s*(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\b/.test(normalized) ||
+    /(^|\n)\s*(?:i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi|xvii|xviii|xix|xx)\s*[-.)]/m.test(normalized)
+  );
+}
+
+function splitPlainTableRow(line, separator) {
+  const cells = String(line || "").split(separator).map((cell) => cell.trim());
+  return separator === "|" ? cells.filter(Boolean) : cells;
+}
+
+function parsePlainTextTableRows(text) {
+  const raw = String(text || "");
+  const lines = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .map(splitLegalMaterialRow)
-    .filter((row) => row.length > 1);
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const legalText = looksLikeLegalArticleText(raw);
+  const candidates = [
+    { separator: "\t", avoidLegal: false },
+    { separator: "|", avoidLegal: false },
+    { separator: ";", avoidLegal: true },
+    { separator: ",", avoidLegal: true },
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.avoidLegal && legalText) continue;
+    const rows = lines
+      .filter((line) => line.includes(candidate.separator))
+      .map((line) => splitPlainTableRow(line, candidate.separator))
+      .filter((row) => row.length > 1 && row.some(Boolean));
+    if (rows.length < 2) continue;
+
+    const counts = rows.map((row) => row.length);
+    const dominantCount = counts
+      .slice()
+      .sort((a, b) => counts.filter((count) => count === b).length - counts.filter((count) => count === a).length)[0];
+    const consistentRows = rows.filter((row) => row.length === dominantCount);
+    if (dominantCount > 1 && consistentRows.length >= 2 && consistentRows.length / rows.length >= 0.75) {
+      return consistentRows;
+    }
+  }
+
+  return [];
+}
+
+function plainTextTableToHTML(text) {
+  const rows = parsePlainTextTableRows(text);
   if (!rows.length) return "";
   const [header, ...body] = rows;
   return `
@@ -5180,7 +5330,7 @@ function insertTextIntoTextarea(textarea, text) {
 async function handleRichDocumentPaste(event, options = {}) {
   const clipboard = event.clipboardData;
   if (!clipboard) return;
-  const editor = $(options.editorSelector);
+  const editor = options.editorElement || $(options.editorSelector);
   const imageItem = Array.from(clipboard.items || []).find((item) => item.kind === "file" && item.type.startsWith("image/"));
   if (imageItem) {
     const file = imageItem.getAsFile();
@@ -5226,6 +5376,240 @@ async function handleLegalMaterialContentPaste(event) {
 
 async function handleCaseSummaryPaste(event) {
   await handleRichDocumentPaste(event, { editorSelector: "#caseSummaryEditor" });
+}
+
+function bindRichPasteGuards() {
+  [
+    ["#legalMaterialContentEditor", { legalMaterialMode: true }],
+    ["#caseSummaryEditor", {}],
+    ["#flashcardFrontEditor", {}],
+    ["#flashcardBackEditor", {}],
+    ["#sourceContentEditor", {}],
+    ["#noteEditor", {}],
+  ].forEach(([selector, options]) => {
+    const editor = $(selector);
+    if (!editor) return;
+    editor.addEventListener("paste", (event) => {
+      handleRichDocumentPaste(event, { ...options, editorSelector: selector });
+    });
+  });
+
+  document.addEventListener("paste", (event) => {
+    const reader = event.target?.closest?.("#activeSourceReader");
+    if (reader) handleRichDocumentPaste(event, { editorElement: reader });
+  });
+}
+
+function getDraftInputValue(selector) {
+  return $(selector)?.value || "";
+}
+
+function getDraftEditorHTML(selector) {
+  return sanitizeNoteHTML($(selector)?.innerHTML.trim() || "");
+}
+
+function draftHasContent(draft) {
+  const ignoredKeys = new Set(["activeId", "type", "subjectId", "topicId", "court", "date", "priority", "difficulty", "autoSync", "sourceId"]);
+  return Object.entries(draft || {}).some(([key, value]) => {
+    if (ignoredKeys.has(key)) return false;
+    if (typeof value !== "string") return Boolean(value);
+    return richTextHasContent(value) || value.trim().length > 0;
+  });
+}
+
+function collectUnsavedFormDrafts() {
+  const drafts = {};
+  const legalMaterial = {
+    activeId: state.ui.activeLegalMaterialEditId || "",
+    type: getDraftInputValue("#legalMaterialType"),
+    subjectId: getDraftInputValue("#legalMaterialSubject"),
+    topicId: getDraftInputValue("#legalMaterialTopic"),
+    title: getDraftInputValue("#legalMaterialTitle"),
+    reference: getDraftInputValue("#legalMaterialReference"),
+    source: getDraftInputValue("#legalMaterialSource"),
+    content: getDraftEditorHTML("#legalMaterialContentEditor"),
+  };
+  if (draftHasContent(legalMaterial)) drafts.legalMaterial = legalMaterial;
+
+  const caseDraft = {
+    activeId: state.ui.activeCaseEditId || "",
+    court: getDraftInputValue("#caseCourtSelect") || state.ui.activeCaseEditCourt || state.ui.caseCourt || "STJ",
+    title: getDraftInputValue("#caseTitle"),
+    subjectId: getDraftInputValue("#caseSubject"),
+    topicId: getDraftInputValue("#caseTopic"),
+    date: getDraftInputValue("#caseDate"),
+    theme: getDraftInputValue("#caseTheme"),
+    tags: getDraftInputValue("#caseTags"),
+    source: getDraftInputValue("#caseSource"),
+    content: getDraftEditorHTML("#caseSummaryEditor"),
+  };
+  if (draftHasContent(caseDraft)) drafts.case = caseDraft;
+
+  const flashcard = {
+    activeId: state.ui.activeFlashcardEditId || "",
+    subjectId: getDraftInputValue("#flashcardSubject"),
+    topicId: getDraftInputValue("#flashcardTopic"),
+    priority: getDraftInputValue("#flashcardPriority"),
+    difficulty: getDraftInputValue("#flashcardDifficulty"),
+    front: getDraftEditorHTML("#flashcardFrontEditor"),
+    back: getDraftEditorHTML("#flashcardBackEditor"),
+  };
+  if (draftHasContent(flashcard)) drafts.flashcard = flashcard;
+
+  const source = {
+    activeId: state.ui.activeSourceEditId || "",
+    title: getDraftInputValue("#sourceTitle"),
+    url: getDraftInputValue("#sourceUrl"),
+    category: getDraftInputValue("#sourceCategorySelect") || getDraftInputValue("#sourceCategoryNew"),
+    autoSync: Boolean($("#sourceAutoSync")?.checked),
+    content: getDraftEditorHTML("#sourceContentEditor"),
+  };
+  if (draftHasContent(source)) drafts.source = source;
+
+  const note = {
+    activeId: state.ui.activeNoteId || "",
+    title: getDraftInputValue("#noteTitle"),
+    category: getDraftInputValue("#noteCategorySelect") || getDraftInputValue("#noteCategoryNew"),
+    sourceId: getDraftInputValue("#noteSource"),
+    content: getDraftEditorHTML("#noteEditor"),
+  };
+  if (draftHasContent(note)) drafts.note = note;
+
+  return { updatedAt: new Date().toISOString(), drafts };
+}
+
+function writeUnsavedFormDrafts() {
+  if (restoringFormDraft || !state.profile?.id || !isProfileAuthenticated()) return;
+  const payload = collectUnsavedFormDrafts();
+  const key = formDraftStorageKey();
+  if (!Object.keys(payload.drafts).length) {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+    return;
+  }
+  safeStorageSet(localStorage, key, JSON.stringify(payload));
+}
+
+function saveUnsavedFormDrafts() {
+  if (restoringFormDraft) return;
+  window.clearTimeout(formDraftTimer);
+  formDraftTimer = window.setTimeout(writeUnsavedFormDrafts, FORM_DRAFT_DEBOUNCE_MS);
+}
+
+function readUnsavedFormDrafts() {
+  try {
+    const raw = localStorage.getItem(formDraftStorageKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearFormDraft(section) {
+  const payload = readUnsavedFormDrafts();
+  if (!payload?.drafts) return;
+  delete payload.drafts[section];
+  try {
+    if (Object.keys(payload.drafts).length) localStorage.setItem(formDraftStorageKey(), JSON.stringify(payload));
+    else localStorage.removeItem(formDraftStorageKey());
+  } catch {}
+}
+
+function restoreDraftField(selector, value) {
+  const element = $(selector);
+  if (element && value) element.value = value;
+}
+
+function restoreDraftEditor(selector, html) {
+  const editor = $(selector);
+  if (editor && richTextHasContent(html || "") && !richTextHasContent(editor.innerHTML || "")) {
+    editor.innerHTML = sanitizeNoteHTML(html);
+  }
+}
+
+function restoreUnsavedFormDrafts() {
+  if (restoringFormDraft || !state.profile?.id || !isProfileAuthenticated()) return;
+  const payload = readUnsavedFormDrafts();
+  if (!payload?.drafts || !Object.keys(payload.drafts).length) return;
+  restoringFormDraft = true;
+  try {
+    const legal = payload.drafts.legalMaterial;
+    if (legal) {
+      restoreDraftField("#legalMaterialType", legal.type);
+      restoreDraftField("#legalMaterialSubject", legal.subjectId);
+      syncScopedTopicSelect("#legalMaterialSubject", "#legalMaterialTopic");
+      restoreDraftField("#legalMaterialTopic", legal.topicId);
+      restoreDraftField("#legalMaterialTitle", legal.title);
+      restoreDraftField("#legalMaterialReference", legal.reference);
+      restoreDraftField("#legalMaterialSource", legal.source);
+      restoreDraftEditor("#legalMaterialContentEditor", legal.content);
+    }
+
+    const caseDraft = payload.drafts.case;
+    if (caseDraft) {
+      state.ui.caseFormCourt = normalizeCaseCourtValue(caseDraft.court || state.ui.caseCourt);
+      restoreDraftField("#caseCourtSelect", normalizeCaseCourtValue(caseDraft.court || state.ui.caseCourt));
+      restoreDraftField("#caseTitle", caseDraft.title);
+      restoreDraftField("#caseSubject", caseDraft.subjectId);
+      syncScopedTopicSelect("#caseSubject", "#caseTopic");
+      restoreDraftField("#caseTopic", caseDraft.topicId);
+      restoreDraftField("#caseDate", caseDraft.date);
+      restoreDraftField("#caseTheme", caseDraft.theme);
+      restoreDraftField("#caseTags", caseDraft.tags);
+      restoreDraftField("#caseSource", caseDraft.source);
+      restoreDraftEditor("#caseSummaryEditor", caseDraft.content);
+      updateCaseCourtFormLabel();
+    }
+
+    const flashcard = payload.drafts.flashcard;
+    if (flashcard) {
+      restoreDraftField("#flashcardSubject", flashcard.subjectId);
+      syncScopedTopicSelect("#flashcardSubject", "#flashcardTopic");
+      restoreDraftField("#flashcardTopic", flashcard.topicId);
+      restoreDraftField("#flashcardPriority", flashcard.priority);
+      restoreDraftField("#flashcardDifficulty", flashcard.difficulty);
+      restoreDraftEditor("#flashcardFrontEditor", flashcard.front);
+      restoreDraftEditor("#flashcardBackEditor", flashcard.back);
+    }
+
+    const source = payload.drafts.source;
+    if (source) {
+      restoreDraftField("#sourceTitle", source.title);
+      restoreDraftField("#sourceUrl", source.url);
+      if (source.category && !$("#sourceCategorySelect")?.value) setCategoryFields("source", source.category);
+      if ($("#sourceAutoSync")) $("#sourceAutoSync").checked = Boolean(source.autoSync);
+      restoreDraftEditor("#sourceContentEditor", source.content);
+    }
+
+    const note = payload.drafts.note;
+    if (note) {
+      restoreDraftField("#noteTitle", note.title);
+      if (note.category && !$("#noteCategorySelect")?.value) setCategoryFields("note", note.category);
+      restoreDraftField("#noteSource", note.sourceId);
+      restoreDraftEditor("#noteEditor", note.content);
+    }
+  } finally {
+    restoringFormDraft = false;
+  }
+  if (!draftRestoreNoticeShown) {
+    draftRestoreNoticeShown = true;
+    showToast("Rascunho local recuperado. Confira e salve para guardar definitivamente.");
+  }
+}
+
+function bindUnsavedDraftTracking() {
+  ["#legalMaterialForm", "#caseForm", "#flashcardForm", "#sourceForm", "#noteForm"].forEach((selector) => {
+    const form = $(selector);
+    if (!form) return;
+    form.addEventListener("input", saveUnsavedFormDrafts);
+    form.addEventListener("change", saveUnsavedFormDrafts);
+    form.addEventListener("paste", () => window.setTimeout(saveUnsavedFormDrafts, 0));
+  });
+  window.addEventListener("beforeunload", writeUnsavedFormDrafts);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") writeUnsavedFormDrafts();
+  });
 }
 
 async function writeClipboardWithHTML(html, text) {
@@ -6418,6 +6802,9 @@ function finishTimerManually() {
 }
 
 function attachEvents() {
+  bindRichPasteGuards();
+  bindUnsavedDraftTracking();
+
   document.addEventListener("mousedown", (event) => {
     const editorButton = event.target.closest("[data-rich-command], [data-rich-highlight], [data-rich-color], [data-rich-preset-color], [data-highlight], [data-source-highlight], [data-reader-highlight]");
     if (editorButton) event.preventDefault();
@@ -6442,7 +6829,20 @@ function attachEvents() {
 
     const caseTab = event.target.closest("[data-case-tab]");
     if (caseTab) {
-      state.ui.caseCourt = caseTab.dataset.caseTab;
+      state.ui.caseCourt = normalizeCaseCourtValue(caseTab.dataset.caseTab);
+      state.ui.caseSearchScope = "current";
+      if (!state.ui.activeCaseEditId && $("#caseCourtSelect")) {
+        state.ui.caseFormCourt = state.ui.caseCourt;
+        $("#caseCourtSelect").value = state.ui.caseCourt;
+      }
+      saveState();
+      renderCases();
+      return;
+    }
+
+    const caseSearchScope = event.target.closest("[data-case-search-scope]");
+    if (caseSearchScope) {
+      state.ui.caseSearchScope = caseSearchScope.dataset.caseSearchScope === "all" ? "all" : "current";
       saveState();
       renderCases();
       return;
@@ -6579,6 +6979,13 @@ function attachEvents() {
     renderCases();
   });
 
+  $("#caseCourtSelect").addEventListener("change", (event) => {
+    state.ui.caseFormCourt = normalizeCaseCourtValue(event.target.value);
+    updateCaseCourtFormLabel();
+    saveState();
+    saveUnsavedFormDrafts();
+  });
+
   $("#caseSubjectFilter").addEventListener("change", (event) => {
     state.ui.caseSubjectFilter = event.target.value;
     state.ui.caseTopicFilter = "";
@@ -6654,6 +7061,7 @@ function attachEvents() {
   });
 
   $("#caseCancelEditBtn").addEventListener("click", () => {
+    clearFormDraft("case");
     resetCaseForm();
     saveState();
     renderCases();
@@ -6965,7 +7373,11 @@ function attachEvents() {
 
   $("#caseForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const court = state.ui.caseCourt;
+    const court = normalizeCaseCourtValue($("#caseCourtSelect").value || state.ui.caseFormCourt || state.ui.caseCourt);
+    state.ui.caseFormCourt = court;
+    const editCourt = normalizeCaseCourtValue(state.ui.activeCaseEditCourt || court);
+    state.cases[court] = state.cases[court] || [];
+    state.cases[editCourt] = state.cases[editCourt] || [];
     const { subjectId, topicId } = resolveSubjectTopic("#caseSubject", "#caseTopic");
     const summary = sanitizeNoteHTML($("#caseSummaryEditor").innerHTML.trim());
     const title = $("#caseTitle").value.trim();
@@ -6984,15 +7396,21 @@ function attachEvents() {
       tags: $("#caseTags").value,
       source: $("#caseSource").value.trim(),
     });
-    const existing = state.cases[court].find((item) => item.id === state.ui.activeCaseEditId);
+    const existing = state.cases[editCourt].find((item) => item.id === state.ui.activeCaseEditId);
     if (existing) {
       payload.id = existing.id;
-      Object.assign(existing, payload);
+      if (editCourt === court) {
+        Object.assign(existing, payload);
+      } else {
+        state.cases[editCourt] = state.cases[editCourt].filter((item) => item.id !== existing.id);
+        state.cases[court].push(payload);
+      }
     } else {
       state.cases[court].push(payload);
     }
-    resetCaseForm();
     saveState();
+    clearFormDraft("case");
+    resetCaseForm({ preserveCourt: true });
     render();
     showToast(existing ? "Jurisprudência atualizada." : `Jurisprudência do ${court} salva.`);
   });
@@ -7020,6 +7438,7 @@ function attachEvents() {
       state.legalMaterials.push(material);
     }
     saveState();
+    clearFormDraft("legalMaterial");
     resetLegalMaterialForm();
     render();
     showToast(existing ? `${legalMaterialTypeLabel(material.type)} atualizada.` : `${legalMaterialTypeLabel(material.type)} salva.`);
@@ -7032,17 +7451,10 @@ function attachEvents() {
   });
 
   $("#legalMaterialCancelEditBtn").addEventListener("click", () => {
+    clearFormDraft("legalMaterial");
     resetLegalMaterialForm();
     saveState();
     showToast("Edição do material cancelada.");
-  });
-
-  $("#legalMaterialContentEditor").addEventListener("paste", (event) => {
-    handleLegalMaterialContentPaste(event);
-  });
-
-  $("#caseSummaryEditor").addEventListener("paste", (event) => {
-    handleCaseSummaryPaste(event);
   });
 
   $("#timerSettingsForm").addEventListener("submit", (event) => {
@@ -7164,8 +7576,9 @@ function attachEvents() {
     }
     state.ui.activeFlashcardId = card.id;
     state.ui.flashcardAnswerOpen = false;
-    resetFlashcardForm();
     saveState();
+    clearFormDraft("flashcard");
+    resetFlashcardForm();
     render();
     showToast(existing ? "Flashcard atualizado." : "Flashcard salvo.");
   });
@@ -7186,6 +7599,7 @@ function attachEvents() {
   });
 
   $("#flashcardCancelEditBtn").addEventListener("click", () => {
+    clearFormDraft("flashcard");
     resetFlashcardForm();
     saveState();
     renderFlashcards();
@@ -7249,6 +7663,7 @@ function attachEvents() {
     }
     state.ui.activeSourceEditId = "";
     saveState();
+    clearFormDraft("source");
     resetSourceForm();
     renderNotes();
     showToast(existing ? "Fonte atualizada." : "Fonte salva.");
@@ -7262,6 +7677,7 @@ function attachEvents() {
   $("#cancelSourceEditBtn").addEventListener("click", () => {
     state.ui.activeSourceEditId = "";
     saveState();
+    clearFormDraft("source");
     resetSourceForm();
     renderNotes();
     showToast("Edição da fonte cancelada.");
@@ -7316,12 +7732,14 @@ function attachEvents() {
     }
 
     saveState();
+    clearFormDraft("note");
     resetNoteForm();
     renderNotes();
     showToast(existing ? "Anotação atualizada." : "Anotação salva.");
   });
 
   $("#noteCancelEditBtn").addEventListener("click", () => {
+    clearFormDraft("note");
     resetNoteForm();
     saveState();
     showToast("Edição da anotação cancelada.");
@@ -7791,8 +8209,10 @@ function handleAction(action) {
     const item = state.cases[court]?.find((caseItem) => caseItem.id === id);
     if (!item) return;
     state.ui.view = "jurisprudencias";
-    state.ui.caseCourt = court;
+    state.ui.caseCourt = normalizeCaseCourtValue(court);
+    state.ui.caseSearchScope = "current";
     state.ui.activeCaseEditId = id;
+    state.ui.activeCaseEditCourt = normalizeCaseCourtValue(court);
     saveState();
     render();
     fillCaseForm(item, court);
@@ -7805,7 +8225,7 @@ function handleAction(action) {
   if (type === "deleteCase") {
     const court = action.dataset.court;
     state.cases[court] = state.cases[court].filter((item) => item.id !== id);
-    if (state.ui.activeCaseEditId === id) {
+    if (state.ui.activeCaseEditId === id && (!state.ui.activeCaseEditCourt || state.ui.activeCaseEditCourt === court)) {
       resetCaseForm();
     }
     saveState();

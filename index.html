@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260712-preserve-topic-records" />
+    <link rel="stylesheet" href="styles.css?v=20260717-case-court-search" />
   </head>
   <body>
     <div class="app-shell">
@@ -492,6 +492,19 @@
               </label>
               <div class="split-inputs">
                 <label>
+                  Tribunal do julgado
+                  <select id="caseCourtSelect" required>
+                    <option value="STJ">STJ</option>
+                    <option value="STF">STF</option>
+                  </select>
+                </label>
+                <label>
+                  Data
+                  <input id="caseDate" type="date" required />
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
                   Matéria relacionada
                   <select id="caseSubject"></select>
                 </label>
@@ -500,10 +513,6 @@
                   <select id="caseTopic"></select>
                 </label>
               </div>
-              <label>
-                Data
-                <input id="caseDate" type="date" required />
-              </label>
               <label>
                 Tema ou classe
                 <input id="caseTheme" type="text" placeholder="Ex.: Tema 1199, ADI, REsp" />
@@ -555,7 +564,7 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Aba atual</p>
+                  <p class="eyebrow" id="caseListScopeLabel">Aba atual</p>
                   <h3 id="caseListTitle">STJ</h3>
                 </div>
               </div>
@@ -564,6 +573,13 @@
                   Buscar
                   <input id="caseSearch" type="search" placeholder="Título, tese, tema, matéria ou assunto" />
                 </label>
+                <div class="case-search-scope-row">
+                  <span>Pesquisar em</span>
+                  <div class="segmented compact-segmented" role="tablist" aria-label="Escopo da pesquisa">
+                    <button class="segment active" data-case-search-scope="current" type="button">Aba atual</button>
+                    <button class="segment" data-case-search-scope="all" type="button">STJ + STF</button>
+                  </div>
+                </div>
                 <div class="split-inputs">
                   <label>
                     Matéria
@@ -1553,7 +1569,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260712-preserve-topic-records"></script>
-    <script src="app.js?v=20260712-preserve-topic-records"></script>
+    <script src="supabase-config.js?v=20260717-case-court-search"></script>
+    <script src="app.js?v=20260717-case-court-search"></script>
   </body>
 </html>

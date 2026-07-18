@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260717-case-court-search" />
+    <link rel="stylesheet" href="styles.css?v=20260717-backup-review-report" />
   </head>
   <body>
     <div class="app-shell">
@@ -61,6 +61,7 @@
         </form>
 
         <div class="storage-actions">
+          <button class="button secondary" data-action="downloadBackup" type="button">Backup</button>
           <button class="button ghost" id="exportBtn" type="button">Exportar</button>
           <label class="button ghost import-label" for="importInput">
             Importar
@@ -108,6 +109,18 @@
           </div>
 
           <div class="stat-grid" id="statGrid"></div>
+
+          <section class="panel backup-shortcut-panel" id="backupShortcutPanel">
+            <div>
+              <p class="eyebrow">Segurança dos dados</p>
+              <strong>Faça backup antes de testar mudanças ou trocar de navegador</strong>
+              <span>O arquivo guarda matérias, pomodoros, questões, flashcards, fontes, leis, tabelas e anotações deste perfil.</span>
+            </div>
+            <div class="backup-shortcut-actions">
+              <button class="button secondary" data-action="downloadBackup" type="button">Baixar backup</button>
+              <button class="button ghost" data-view="conta" type="button">Restaurar backup</button>
+            </div>
+          </section>
 
           <section class="panel daily-review-panel">
             <div class="panel-header">
@@ -1494,6 +1507,16 @@
               </label>
             </div>
 
+            <div class="report-filter-row">
+              <label>
+                Concurso
+                <select id="reportCompetitionFilter">
+                  <option value="">Todos os concursos</option>
+                </select>
+              </label>
+              <span id="reportCompetitionHint">Mostrando todo o histórico do período.</span>
+            </div>
+
             <div class="report-stage">
               <button class="report-nav-button" data-report-shift="-1" type="button" aria-label="Período anterior">◀</button>
               <div class="report-chart-card">
@@ -1569,7 +1592,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260717-case-court-search"></script>
-    <script src="app.js?v=20260717-case-court-search"></script>
+    <script src="supabase-config.js?v=20260717-backup-review-report"></script>
+    <script src="app.js?v=20260717-backup-review-report"></script>
   </body>
 </html>

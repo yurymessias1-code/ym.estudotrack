@@ -338,7 +338,7 @@ button:disabled {
 
 .storage-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -653,6 +653,41 @@ button:disabled {
   gap: 14px;
   margin-bottom: 18px;
   padding: 16px;
+}
+
+.backup-shortcut-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(37, 99, 235, 0.07));
+}
+
+.backup-shortcut-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.backup-shortcut-panel strong,
+.backup-shortcut-panel span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.backup-shortcut-panel span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.backup-shortcut-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .daily-review-grid {
@@ -1974,6 +2009,32 @@ button:focus-visible {
   line-height: 1.25;
 }
 
+.report-filter-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.report-filter-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.report-filter-row span {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .report-stage {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 44px minmax(220px, 300px);
@@ -2787,8 +2848,10 @@ td {
 .theme-dark .profile-panel,
 .theme-dark .stat-card,
 .theme-dark .daily-review-card,
+.theme-dark .backup-shortcut-panel,
 .theme-dark .report-view-tab.active,
 .theme-dark .report-total-card,
+.theme-dark .report-filter-row span,
 .theme-dark .account-status-row,
 .theme-dark .edital-manual-form,
 .theme-dark .subject-card,
@@ -3184,6 +3247,7 @@ td {
 
   .report-view-tabs,
   .report-options,
+  .report-filter-row,
   .report-range-segments {
     display: grid;
     grid-template-columns: 1fr;

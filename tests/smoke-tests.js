@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260717-case-court-search"), "Cache do HTML nao foi atualizado para busca/cadastro de jurisprudencias.");
-assert(html.includes("supabase-config.js?v=20260717-case-court-search"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260717-backup-review-report"), "Cache do HTML nao foi atualizado para backup, revisao e relatorios.");
+assert(html.includes("supabase-config.js?v=20260717-backup-review-report"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -47,6 +47,10 @@ assert(html.includes("questionPrecisionSummary"), "Resumo de precisao por period
 assert(html.includes("questionReviewReminders"), "Lembretes de revisao por pior desempenho ausentes.");
 assert(html.includes("caseCourtSelect"), "Seletor de tribunal no cadastro de jurisprudencia ausente.");
 assert(html.includes("data-case-search-scope=\"all\""), "Busca geral STJ + STF ausente.");
+assert(html.includes("backupShortcutPanel"), "Atalho visivel de backup no painel ausente.");
+assert(html.includes("data-action=\"downloadBackup\""), "Acao direta de download de backup ausente.");
+assert(html.includes("reportCompetitionFilter"), "Filtro de relatorios por concurso ausente.");
+assert(html.includes("reportCompetitionHint"), "Resumo do filtro de concurso ausente.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -87,6 +91,12 @@ assert(app.includes("bindUnsavedDraftTracking"), "Monitoramento de rascunhos nao
 assert(app.includes("caseFormCourt"), "Tribunal do formulario de jurisprudencia nao foi separado da aba ativa.");
 assert(app.includes("caseSearchScope"), "Escopo da busca de jurisprudencias ausente.");
 assert(app.includes("activeCaseEditCourt"), "Edicao de jurisprudencia deve preservar o tribunal original.");
+assert(app.includes("reportCompetitionId"), "Estado do filtro de relatorio por concurso ausente.");
+assert(app.includes("function reportStudyLogMatchesCompetition"), "Filtro de estudos por concurso ausente.");
+assert(app.includes("function reportQuestionLogMatchesCompetition"), "Filtro de questoes por concurso ausente.");
+assert(app.includes("competitionFocusSubject"), "Revisao diaria nao sugere foco por concurso.");
+assert(app.includes("staleSubject"), "Revisao diaria nao identifica materia sem estudo recente.");
+assert(app.includes("downloadBackupFile();"), "Botao rapido de backup nao dispara download.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
@@ -102,6 +112,8 @@ assert(css.includes(".report-legend-item"), "CSS da legenda de materias dos rela
 assert(css.includes("overflow: hidden"), "Grafico dos relatorios nao deve criar rolagem interna.");
 assert(css.includes(".legal-material-group-title"), "CSS da separacao por tipo de material ausente.");
 assert(css.includes(".review-reminder-card"), "CSS dos lembretes de revisao ausente.");
+assert(css.includes(".backup-shortcut-panel"), "CSS do atalho de backup ausente.");
+assert(css.includes(".report-filter-row"), "CSS do filtro de concurso em relatorios ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

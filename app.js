@@ -990,6 +990,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
         questionPrecisionRange: ["day", "week", "month", "year"].includes(candidate.ui?.questionPrecisionRange) ? candidate.ui.questionPrecisionRange : "week",
         reportMode: ["timeline", "time"].includes(candidate.ui?.reportMode) ? candidate.ui.reportMode : "timeline",
         reportGroup: ["subjects", "topics"].includes(candidate.ui?.reportGroup) ? candidate.ui.reportGroup : "subjects",
+        reportCompetitionId: typeof candidate.ui?.reportCompetitionId === "string" ? candidate.ui.reportCompetitionId : "",
         reportReferenceDate: candidate.ui?.reportReferenceDate || todayISO(),
         reportCustomStart: candidate.ui?.reportCustomStart || todayISO(),
         reportCustomEnd: candidate.ui?.reportCustomEnd || todayISO(),
@@ -1061,6 +1062,7 @@ function createEmptyState(profile = {}) {
         questionPrecisionRange: "week",
         reportMode: "timeline",
         reportGroup: "subjects",
+        reportCompetitionId: "",
         reportReferenceDate: todayISO(),
         reportCustomStart: todayISO(),
         reportCustomEnd: todayISO(),
@@ -1208,6 +1210,7 @@ function createSeedState() {
         questionPrecisionRange: "week",
         reportMode: "timeline",
         reportGroup: "subjects",
+        reportCompetitionId: "",
         reportReferenceDate: todayISO(),
         reportCustomStart: todayISO(),
         reportCustomEnd: todayISO(),
@@ -2198,6 +2201,7 @@ function renderSelectors() {
   populateCompetitionSelect($("#timerCompetition"));
   populateCompetitionSelect($("#studyCompetition"));
   populateCompetitionSelect($("#competitionSelect"), { includeEmpty: false });
+  populateCompetitionSelect($("#reportCompetitionFilter"), { includeEmpty: true, emptyLabel: "Todos os concursos" });
 
   populateTopicSelect($("#questionTopic"), { subjectId: $("#questionSubject")?.value || "" });
   populateTopicSelect($("#timerTopic"), { includeEmpty: true, subjectId: $("#timerSubject")?.value || "", emptyLabel: "Sem assunto específico" });
@@ -2230,6 +2234,7 @@ function renderSelectors() {
   ["#timerCompetition", "#studyCompetition"].forEach((selector) => {
     if ($(selector)) $(selector).disabled = state.competitions.length === 0;
   });
+  if ($("#reportCompetitionFilter")) $("#reportCompetitionFilter").disabled = state.competitions.length === 0;
 }
 
 function syncScopedTopicSelect(subjectSelector, topicSelector, options = {}) {
@@ -2275,31 +2280,64 @@ function renderDailyReview() {
   if (!list) return;
   const todayMinutes = state.studyLogs.filter(getRangePredicate("day")).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
   const dueFlashcards = state.flashcards.filter((card) => flashcardIsDue(card));
-  const ranked = getRankedTopics();
-  const weakTopic = ranked.filter((topic) => topic.total > 0).at(-1);
+  const ranked = getRankedTopics().filter((topic) => topic.total > 0);
+  const weakTopic = [...ranked].sort((a, b) => a.accuracy - b.accuracy || b.wrong - a.wrong || b.total - a.total)[0];
   const schedule = buildEditalSchedule(state.edital);
   const currentWeek = schedule[0];
   const nextTasks = currentWeek?.tasks?.slice(0, 3) || [];
-  const nextSubject = nextTasks[0]?.text?.split(":")[0] || state.subjects[0]?.name || "Materia livre";
+  const weekLogs = state.studyLogs.filter(getRangePredicate("week"));
+  const today = parseISODate(todayISO());
+  const nearestCompetition = state.competitions
+    .filter((competition) => competition.date && parseISODate(competition.date) >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))[0] || state.competitions[0];
+  const competitionSubjectIds = nearestCompetition ? getCompetitionSubjectIds(nearestCompetition) : [];
+  const competitionFocusSubject = competitionSubjectIds
+    .map((subjectId) => {
+      const subject = getSubject(subjectId);
+      const minutes = weekLogs.filter((log) => getEntrySubjectId(log) === subjectId).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+      return subject ? { subject, minutes } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.minutes - b.minutes || a.subject.name.localeCompare(b.subject.name))[0];
+  const staleSubject = state.subjects
+    .map((subject) => {
+      const logs = state.studyLogs.filter((log) => getEntrySubjectId(log) === subject.id && log.date);
+      const lastDate = logs.map((log) => log.date).sort().at(-1) || "";
+      const days = lastDate ? daysBetween(lastDate, todayISO()) : 9999;
+      return { subject, lastDate, days };
+    })
+    .sort((a, b) => b.days - a.days || a.subject.name.localeCompare(b.subject.name))[0];
 
   const cards = [
-    {
-      label: "Comecar",
-      title: nextTasks.length ? nextTasks[0].text : "Escolha uma materia e faca um bloco de foco",
-      meta: nextTasks.length ? `${nextTasks.length} tarefas do edital nesta semana` : "Sem cronograma ativo",
-      view: "pomodoro",
+    weakTopic && {
+      label: weakTopic.accuracy < 60 ? "Prioridade alta" : "Reforco",
+      title: `Revisar ${weakTopic.name}`,
+      meta: `${percent(weakTopic.accuracy)} de precisao em ${weakTopic.subjectName}`,
+      view: "questoes",
     },
-    {
+    dueFlashcards.length && {
       label: "Flashcards",
-      title: dueFlashcards.length ? `${dueFlashcards.length} cartoes para revisar` : "Nenhum flashcard pendente",
-      meta: dueFlashcards[0] ? getEntryScopeLabel(dueFlashcards[0]) : "Mantenha a fila em dia",
+      title: `${dueFlashcards.length} cartoes vencidos`,
+      meta: dueFlashcards[0] ? getEntryScopeLabel(dueFlashcards[0]) : "Fila de revisao pronta",
       view: "flashcards",
     },
-    {
-      label: "Reforco",
-      title: weakTopic ? weakTopic.name : nextSubject,
-      meta: weakTopic ? `${percent(weakTopic.accuracy)} de precisao em questoes` : "Use o primeiro bloco para aquecer",
-      view: weakTopic ? "questoes" : "plano",
+    nearestCompetition && competitionFocusSubject && {
+      label: "Concurso",
+      title: nearestCompetition.name,
+      meta: `Priorize ${competitionFocusSubject.subject.name}: ${formatMinutes(competitionFocusSubject.minutes)} na semana`,
+      view: "pomodoro",
+    },
+    nextTasks.length && {
+      label: "Edital",
+      title: nextTasks[0].text,
+      meta: `${nextTasks.length} tarefas sugeridas nesta semana`,
+      view: "edital",
+    },
+    staleSubject && {
+      label: "Retomar",
+      title: staleSubject.subject.name,
+      meta: staleSubject.lastDate ? `Sem registro ha ${staleSubject.days} dias` : "Ainda sem estudo registrado",
+      view: "pomodoro",
     },
     {
       label: "Hoje",
@@ -2307,7 +2345,7 @@ function renderDailyReview() {
       meta: todayMinutes ? "Continue preservando o ritmo" : "Ainda sem tempo registrado hoje",
       view: "controle",
     },
-  ];
+  ].filter(Boolean).slice(0, 4);
 
   list.innerHTML = cards
     .map(
@@ -6230,19 +6268,44 @@ function shiftReportPeriod(direction) {
   renderReports();
 }
 
+function getActiveReportCompetition() {
+  const id = state.ui.reportCompetitionId || "";
+  const competition = id ? getCompetition(id) : null;
+  if (!competition) {
+    state.ui.reportCompetitionId = "";
+    return null;
+  }
+  return competition;
+}
+
+function reportStudyLogMatchesCompetition(log, competition) {
+  if (!competition) return true;
+  if (log.competitionId) return log.competitionId === competition.id;
+  const subjectId = getEntrySubjectId(log);
+  return getCompetitionSubjectIds(competition).includes(subjectId);
+}
+
+function reportQuestionLogMatchesCompetition(log, competition) {
+  if (!competition) return true;
+  const subjectId = getEntrySubjectId(log);
+  return getCompetitionSubjectIds(competition).includes(subjectId);
+}
+
 function renderReports() {
   const range = state.ui.reportRange || "week";
   state.ui.reportMode = ["timeline", "time"].includes(state.ui.reportMode) ? state.ui.reportMode : "timeline";
   state.ui.reportGroup = ["subjects", "topics"].includes(state.ui.reportGroup) ? state.ui.reportGroup : "subjects";
+  const activeCompetition = getActiveReportCompetition();
   $$(".segment[data-report-range]").forEach((button) => button.classList.toggle("active", button.dataset.reportRange === range));
   $$("[data-report-mode]").forEach((button) => button.classList.toggle("active", button.dataset.reportMode === state.ui.reportMode));
   $$("[data-report-group]").forEach((input) => {
     input.checked = input.value === state.ui.reportGroup;
   });
+  if ($("#reportCompetitionFilter")) $("#reportCompetitionFilter").value = activeCompetition?.id || "";
 
   const meta = getReportPeriodMeta();
-  const studyLogs = state.studyLogs.filter((log) => reportLogIsInPeriod(log, meta));
-  const questionLogs = state.questionLogs.filter((log) => reportLogIsInPeriod(log, meta));
+  const studyLogs = state.studyLogs.filter((log) => reportLogIsInPeriod(log, meta) && reportStudyLogMatchesCompetition(log, activeCompetition));
+  const questionLogs = state.questionLogs.filter((log) => reportLogIsInPeriod(log, meta) && reportQuestionLogMatchesCompetition(log, activeCompetition));
   const minutes = studyLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
   const correct = questionLogs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
   const wrong = questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
@@ -6254,11 +6317,18 @@ function renderReports() {
   if ($("#reportCustomEnd")) $("#reportCustomEnd").value = state.ui.reportCustomEnd || meta.end;
   if ($("#reportPeriodTitle")) $("#reportPeriodTitle").textContent = meta.title;
   if ($("#reportTotalMinutes")) $("#reportTotalMinutes").textContent = formatMinutes(minutes);
-  if ($("#reportPeriodCaption")) $("#reportPeriodCaption").textContent = meta.caption;
+  const reportCaption = activeCompetition ? `${meta.caption} - ${activeCompetition.name}` : meta.caption;
+  if ($("#reportPeriodCaption")) $("#reportPeriodCaption").textContent = reportCaption;
+  if ($("#reportCompetitionHint")) {
+    const linkedCount = activeCompetition ? getCompetitionSubjectIds(activeCompetition).length : 0;
+    $("#reportCompetitionHint").textContent = activeCompetition
+      ? `Filtrando por ${activeCompetition.name}. Inclui estudos vinculados e matérias associadas (${linkedCount}).`
+      : "Mostrando todo o histórico do período.";
+  }
 
   if ($("#reportStats")) {
     $("#reportStats").innerHTML = [
-    statCard("Tempo", formatMinutes(minutes), meta.caption),
+    statCard("Tempo", formatMinutes(minutes), reportCaption),
     statCard("Questões", String(total), `${correct} acertos e ${wrong} erros`),
     statCard("Precisão", percent(accuracy), "no período selecionado"),
     statCard("Sessões", String(studyLogs.length), "registros de estudo"),
@@ -6999,6 +7069,12 @@ function attachEvents() {
       saveState();
       renderReports();
     });
+  });
+
+  $("#reportCompetitionFilter").addEventListener("change", (event) => {
+    state.ui.reportCompetitionId = event.target.value || "";
+    saveState();
+    renderReports();
   });
 
   $("#reportCustomForm").addEventListener("submit", (event) => {
@@ -7808,6 +7884,11 @@ function handleAction(action) {
   const id = action.dataset.id;
   const type = action.dataset.action;
 
+  if (type === "downloadBackup") {
+    downloadBackupFile();
+    return;
+  }
+
   if (type === "quickQuestion") {
     const isCorrect = action.dataset.result === "correct";
     state.questionLogs.push({
@@ -8059,6 +8140,7 @@ function handleAction(action) {
     if (!window.confirm("Excluir este concurso? Os tempos registrados serão mantidos sem vínculo de concurso.")) return;
     state.competitions = state.competitions.filter((competition) => competition.id !== id);
     state.studyLogs = state.studyLogs.map((log) => (log.competitionId === id ? { ...log, competitionId: "" } : log));
+    if (state.ui.reportCompetitionId === id) state.ui.reportCompetitionId = "";
     saveState();
     render();
     showToast("Concurso excluído.");

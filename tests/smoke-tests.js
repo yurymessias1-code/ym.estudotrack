@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260717-backup-review-report"), "Cache do HTML nao foi atualizado para backup, revisao e relatorios.");
-assert(html.includes("supabase-config.js?v=20260717-backup-review-report"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260722-save-reliability"), "Cache do HTML nao foi atualizado para confiabilidade de salvamento.");
+assert(html.includes("supabase-config.js?v=20260722-save-reliability"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -97,6 +97,13 @@ assert(app.includes("function reportQuestionLogMatchesCompetition"), "Filtro de 
 assert(app.includes("competitionFocusSubject"), "Revisao diaria nao sugere foco por concurso.");
 assert(app.includes("staleSubject"), "Revisao diaria nao identifica materia sem estudo recente.");
 assert(app.includes("downloadBackupFile();"), "Botao rapido de backup nao dispara download.");
+assert(app.includes("function shouldPreferLocalSnapshot"), "Protecao contra sobrescrita por estado remoto antigo ausente.");
+assert(app.includes("function getLocalProfileSnapshot"), "Leitura de copia local do perfil ausente.");
+assert(app.includes("function scheduleRemoteSaveRetry"), "Retentativa automatica de salvamento remoto ausente.");
+assert(app.includes("function persistBeforePageExit"), "Salvamento defensivo ao sair da pagina ausente.");
+assert(app.includes("LOCAL_NEWER_GRACE_MS"), "Margem de comparacao local/remoto ausente.");
+assert(app.includes("REMOTE_SAVE_MAX_RETRIES"), "Limite de retentativas remotas ausente.");
+assert(app.includes("localSavedAt"), "Carimbo interno de salvamento local ausente.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");

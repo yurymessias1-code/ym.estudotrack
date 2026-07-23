@@ -14,6 +14,9 @@ const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minusc
 const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
 const STATE_BACKUP_KEY_PREFIX = "ymEstudos.stateBackup.";
 const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
+const LOCAL_NEWER_GRACE_MS = 1500;
+const REMOTE_SAVE_RETRY_MS = 8000;
+const REMOTE_SAVE_MAX_RETRIES = 4;
 
 const titles = {
   dashboard: "Painel",
@@ -65,6 +68,8 @@ let remoteStore = {
   usingFallbackClient: false,
   user: null,
   saveTimer: null,
+  retryTimer: null,
+  retryCount: 0,
   syncing: false,
   pendingSave: false,
   recoveryMode: false,
@@ -539,9 +544,15 @@ async function forceSaveCurrentProfile() {
   }
   if (isRemoteSessionActive()) {
     clearTimeout(remoteStore.saveTimer);
+    if (remoteStore.syncing) {
+      remoteStore.pendingSave = true;
+      setSyncStatus("saving");
+      showToast("Já existe um salvamento em andamento. Vou reenviar os dados assim que ele terminar.");
+      return;
+    }
     remoteStore.pendingSave = false;
-    await saveRemoteStateNow();
-    showToast("Dados enviados para o Supabase.");
+    const saved = await saveRemoteStateNow();
+    showToast(saved ? "Dados enviados para o Supabase." : "Dados salvos neste navegador. O envio online será tentado novamente.");
     return;
   }
   saveState({ syncRemote: false });
@@ -602,16 +613,33 @@ function queueRemoteSave() {
     return;
   }
   setSyncStatus("saving");
+  clearTimeout(remoteStore.retryTimer);
+  remoteStore.retryTimer = null;
   clearTimeout(remoteStore.saveTimer);
   remoteStore.saveTimer = setTimeout(() => {
     saveRemoteStateNow();
   }, REMOTE_SAVE_DEBOUNCE_MS);
 }
 
-async function saveRemoteStateNow() {
+function scheduleRemoteSaveRetry() {
+  if (!isRemoteSessionActive() || remoteStore.retryCount >= REMOTE_SAVE_MAX_RETRIES) return;
+  clearTimeout(remoteStore.retryTimer);
+  remoteStore.retryCount += 1;
+  const delay = REMOTE_SAVE_RETRY_MS * remoteStore.retryCount;
+  remoteStore.retryTimer = setTimeout(() => {
+    remoteStore.retryTimer = null;
+    saveRemoteStateNow({ silent: true });
+  }, delay);
+}
+
+async function saveRemoteStateNow(options = {}) {
   const client = getSupabaseClient();
   const user = remoteStore.user;
-  if (!client || !user || remoteStore.syncing) return;
+  if (!client || !user) return false;
+  if (remoteStore.syncing) {
+    remoteStore.pendingSave = true;
+    return false;
+  }
   const settings = getSupabaseSettings();
   remoteStore.syncing = true;
   setSyncStatus("saving");
@@ -629,11 +657,17 @@ async function saveRemoteStateNow() {
       { onConflict: "user_id" }
     );
     if (error) throw error;
+    clearTimeout(remoteStore.retryTimer);
+    remoteStore.retryTimer = null;
+    remoteStore.retryCount = 0;
     setSyncStatus("saved");
+    return true;
   } catch (error) {
     console.warn("Falha ao sincronizar com Supabase:", error);
     setSyncStatus("error", getSupabaseAuthMessage(error) || "Falha na sincronizacao com o Supabase.");
-    showToast("Não foi possível sincronizar com o Supabase agora. Seus dados ficaram salvos neste navegador.");
+    if (!options.silent) showToast("Não foi possível sincronizar com o Supabase agora. Seus dados ficaram salvos neste navegador.");
+    scheduleRemoteSaveRetry();
+    return false;
   } finally {
     remoteStore.syncing = false;
     if (remoteStore.pendingSave) {
@@ -654,11 +688,18 @@ async function loadSupabaseProfile(user, options = {}) {
     const { data, error } = await client.from(settings.table).select("email,display_name,state,updated_at").eq("user_id", user.id).maybeSingle();
     if (error) throw error;
 
+    const profileId = remoteProfileId(user.id);
+    const localSnapshot = getLocalProfileSnapshot(profileId);
+    const preferLocal = shouldPreferLocalSnapshot(localSnapshot, data?.updated_at);
     const displayName = data?.display_name || getRemoteDisplayName(user);
-    const loadedState = data?.state ? normalizeState(data.state, remoteProfileId(user.id)) : createEmptyState();
+    const loadedState = preferLocal
+      ? normalizeState(localSnapshot.state, profileId)
+      : data?.state
+        ? normalizeState(data.state, profileId)
+        : createEmptyState();
     loadedState.profile = makeProfile({
       ...loadedState.profile,
-      id: remoteProfileId(user.id),
+      id: profileId,
       name: loadedState.profile?.name || displayName,
       pinHash: "supabase-auth",
       createdAt: loadedState.profile?.createdAt || todayISO(),
@@ -670,11 +711,25 @@ async function loadSupabaseProfile(user, options = {}) {
     };
     state = loadedState;
     saveState({ syncRemote: false });
-    if (!data) await saveRemoteStateNow();
-    else setSyncStatus("saved");
+    let resynced = true;
+    if (!data || preferLocal) {
+      resynced = await saveRemoteStateNow({ silent: preferLocal });
+    } else {
+      setSyncStatus("saved");
+    }
     resetTimer();
     render();
-    if (!options.recovery) showToast(options.isNew ? "Conta online criada com dados zerados." : "Conta online carregada.");
+    if (!options.recovery) {
+      showToast(
+        preferLocal
+          ? resynced
+            ? "Dados locais mais recentes recuperados e reenviados para a conta online."
+            : "Dados locais mais recentes recuperados. O envio online será tentado novamente."
+          : options.isNew
+            ? "Conta online criada com dados zerados."
+            : "Conta online carregada."
+      );
+    }
     return true;
   } catch (error) {
     console.warn("Falha ao carregar perfil Supabase:", error);
@@ -730,6 +785,34 @@ function stateBackupStorageKey(profileId) {
 
 function formDraftStorageKey(profileId = state.profile?.id) {
   return `${FORM_DRAFT_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
+}
+
+function timestampMs(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getLocalProfileRecord(profileId) {
+  const root = getProfilesRoot();
+  return root.profiles.find((profile) => profile.id === profileId) || null;
+}
+
+function getLocalProfileSnapshot(profileId) {
+  const storedState = readJSON(profileStorageKey(profileId));
+  const backupState = readJSON(stateBackupStorageKey(profileId));
+  const record = getLocalProfileRecord(profileId);
+  const localState = storedState || backupState;
+  return localState
+    ? { state: localState, updatedAt: record?.updatedAt || localState.meta?.localSavedAt || "", fromBackup: !storedState && Boolean(backupState) }
+    : null;
+}
+
+function shouldPreferLocalSnapshot(localSnapshot, remoteUpdatedAt) {
+  if (!localSnapshot?.state) return false;
+  const remoteMs = timestampMs(remoteUpdatedAt);
+  if (!remoteMs) return true;
+  const localMs = timestampMs(localSnapshot.updatedAt);
+  return Boolean(localMs && localMs > remoteMs + LOCAL_NEWER_GRACE_MS);
 }
 
 function safeStorageSet(storage, key, value) {
@@ -933,6 +1016,9 @@ function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
   return {
     version: 2,
+    meta: {
+      localSavedAt: typeof candidate.meta?.localSavedAt === "string" ? candidate.meta.localSavedAt : "",
+    },
     profile: makeProfile(candidate.profile || empty.profile),
     subjects: Array.isArray(candidate.subjects) ? candidate.subjects : empty.subjects,
     topics: Array.isArray(candidate.topics) ? candidate.topics : empty.topics,
@@ -1024,6 +1110,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
 function createEmptyState(profile = {}) {
   return {
     version: 2,
+    meta: { localSavedAt: "" },
     profile: makeProfile(profile),
     subjects: [],
     topics: [],
@@ -1233,12 +1320,14 @@ function saveState(options = {}) {
   const login = normalizeProfileLogin(state.profile.name || previousRecord.name);
   const remoteActive = isRemoteSessionActive();
   if (!login || (!state.profile.pinHash && !remoteActive)) return;
+  const savedAt = new Date().toISOString();
+  state.meta = { ...(state.meta || {}), localSavedAt: savedAt };
   const profileRecord = {
     id: state.profile.id,
     name: state.profile.name || "Perfil sem nome",
     login,
     pinHash: state.profile.pinHash || previousRecord.pinHash || (remoteActive ? "supabase-auth" : ""),
-    updatedAt: new Date().toISOString(),
+    updatedAt: savedAt,
   };
   const profiles = root.profiles.filter((profile) => {
     const profileLogin = profile.login || normalizeProfileLogin(profile.name);
@@ -5636,6 +5725,16 @@ function restoreUnsavedFormDrafts() {
   }
 }
 
+function persistBeforePageExit() {
+  writeUnsavedFormDrafts();
+  if (!isProfileAuthenticated()) return;
+  saveState({ syncRemote: false });
+  if (isRemoteSessionActive()) {
+    clearTimeout(remoteStore.saveTimer);
+    saveRemoteStateNow({ silent: true });
+  }
+}
+
 function bindUnsavedDraftTracking() {
   ["#legalMaterialForm", "#caseForm", "#flashcardForm", "#sourceForm", "#noteForm"].forEach((selector) => {
     const form = $(selector);
@@ -5644,9 +5743,10 @@ function bindUnsavedDraftTracking() {
     form.addEventListener("change", saveUnsavedFormDrafts);
     form.addEventListener("paste", () => window.setTimeout(saveUnsavedFormDrafts, 0));
   });
-  window.addEventListener("beforeunload", writeUnsavedFormDrafts);
+  window.addEventListener("beforeunload", persistBeforePageExit);
+  window.addEventListener("pagehide", persistBeforePageExit);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") writeUnsavedFormDrafts();
+    if (document.visibilityState === "hidden") persistBeforePageExit();
   });
 }
 

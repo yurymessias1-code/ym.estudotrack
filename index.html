@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260725-data-loss-guard" />
+    <link rel="stylesheet" href="styles.css?v=20260725-local-recovery" />
   </head>
   <body>
     <div class="app-shell">
@@ -1474,6 +1474,17 @@
               </div>
               <p class="music-note">Guarde o código ou arquivo de backup. Ele leva seus estudos para outro navegador ou computador.</p>
             </section>
+            <section class="panel form-panel local-recovery-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Recuperacao</p>
+                  <h3>Procurar copias locais</h3>
+                </div>
+              </div>
+              <button class="button secondary" data-action="scanLocalRecovery" type="button">Procurar backups locais</button>
+              <div class="local-recovery-list" id="localRecoveryList"></div>
+              <p class="music-note">Use se o Supabase abriu vazio. A busca procura copias antigas salvas neste navegador antes de reenviar para a conta online.</p>
+            </section>
           </div>
         </section>
 
@@ -1593,7 +1604,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260725-data-loss-guard"></script>
-    <script src="app.js?v=20260725-data-loss-guard"></script>
+    <script src="supabase-config.js?v=20260725-local-recovery"></script>
+    <script src="app.js?v=20260725-local-recovery"></script>
   </body>
 </html>

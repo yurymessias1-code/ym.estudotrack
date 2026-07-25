@@ -1860,12 +1860,47 @@ button:focus-visible {
   color: var(--green);
 }
 
+.mini-button.success {
+  color: var(--teal-strong);
+}
+
 .mini-button.bad {
   color: var(--red);
 }
 
 .mini-button:hover {
   border-color: #b8c3cf;
+}
+
+.local-recovery-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.local-recovery-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfb;
+}
+
+.local-recovery-card strong,
+.local-recovery-card small,
+.local-recovery-card span {
+  display: block;
+}
+
+.local-recovery-card small,
+.local-recovery-card span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
 }
 
 .progress-track {
@@ -3098,6 +3133,11 @@ td {
   border-color: rgba(45, 212, 191, 0.42);
   background: #10251f;
   color: #7ddfd1;
+}
+
+.theme-dark .local-recovery-card {
+  border-color: #2f3f4f;
+  background: #111922;
 }
 
 .theme-dark .timer-face.break-mode {

@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260725-data-loss-guard"), "Cache do HTML nao foi atualizado para protecao contra perda de dados.");
-assert(html.includes("supabase-config.js?v=20260725-data-loss-guard"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260725-local-recovery"), "Cache do HTML nao foi atualizado para recuperacao local.");
+assert(html.includes("supabase-config.js?v=20260725-local-recovery"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -52,6 +52,8 @@ assert(html.includes("backupShortcutPanel"), "Atalho visivel de backup no painel
 assert(html.includes("data-action=\"downloadBackup\""), "Acao direta de download de backup ausente.");
 assert(html.includes("reportCompetitionFilter"), "Filtro de relatorios por concurso ausente.");
 assert(html.includes("reportCompetitionHint"), "Resumo do filtro de concurso ausente.");
+assert(html.includes("localRecoveryList"), "Lista de recuperacao local ausente.");
+assert(html.includes("data-action=\"scanLocalRecovery\""), "Botao de busca de backups locais ausente.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -109,6 +111,9 @@ assert(app.includes("MEANINGFUL_STATE_BACKUP_KEY_PREFIX"), "Backup local util co
 assert(app.includes("function stateHasMeaningfulData"), "Deteccao de estado com dados reais ausente.");
 assert(app.includes("stateHasMeaningfulData(localSnapshot.state) && !stateHasMeaningfulData(remoteState)"), "Estado remoto vazio nao prioriza copia local com dados.");
 assert(app.includes("Protecao ativada: o app bloqueou um envio vazio"), "Bloqueio de envio remoto vazio ausente.");
+assert(app.includes("function getLocalRecoveryCandidates"), "Busca de backups locais no navegador ausente.");
+assert(app.includes("function restoreLocalRecoveryCandidate"), "Restauracao de backup local ausente.");
+assert(app.includes("data-action=\"restoreLocalRecovery\""), "Acao de restauracao local nao e renderizada.");
 assert(app.includes("POMODORO_CHECKPOINT_KEY_PREFIX"), "Chave de checkpoint do Pomodoro ausente.");
 assert(app.includes("function writePomodoroCheckpoint"), "Pre-salvamento do Pomodoro ausente.");
 assert(app.includes("function restorePomodoroCheckpoint"), "Recuperacao do Pomodoro interrompido ausente.");
@@ -132,6 +137,7 @@ assert(css.includes(".review-reminder-card"), "CSS dos lembretes de revisao ause
 assert(css.includes(".backup-shortcut-panel"), "CSS do atalho de backup ausente.");
 assert(css.includes(".report-filter-row"), "CSS do filtro de concurso em relatorios ausente.");
 assert(css.includes(".pomodoro-save-status"), "CSS do status de pre-salvamento do Pomodoro ausente.");
+assert(css.includes(".local-recovery-card"), "CSS dos cards de recuperacao local ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

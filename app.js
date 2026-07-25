@@ -2264,6 +2264,164 @@ function renderAccountPanel() {
   const deleteBtn = $("#deleteAccountDataBtn");
   if (forceSyncBtn) forceSyncBtn.disabled = !authenticated;
   if (deleteBtn) deleteBtn.disabled = !authenticated;
+  renderLocalRecoveryList();
+}
+
+function getRecoveryDataCounts(candidate) {
+  const keys = {
+    subjects: "materias",
+    topics: "assuntos",
+    studyLogs: "estudos",
+    questionLogs: "questoes",
+    flashcards: "flashcards",
+    notes: "anotacoes",
+    sources: "fontes",
+    cases: "jurisprudencias",
+    legalMaterials: "leis/tabelas",
+    editalItems: "edital",
+    competitions: "concursos",
+  };
+  return Object.entries(keys).map(([key, label]) => ({
+    key,
+    label,
+    count: Array.isArray(candidate?.[key]) ? candidate[key].length : 0,
+  }));
+}
+
+function getRecoveryDataTotal(candidate) {
+  return getRecoveryDataCounts(candidate).reduce((sum, item) => sum + item.count, 0);
+}
+
+function getRecoveryStateFromStorageKey(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  const payload = parsed?.data ? parsed.data : parsed;
+  if (!payload || typeof payload !== "object") return null;
+  return normalizeState(payload, payload.profile?.id);
+}
+
+function getLocalRecoveryCandidates() {
+  const prefixes = [PROFILE_KEY_PREFIX, STATE_BACKUP_KEY_PREFIX, MEANINGFUL_STATE_BACKUP_KEY_PREFIX];
+  const candidates = [];
+  const seen = new Set();
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !prefixes.some((prefix) => key.startsWith(prefix)) || seen.has(key)) continue;
+      seen.add(key);
+      try {
+        const candidateState = getRecoveryStateFromStorageKey(key);
+        if (!stateHasMeaningfulData(candidateState)) continue;
+        const total = getRecoveryDataTotal(candidateState);
+        candidates.push({
+          key,
+          state: candidateState,
+          total,
+          updatedAt: candidateState.meta?.localSavedAt || "",
+          label: candidateState.account?.email || candidateState.profile?.name || key.replace(/^ymEstudos\./, ""),
+          counts: getRecoveryDataCounts(candidateState).filter((item) => item.count > 0),
+        });
+      } catch (error) {
+        console.warn("Backup local ignorado:", key, error);
+      }
+    }
+  } catch (error) {
+    console.warn("Falha ao listar backups locais:", error);
+  }
+
+  return candidates.sort((a, b) => b.total - a.total || timestampMs(b.updatedAt) - timestampMs(a.updatedAt));
+}
+
+function findLocalRecoveryCandidate(key) {
+  return getLocalRecoveryCandidates().find((candidate) => candidate.key === key) || null;
+}
+
+function renderLocalRecoveryList() {
+  const list = $("#localRecoveryList");
+  if (!list) return;
+  const candidates = getLocalRecoveryCandidates();
+  list.innerHTML = candidates.length
+    ? candidates
+        .map((candidate) => {
+          const updatedAt = candidate.updatedAt ? new Date(candidate.updatedAt).toLocaleString("pt-BR") : "sem data";
+          const counts = candidate.counts.map((item) => `${item.label}: ${item.count}`).join(" | ");
+          return `
+            <article class="local-recovery-card">
+              <div>
+                <strong>${escapeHTML(candidate.label)}</strong>
+                <small>${escapeHTML(updatedAt)} - ${candidate.total} itens encontrados</small>
+                <span>${escapeHTML(counts)}</span>
+              </div>
+              <div class="inline-actions">
+                <button class="mini-button" data-action="downloadLocalRecovery" data-id="${escapeHTML(candidate.key)}" type="button">Baixar</button>
+                <button class="mini-button success" data-action="restoreLocalRecovery" data-id="${escapeHTML(candidate.key)}" type="button">Restaurar</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Nenhuma copia local com dados foi encontrada neste navegador.</div>`;
+}
+
+function downloadLocalRecoveryCandidate(key) {
+  const candidate = findLocalRecoveryCandidate(key);
+  if (!candidate) {
+    showToast("Backup local nao encontrado neste navegador.");
+    return;
+  }
+  const payload = JSON.stringify(
+    {
+      app: "estudos-track",
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      recoverySource: key,
+      data: candidate.state,
+    },
+    null,
+    2
+  );
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `estudos-track-recuperacao-${todayISO()}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  showToast("Backup local baixado.");
+}
+
+async function restoreLocalRecoveryCandidate(key) {
+  const candidate = findLocalRecoveryCandidate(key);
+  if (!candidate) {
+    showToast("Backup local nao encontrado neste navegador.");
+    return;
+  }
+  const confirmed = window.confirm(`Restaurar esta copia local com ${candidate.total} itens? Ela substitui o estado aberto neste login.`);
+  if (!confirmed) return;
+
+  const currentProfile = makeProfile(state.profile);
+  const currentAccount = { ...(state.account || {}) };
+  const restored = normalizeState(candidate.state, currentProfile.id);
+  restored.profile = {
+    ...restored.profile,
+    ...currentProfile,
+    name: currentProfile.name || restored.profile?.name || candidate.label,
+    pinHash: currentProfile.pinHash || restored.profile?.pinHash || (isRemoteSessionActive() ? "supabase-auth" : ""),
+  };
+  restored.account = {
+    ...restored.account,
+    ...currentAccount,
+    name: currentAccount.name || restored.account?.name || restored.profile.name,
+    email: currentAccount.email || restored.account?.email || "",
+  };
+
+  state = restored;
+  saveState({ syncRemote: false });
+  const synced = isRemoteSessionActive() ? await saveRemoteStateNow() : false;
+  resetTimer();
+  render();
+  showToast(synced ? "Copia local restaurada e reenviada ao Supabase." : "Copia local restaurada neste navegador.");
 }
 
 async function accessProfileByNameAndPin(name, pin, options = {}) {
@@ -8226,6 +8384,22 @@ function handleAction(action) {
 
   if (type === "downloadBackup") {
     downloadBackupFile();
+    return;
+  }
+
+  if (type === "scanLocalRecovery") {
+    renderLocalRecoveryList();
+    showToast("Busca por copias locais concluida.");
+    return;
+  }
+
+  if (type === "downloadLocalRecovery") {
+    downloadLocalRecoveryCandidate(id);
+    return;
+  }
+
+  if (type === "restoreLocalRecovery") {
+    restoreLocalRecoveryCandidate(id);
     return;
   }
 

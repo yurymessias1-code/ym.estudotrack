@@ -13,6 +13,7 @@ const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174
 const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minuscula, numero e simbolo.";
 const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
 const STATE_BACKUP_KEY_PREFIX = "ymEstudos.stateBackup.";
+const MEANINGFUL_STATE_BACKUP_KEY_PREFIX = "ymEstudos.meaningfulStateBackup.";
 const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
 const POMODORO_CHECKPOINT_KEY_PREFIX = "ymEstudos.pomodoroCheckpoint.";
 const POMODORO_CHECKPOINT_VERSION = 1;
@@ -648,6 +649,12 @@ async function saveRemoteStateNow(options = {}) {
   setSyncStatus("saving");
   try {
     const payload = JSON.parse(JSON.stringify(state));
+    const localSnapshot = getLocalProfileSnapshot(state.profile?.id);
+    if (!options.allowEmpty && !stateHasMeaningfulData(payload) && stateHasMeaningfulData(localSnapshot?.state)) {
+      setSyncStatus("error", "Envio vazio bloqueado para proteger seus dados locais.");
+      showToast("Protecao ativada: o app bloqueou um envio vazio para nao sobrescrever dados existentes.");
+      return false;
+    }
     const displayName = state.profile?.name || state.account?.name || getRemoteDisplayName(user);
     const { error } = await client.from(settings.table).upsert(
       {
@@ -693,7 +700,7 @@ async function loadSupabaseProfile(user, options = {}) {
 
     const profileId = remoteProfileId(user.id);
     const localSnapshot = getLocalProfileSnapshot(profileId);
-    const preferLocal = shouldPreferLocalSnapshot(localSnapshot, data?.updated_at);
+    const preferLocal = shouldPreferLocalSnapshot(localSnapshot, data?.updated_at, data?.state);
     const displayName = data?.display_name || getRemoteDisplayName(user);
     const loadedState = preferLocal
       ? normalizeState(localSnapshot.state, profileId)
@@ -786,6 +793,10 @@ function stateBackupStorageKey(profileId) {
   return `${STATE_BACKUP_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
 }
 
+function meaningfulStateBackupStorageKey(profileId) {
+  return `${MEANINGFUL_STATE_BACKUP_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
+}
+
 function formDraftStorageKey(profileId = state.profile?.id) {
   return `${FORM_DRAFT_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
 }
@@ -800,18 +811,44 @@ function getLocalProfileRecord(profileId) {
   return root.profiles.find((profile) => profile.id === profileId) || null;
 }
 
+function stateHasMeaningfulData(candidate) {
+  if (!candidate || typeof candidate !== "object") return false;
+  return [
+    "subjects",
+    "topics",
+    "studyLogs",
+    "questionLogs",
+    "flashcards",
+    "notes",
+    "sources",
+    "cases",
+    "legalMaterials",
+    "editalItems",
+    "competitions",
+  ].some((key) => Array.isArray(candidate[key]) && candidate[key].length > 0);
+}
+
 function getLocalProfileSnapshot(profileId) {
   const storedState = readJSON(profileStorageKey(profileId));
   const backupState = readJSON(stateBackupStorageKey(profileId));
+  const meaningfulBackupState = readJSON(meaningfulStateBackupStorageKey(profileId));
   const record = getLocalProfileRecord(profileId);
-  const localState = storedState || backupState;
+  let localState = storedState || backupState || meaningfulBackupState;
+  if (stateHasMeaningfulData(meaningfulBackupState) && !stateHasMeaningfulData(localState)) {
+    localState = meaningfulBackupState;
+  }
   return localState
-    ? { state: localState, updatedAt: record?.updatedAt || localState.meta?.localSavedAt || "", fromBackup: !storedState && Boolean(backupState) }
+    ? {
+        state: localState,
+        updatedAt: record?.updatedAt || localState.meta?.localSavedAt || "",
+        fromBackup: !storedState && (Boolean(backupState) || Boolean(meaningfulBackupState)),
+      }
     : null;
 }
 
-function shouldPreferLocalSnapshot(localSnapshot, remoteUpdatedAt) {
+function shouldPreferLocalSnapshot(localSnapshot, remoteUpdatedAt, remoteState) {
   if (!localSnapshot?.state) return false;
+  if (stateHasMeaningfulData(localSnapshot.state) && !stateHasMeaningfulData(remoteState)) return true;
   const remoteMs = timestampMs(remoteUpdatedAt);
   if (!remoteMs) return true;
   const localMs = timestampMs(localSnapshot.updatedAt);
@@ -1532,11 +1569,13 @@ function saveState(options = {}) {
   const serializedRoot = JSON.stringify({ activeProfileId: "", profiles });
   const profileKey = profileStorageKey(state.profile.id);
   const backupKey = stateBackupStorageKey(state.profile.id);
+  const meaningfulBackupKey = meaningfulStateBackupStorageKey(state.profile.id);
   const sessionWritten = safeStorageSet(sessionStorage, ACTIVE_SESSION_PROFILE_KEY, state.profile.id);
   const stateWritten = safeStorageSet(localStorage, profileKey, serializedState);
   const rootWritten = safeStorageSet(localStorage, PROFILE_ROOT_KEY, serializedRoot);
   safeStorageSet(sessionStorage, backupKey, serializedState);
   safeStorageSet(localStorage, backupKey, serializedState);
+  if (stateHasMeaningfulData(state)) safeStorageSet(localStorage, meaningfulBackupKey, serializedState);
   if (!sessionWritten || !stateWritten || !rootWritten) {
     setSyncStatus("error", "Falha ao salvar localmente. Uma copia de seguranca foi tentada nesta sessao.");
     showToast("Falha ao salvar localmente. Confira espaco do navegador; tente exportar um backup.");

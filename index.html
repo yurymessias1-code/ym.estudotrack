@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260722-save-reliability" />
+    <link rel="stylesheet" href="styles.css?v=20260725-pomodoro-checkpoint" />
   </head>
   <body>
     <div class="app-shell">
@@ -756,6 +756,7 @@
                 <button class="button ghost" id="resetTimerBtn" type="button">Zerar</button>
                 <button class="button ghost" id="finishTimerBtn" type="button">Registrar</button>
               </div>
+              <p class="pomodoro-save-status" id="pomodoroCheckpointStatus">Pre-salvamento pronto para o proximo Pomodoro.</p>
             </section>
 
             <form class="panel form-panel" id="timerSettingsForm">
@@ -1592,7 +1593,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260722-save-reliability"></script>
-    <script src="app.js?v=20260722-save-reliability"></script>
+    <script src="supabase-config.js?v=20260725-pomodoro-checkpoint"></script>
+    <script src="app.js?v=20260725-pomodoro-checkpoint"></script>
   </body>
 </html>

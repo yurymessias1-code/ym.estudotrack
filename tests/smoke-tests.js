@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260722-save-reliability"), "Cache do HTML nao foi atualizado para confiabilidade de salvamento.");
-assert(html.includes("supabase-config.js?v=20260722-save-reliability"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260725-pomodoro-checkpoint"), "Cache do HTML nao foi atualizado para checkpoint do Pomodoro.");
+assert(html.includes("supabase-config.js?v=20260725-pomodoro-checkpoint"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -37,6 +37,7 @@ assert(html.includes("bookmarklet-aprovado.txt"), "Link do coletor do Aprovado a
 assert(html.includes("data-view=\"concursos\""), "Aba Concursos ausente.");
 assert(html.includes("competitionForm"), "Formulario de concursos ausente.");
 assert(html.includes("timerCompetition"), "Seletor de concurso no Pomodoro ausente.");
+assert(html.includes("pomodoroCheckpointStatus"), "Status de pre-salvamento do Pomodoro ausente.");
 assert(html.includes("studyCompetition"), "Seletor de concurso no registro manual ausente.");
 assert(html.includes("data-subject-color"), "Cores rapidas de materia ausentes.");
 assert(html.includes("reportTimelineChart"), "Grafico de linha do tempo dos relatorios ausente.");
@@ -104,6 +105,11 @@ assert(app.includes("function persistBeforePageExit"), "Salvamento defensivo ao 
 assert(app.includes("LOCAL_NEWER_GRACE_MS"), "Margem de comparacao local/remoto ausente.");
 assert(app.includes("REMOTE_SAVE_MAX_RETRIES"), "Limite de retentativas remotas ausente.");
 assert(app.includes("localSavedAt"), "Carimbo interno de salvamento local ausente.");
+assert(app.includes("POMODORO_CHECKPOINT_KEY_PREFIX"), "Chave de checkpoint do Pomodoro ausente.");
+assert(app.includes("function writePomodoroCheckpoint"), "Pre-salvamento do Pomodoro ausente.");
+assert(app.includes("function restorePomodoroCheckpoint"), "Recuperacao do Pomodoro interrompido ausente.");
+assert(app.includes("restorePomodoroCheckpointOnce();"), "Recuperacao do Pomodoro nao esta ligada ao render.");
+assert(app.includes("writePomodoroCheckpoint();\n  saveState({ syncRemote: false });"), "Fechamento da pagina nao grava checkpoint do Pomodoro antes do estado.");
 
 assert(css.includes(".daily-review-grid"), "CSS do painel diario ausente.");
 assert(css.includes(".account-status-row"), "CSS do status da conta ausente.");
@@ -121,6 +127,7 @@ assert(css.includes(".legal-material-group-title"), "CSS da separacao por tipo d
 assert(css.includes(".review-reminder-card"), "CSS dos lembretes de revisao ausente.");
 assert(css.includes(".backup-shortcut-panel"), "CSS do atalho de backup ausente.");
 assert(css.includes(".report-filter-row"), "CSS do filtro de concurso em relatorios ausente.");
+assert(css.includes(".pomodoro-save-status"), "CSS do status de pre-salvamento do Pomodoro ausente.");
 
 assert(aprovadoBookmarklet.startsWith("javascript:"), "Bookmarklet do Aprovado deve comecar com javascript:.");
 assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmarklet do Aprovado nao gera schema esperado.");

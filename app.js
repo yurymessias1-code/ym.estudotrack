@@ -14,6 +14,8 @@ const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minusc
 const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
 const STATE_BACKUP_KEY_PREFIX = "ymEstudos.stateBackup.";
 const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
+const POMODORO_CHECKPOINT_KEY_PREFIX = "ymEstudos.pomodoroCheckpoint.";
+const POMODORO_CHECKPOINT_VERSION = 1;
 const LOCAL_NEWER_GRACE_MS = 1500;
 const REMOTE_SAVE_RETRY_MS = 8000;
 const REMOTE_SAVE_MAX_RETRIES = 4;
@@ -45,6 +47,7 @@ let state = loadState();
 let formDraftTimer = null;
 let restoringFormDraft = false;
 let draftRestoreNoticeShown = false;
+let restoredPomodoroProfileId = "";
 let timer = {
   interval: null,
   running: false,
@@ -823,6 +826,195 @@ function safeStorageSet(storage, key, value) {
     console.warn("Falha ao gravar armazenamento local:", error);
     return false;
   }
+}
+
+function safeStorageRemove(storage, key) {
+  try {
+    storage.removeItem(key);
+  } catch {}
+}
+
+function readJSONFromStorage(storage, key) {
+  try {
+    const saved = storage.getItem(key);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+}
+
+function pomodoroCheckpointStorageKey(profileId = state.profile?.id) {
+  return `${POMODORO_CHECKPOINT_KEY_PREFIX}${profileId || "sem-perfil"}.v1`;
+}
+
+function normalizePomodoroMode(mode) {
+  return ["focus", "break", "longBreak"].includes(mode) ? mode : "focus";
+}
+
+function getPomodoroModeDuration(mode = timer.mode) {
+  const normalizedMode = normalizePomodoroMode(mode);
+  if (normalizedMode === "longBreak") return Math.max(1, Number(state.settings.longBreakMinutes || 30)) * 60;
+  if (normalizedMode === "break") return Math.max(1, Number(state.settings.breakMinutes || 5)) * 60;
+  return Math.max(1, Number(state.settings.focusMinutes || 25)) * 60;
+}
+
+function hasRecoverablePomodoroCheckpointData(data) {
+  const mode = normalizePomodoroMode(data?.mode);
+  const defaultDuration = getPomodoroModeDuration(mode);
+  const remaining = Number(data?.remaining);
+  return Boolean(
+    data &&
+      (data.running ||
+        mode !== "focus" ||
+        Number(data.elapsedFocusSeconds || 0) > 0 ||
+        (Number.isFinite(remaining) && remaining < defaultDuration))
+  );
+}
+
+function hasActivePomodoroCheckpoint() {
+  return hasRecoverablePomodoroCheckpointData({
+    running: timer.running,
+    mode: timer.mode,
+    remaining: timer.remaining,
+    elapsedFocusSeconds: timer.elapsedFocusSeconds,
+  });
+}
+
+function createPomodoroCheckpoint() {
+  return {
+    version: POMODORO_CHECKPOINT_VERSION,
+    profileId: state.profile?.id || "",
+    savedAt: new Date().toISOString(),
+    timer: {
+      running: Boolean(timer.running),
+      mode: normalizePomodoroMode(timer.mode),
+      remaining: clamp(Math.round(Number(timer.remaining) || 0), 0, getPomodoroModeDuration(timer.mode)),
+      elapsedFocusSeconds: clamp(Math.round(Number(timer.elapsedFocusSeconds) || 0), 0, Math.max(1, Number(state.settings.focusMinutes || 25)) * 60),
+      elapsedSinceLongBreakSeconds: clamp(
+        Math.round(Number(timer.elapsedSinceLongBreakSeconds) || 0),
+        0,
+        Math.max(1, Number(state.settings.longBreakEveryMinutes || 120)) * 60
+      ),
+      cycle: clamp(Math.round(Number(timer.cycle) || 1), 1, Math.max(1, Number(state.settings.cycles || 4))),
+      subjectId: timer.subjectId || $("#timerSubject")?.value || "",
+      topicId: timer.topicId || $("#timerTopic")?.value || "",
+      competitionId: timer.competitionId || $("#timerCompetition")?.value || "",
+    },
+  };
+}
+
+function clearPomodoroCheckpoint(profileId = state.profile?.id) {
+  const key = pomodoroCheckpointStorageKey(profileId);
+  safeStorageRemove(localStorage, key);
+  safeStorageRemove(sessionStorage, key);
+  updatePomodoroCheckpointStatus();
+}
+
+function writePomodoroCheckpoint() {
+  if (!state.profile?.id || !isProfileAuthenticated()) return;
+  if (!hasActivePomodoroCheckpoint()) {
+    clearPomodoroCheckpoint();
+    return;
+  }
+
+  const checkpoint = createPomodoroCheckpoint();
+  const serialized = JSON.stringify(checkpoint);
+  safeStorageSet(localStorage, pomodoroCheckpointStorageKey(), serialized);
+  safeStorageSet(sessionStorage, pomodoroCheckpointStorageKey(), serialized);
+  updatePomodoroCheckpointStatus(checkpoint.savedAt);
+}
+
+function readPomodoroCheckpoint(profileId = state.profile?.id) {
+  const key = pomodoroCheckpointStorageKey(profileId);
+  return readJSONFromStorage(localStorage, key) || readJSONFromStorage(sessionStorage, key);
+}
+
+function getValidPomodoroScope(checkpointTimer) {
+  const candidateTopic = getTopic(checkpointTimer.topicId);
+  let subjectId = getSubject(checkpointTimer.subjectId) ? checkpointTimer.subjectId : "";
+  let topicId = "";
+
+  if (candidateTopic && (!subjectId || candidateTopic.subjectId === subjectId)) {
+    subjectId = candidateTopic.subjectId;
+    topicId = candidateTopic.id;
+  }
+
+  const competitionId = getCompetition(checkpointTimer.competitionId) ? checkpointTimer.competitionId : "";
+  return { subjectId, topicId, competitionId };
+}
+
+function restorePomodoroCheckpoint() {
+  if (!state.profile?.id || !isProfileAuthenticated()) return false;
+  const checkpoint = readPomodoroCheckpoint();
+  const checkpointTimer = checkpoint?.timer;
+  if (!checkpointTimer || checkpoint.version !== POMODORO_CHECKPOINT_VERSION || !hasRecoverablePomodoroCheckpointData(checkpointTimer)) {
+    return false;
+  }
+
+  window.clearInterval(timer.interval);
+  stopLofiTick();
+
+  const mode = normalizePomodoroMode(checkpointTimer.mode);
+  const scope = getValidPomodoroScope(checkpointTimer);
+  timer.interval = null;
+  timer.running = false;
+  timer.mode = mode;
+  timer.remaining = clamp(Math.round(Number(checkpointTimer.remaining) || getPomodoroModeDuration(mode)), 0, getPomodoroModeDuration(mode));
+  timer.elapsedFocusSeconds = clamp(
+    Math.round(Number(checkpointTimer.elapsedFocusSeconds) || 0),
+    0,
+    Math.max(1, Number(state.settings.focusMinutes || 25)) * 60
+  );
+  timer.elapsedSinceLongBreakSeconds = clamp(
+    Math.round(Number(checkpointTimer.elapsedSinceLongBreakSeconds) || 0),
+    0,
+    Math.max(1, Number(state.settings.longBreakEveryMinutes || 120)) * 60
+  );
+  timer.cycle = clamp(Math.round(Number(checkpointTimer.cycle) || 1), 1, Math.max(1, Number(state.settings.cycles || 4)));
+  timer.subjectId = scope.subjectId;
+  timer.topicId = scope.topicId;
+  timer.competitionId = scope.competitionId;
+
+  if ($("#timerSubject") && timer.subjectId) {
+    $("#timerSubject").value = timer.subjectId;
+    syncScopedTopicSelect("#timerSubject", "#timerTopic");
+  }
+  if ($("#timerTopic")) $("#timerTopic").value = timer.topicId || "";
+  if ($("#timerCompetition")) $("#timerCompetition").value = timer.competitionId || "";
+
+  renderPomodoro();
+  showToast("Pomodoro pre-salvo recuperado. Ele voltou pausado para voce revisar e continuar.");
+  return true;
+}
+
+function restorePomodoroCheckpointOnce() {
+  if (!state.profile?.id || !isProfileAuthenticated()) {
+    restoredPomodoroProfileId = "";
+    return;
+  }
+  if (restoredPomodoroProfileId === state.profile.id) return;
+  restoredPomodoroProfileId = state.profile.id;
+  restorePomodoroCheckpoint();
+}
+
+function updatePomodoroCheckpointStatus(savedAt = "") {
+  const status = $("#pomodoroCheckpointStatus");
+  if (!status) return;
+  const active = hasActivePomodoroCheckpoint();
+  status.classList.toggle("active", active);
+  if (!isProfileAuthenticated()) {
+    status.textContent = "Entre na conta para ativar o pre-salvamento do Pomodoro.";
+    return;
+  }
+  if (!active) {
+    status.textContent = "Pre-salvamento pronto para o proximo Pomodoro.";
+    return;
+  }
+  const savedAtDate = savedAt ? new Date(savedAt) : new Date();
+  const savedAtLabel = Number.isNaN(savedAtDate.getTime())
+    ? "agora"
+    : savedAtDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  status.textContent = `Sessao pre-salva as ${savedAtLabel}. Se fechar a janela, ela volta pausada.`;
 }
 
 function normalizeProfileLogin(value) {
@@ -1941,6 +2133,7 @@ function render() {
   renderReports();
   renderAccountPanel();
   restoreUnsavedFormDrafts();
+  restorePomodoroCheckpointOnce();
 }
 
 function renderNavigation() {
@@ -5728,6 +5921,7 @@ function restoreUnsavedFormDrafts() {
 function persistBeforePageExit() {
   writeUnsavedFormDrafts();
   if (!isProfileAuthenticated()) return;
+  writePomodoroCheckpoint();
   saveState({ syncRemote: false });
   if (isRemoteSessionActive()) {
     clearTimeout(remoteStore.saveTimer);
@@ -6037,6 +6231,7 @@ function renderPomodoro() {
   $("#tickLofiToggleBtn").textContent = state.settings.tickLofiEnabled ? "Desligar lofi" : "Ligar lofi";
   renderMusicPlayer();
   updateStudyLogFormMode();
+  updatePomodoroCheckpointStatus();
 
   const recent = [...state.studyLogs]
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
@@ -6725,6 +6920,7 @@ function resetTimer() {
   timer.subjectId = "";
   timer.topicId = "";
   timer.competitionId = "";
+  clearPomodoroCheckpoint();
   renderPomodoro();
 }
 
@@ -6846,6 +7042,7 @@ function startTimer() {
   timer.running = true;
   timer.interval = window.setInterval(tickTimer, 1000);
   startLofiTick();
+  writePomodoroCheckpoint();
   renderPomodoro();
 }
 
@@ -6854,6 +7051,7 @@ function pauseTimer() {
   stopLofiTick();
   timer.interval = null;
   timer.running = false;
+  writePomodoroCheckpoint();
   renderPomodoro();
 }
 
@@ -6866,6 +7064,7 @@ function tickTimer() {
     completeTimerBlock();
   }
 
+  writePomodoroCheckpoint();
   renderPomodoro();
   renderDashboard();
   renderReports();
@@ -6933,6 +7132,7 @@ function skipTimerStep() {
     timer.competitionId = $("#timerCompetition")?.value || "";
   }
   completeTimerBlock({ skipped: true });
+  writePomodoroCheckpoint();
   renderPomodoro();
   renderDashboard();
   renderReports();
@@ -6958,6 +7158,7 @@ function logPomodoroFocus() {
   });
   timer.elapsedFocusSeconds = 0;
   saveState();
+  writePomodoroCheckpoint();
 }
 
 function finishTimerManually() {

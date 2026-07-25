@@ -2577,6 +2577,24 @@ td {
   flex: 1 1 118px;
 }
 
+.pomodoro-save-status {
+  margin: -4px 0 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfb;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.pomodoro-save-status.active {
+  border-color: rgba(14, 116, 104, 0.32);
+  background: #ecfdf8;
+  color: var(--teal-strong);
+}
+
 .timer-face {
   position: relative;
   display: grid;
@@ -3068,6 +3086,18 @@ td {
   border-color: #28564d;
   border-top-color: var(--teal);
   background: #13251f;
+}
+
+.theme-dark .pomodoro-save-status {
+  border-color: #2f3f4f;
+  background: #111922;
+  color: var(--muted);
+}
+
+.theme-dark .pomodoro-save-status.active {
+  border-color: rgba(45, 212, 191, 0.42);
+  background: #10251f;
+  color: #7ddfd1;
 }
 
 .theme-dark .timer-face.break-mode {

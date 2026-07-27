@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260725-local-recovery" />
+    <link rel="stylesheet" href="styles.css?v=20260727-auxiliary-backup" />
   </head>
   <body>
     <div class="app-shell">
@@ -1481,7 +1481,10 @@
                   <h3>Procurar copias locais</h3>
                 </div>
               </div>
-              <button class="button secondary" data-action="scanLocalRecovery" type="button">Procurar backups locais</button>
+              <div class="profile-actions">
+                <button class="button secondary" data-action="createAuxiliaryBackup" type="button">Criar backup auxiliar agora</button>
+                <button class="button ghost" data-action="scanLocalRecovery" type="button">Procurar backups locais</button>
+              </div>
               <div class="local-recovery-list" id="localRecoveryList"></div>
               <p class="music-note">Use se o Supabase abriu vazio. A busca procura copias antigas salvas neste navegador antes de reenviar para a conta online.</p>
             </section>
@@ -1604,7 +1607,7 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260725-local-recovery"></script>
-    <script src="app.js?v=20260725-local-recovery"></script>
+    <script src="supabase-config.js?v=20260727-auxiliary-backup"></script>
+    <script src="app.js?v=20260727-auxiliary-backup"></script>
   </body>
 </html>

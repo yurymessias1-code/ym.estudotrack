@@ -14,6 +14,13 @@ const ONLINE_PASSWORD_HINT = "Use uma senha com 8+ caracteres, maiuscula, minusc
 const SUPABASE_FALLBACK_SESSION_KEY = "estudosTrack.supabaseFallbackSession.v1";
 const STATE_BACKUP_KEY_PREFIX = "ymEstudos.stateBackup.";
 const MEANINGFUL_STATE_BACKUP_KEY_PREFIX = "ymEstudos.meaningfulStateBackup.";
+const AUXILIARY_BACKUP_KEY_PREFIX = "ymEstudos.auxBackup.";
+const AUXILIARY_BACKUP_INDEX_KEY = "ymEstudos.auxBackup.index.v1";
+const AUXILIARY_BACKUP_DB_NAME = "estudosTrackAuxiliaryBackups";
+const AUXILIARY_BACKUP_DB_VERSION = 1;
+const AUXILIARY_BACKUP_STORE = "snapshots";
+const AUXILIARY_BACKUP_MAX_PER_PROFILE = 5;
+const AUXILIARY_BACKUP_MIN_INTERVAL_MS = 60 * 1000;
 const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
 const POMODORO_CHECKPOINT_KEY_PREFIX = "ymEstudos.pomodoroCheckpoint.";
 const POMODORO_CHECKPOINT_VERSION = 1;
@@ -49,6 +56,7 @@ let formDraftTimer = null;
 let restoringFormDraft = false;
 let draftRestoreNoticeShown = false;
 let restoredPomodoroProfileId = "";
+let localRecoveryCandidateCache = [];
 let timer = {
   interval: null,
   running: false,
@@ -1575,7 +1583,10 @@ function saveState(options = {}) {
   const rootWritten = safeStorageSet(localStorage, PROFILE_ROOT_KEY, serializedRoot);
   safeStorageSet(sessionStorage, backupKey, serializedState);
   safeStorageSet(localStorage, backupKey, serializedState);
-  if (stateHasMeaningfulData(state)) safeStorageSet(localStorage, meaningfulBackupKey, serializedState);
+  if (stateHasMeaningfulData(state)) {
+    safeStorageSet(localStorage, meaningfulBackupKey, serializedState);
+    writeAuxiliaryBackupSnapshot(serializedState, savedAt);
+  }
   if (!sessionWritten || !stateWritten || !rootWritten) {
     setSyncStatus("error", "Falha ao salvar localmente. Uma copia de seguranca foi tentada nesta sessao.");
     showToast("Falha ao salvar localmente. Confira espaco do navegador; tente exportar um backup.");
@@ -2301,8 +2312,206 @@ function getRecoveryStateFromStorageKey(key) {
   return normalizeState(payload, payload.profile?.id);
 }
 
+function makeRecoveryCandidate(key, candidateState, sourceLabel = "Navegador") {
+  const total = getRecoveryDataTotal(candidateState);
+  return {
+    key,
+    state: candidateState,
+    total,
+    sourceLabel,
+    updatedAt: candidateState.meta?.localSavedAt || "",
+    label: candidateState.account?.email || candidateState.profile?.name || key.replace(/^ymEstudos\./, ""),
+    counts: getRecoveryDataCounts(candidateState).filter((item) => item.count > 0),
+  };
+}
+
+function mergeRecoveryCandidates(candidates) {
+  const byKey = new Map();
+  candidates.forEach((candidate) => {
+    if (!candidate?.key || !stateHasMeaningfulData(candidate.state)) return;
+    const current = byKey.get(candidate.key);
+    if (!current || candidate.total > current.total || timestampMs(candidate.updatedAt) > timestampMs(current.updatedAt)) {
+      byKey.set(candidate.key, candidate);
+    }
+  });
+  return Array.from(byKey.values()).sort((a, b) => b.total - a.total || timestampMs(b.updatedAt) - timestampMs(a.updatedAt));
+}
+
+function getAuxiliaryBackupIndex() {
+  const index = readJSON(AUXILIARY_BACKUP_INDEX_KEY);
+  return Array.isArray(index?.items) ? index.items : [];
+}
+
+function saveAuxiliaryBackupIndex(items) {
+  safeStorageSet(
+    localStorage,
+    AUXILIARY_BACKUP_INDEX_KEY,
+    JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), items: items.slice(0, 80) })
+  );
+}
+
+function shouldCreateAuxiliaryBackup(profileId, savedAt, options = {}) {
+  if (options.force) return true;
+  const savedMs = timestampMs(savedAt) || Date.now();
+  const newest = getAuxiliaryBackupIndex()
+    .filter((item) => item.profileId === profileId)
+    .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0))[0];
+  return !newest || savedMs - Number(newest.createdMs || 0) >= AUXILIARY_BACKUP_MIN_INTERVAL_MS;
+}
+
+function trimAuxiliaryLocalBackups(profileId, items) {
+  const profileItems = items
+    .filter((item) => item.profileId === profileId)
+    .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0));
+  const keep = new Set(profileItems.slice(0, AUXILIARY_BACKUP_MAX_PER_PROFILE).map((item) => item.key));
+  const nextItems = items.filter((item) => {
+    if (item.profileId !== profileId || keep.has(item.key)) return true;
+    safeStorageRemove(localStorage, item.key);
+    return false;
+  });
+  saveAuxiliaryBackupIndex(nextItems);
+}
+
+function writeAuxiliaryBackupSnapshot(serializedState, savedAt, options = {}) {
+  if (!state.profile?.id || !stateHasMeaningfulData(state) || !shouldCreateAuxiliaryBackup(state.profile.id, savedAt, options)) return;
+  const createdMs = timestampMs(savedAt) || Date.now();
+  const key = `${AUXILIARY_BACKUP_KEY_PREFIX}${state.profile.id}.${createdMs}.v1`;
+  const item = {
+    key,
+    profileId: state.profile.id,
+    label: state.account?.email || state.profile?.name || "Perfil",
+    updatedAt: savedAt,
+    createdMs,
+    total: getRecoveryDataTotal(state),
+  };
+  const items = getAuxiliaryBackupIndex().filter((backup) => backup.key !== key);
+  if (safeStorageSet(localStorage, key, serializedState)) {
+    items.unshift(item);
+    trimAuxiliaryLocalBackups(state.profile.id, items);
+  }
+  writeAuxiliaryIndexedBackupSnapshot(item, serializedState);
+}
+
+function createAuxiliaryBackupNow() {
+  if (!state.profile?.id || !isProfileAuthenticated()) {
+    showToast("Entre na conta antes de criar o backup auxiliar.");
+    return;
+  }
+  if (!stateHasMeaningfulData(state)) {
+    showToast("Ainda nao ha dados de estudo para guardar no backup auxiliar.");
+    return;
+  }
+  const savedAt = new Date().toISOString();
+  state.meta = { ...(state.meta || {}), localSavedAt: savedAt };
+  const serializedState = JSON.stringify(state);
+  safeStorageSet(localStorage, meaningfulStateBackupStorageKey(state.profile.id), serializedState);
+  writeAuxiliaryBackupSnapshot(serializedState, savedAt, { force: true });
+  renderLocalRecoveryList();
+  showToast("Backup auxiliar criado neste navegador.");
+}
+
+function openAuxiliaryBackupDB() {
+  if (!globalThis.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(AUXILIARY_BACKUP_DB_NAME, AUXILIARY_BACKUP_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(AUXILIARY_BACKUP_STORE)) {
+        const store = db.createObjectStore(AUXILIARY_BACKUP_STORE, { keyPath: "key" });
+        store.createIndex("profileId", "profileId", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function waitForTransaction(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+function waitForRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function writeAuxiliaryIndexedBackupSnapshot(item, serializedState) {
+  try {
+    const db = await openAuxiliaryBackupDB();
+    if (!db) return;
+    const transaction = db.transaction(AUXILIARY_BACKUP_STORE, "readwrite");
+    const complete = waitForTransaction(transaction);
+    transaction.objectStore(AUXILIARY_BACKUP_STORE).put({
+      ...item,
+      state: JSON.parse(serializedState),
+      sourceLabel: "Cofre auxiliar IndexedDB",
+    });
+    await complete;
+    db.close();
+    trimAuxiliaryIndexedBackups(item.profileId);
+  } catch (error) {
+    console.warn("Falha ao gravar cofre auxiliar IndexedDB:", error);
+  }
+}
+
+async function trimAuxiliaryIndexedBackups(profileId) {
+  try {
+    const db = await openAuxiliaryBackupDB();
+    if (!db) return;
+    const readTransaction = db.transaction(AUXILIARY_BACKUP_STORE, "readonly");
+    const readComplete = waitForTransaction(readTransaction);
+    const all = await waitForRequest(readTransaction.objectStore(AUXILIARY_BACKUP_STORE).getAll());
+    await readComplete;
+    const extras = all
+      .filter((item) => item.profileId === profileId)
+      .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0))
+      .slice(AUXILIARY_BACKUP_MAX_PER_PROFILE);
+    if (extras.length) {
+      const writeTransaction = db.transaction(AUXILIARY_BACKUP_STORE, "readwrite");
+      const writeComplete = waitForTransaction(writeTransaction);
+      const store = writeTransaction.objectStore(AUXILIARY_BACKUP_STORE);
+      extras.forEach((item) => store.delete(item.key));
+      await writeComplete;
+    }
+    db.close();
+  } catch (error) {
+    console.warn("Falha ao limpar backups antigos do IndexedDB:", error);
+  }
+}
+
+async function getIndexedRecoveryCandidates() {
+  try {
+    const db = await openAuxiliaryBackupDB();
+    if (!db) return [];
+    const transaction = db.transaction(AUXILIARY_BACKUP_STORE, "readonly");
+    const complete = waitForTransaction(transaction);
+    const records = await waitForRequest(transaction.objectStore(AUXILIARY_BACKUP_STORE).getAll());
+    await complete;
+    db.close();
+    return records
+      .map((record) => {
+        const candidateState = normalizeState(record.state || record.data, record.state?.profile?.id || record.profileId);
+        if (!stateHasMeaningfulData(candidateState)) return null;
+        return {
+          ...makeRecoveryCandidate(record.key, candidateState, record.sourceLabel || "Cofre auxiliar IndexedDB"),
+          updatedAt: record.updatedAt || candidateState.meta?.localSavedAt || "",
+        };
+      })
+      .filter(Boolean);
+  } catch (error) {
+    console.warn("Falha ao ler cofre auxiliar IndexedDB:", error);
+    return [];
+  }
+}
+
 function getLocalRecoveryCandidates() {
-  const prefixes = [PROFILE_KEY_PREFIX, STATE_BACKUP_KEY_PREFIX, MEANINGFUL_STATE_BACKUP_KEY_PREFIX];
+  const prefixes = [PROFILE_KEY_PREFIX, STATE_BACKUP_KEY_PREFIX, MEANINGFUL_STATE_BACKUP_KEY_PREFIX, AUXILIARY_BACKUP_KEY_PREFIX];
   const candidates = [];
   const seen = new Set();
   try {
@@ -2313,15 +2522,7 @@ function getLocalRecoveryCandidates() {
       try {
         const candidateState = getRecoveryStateFromStorageKey(key);
         if (!stateHasMeaningfulData(candidateState)) continue;
-        const total = getRecoveryDataTotal(candidateState);
-        candidates.push({
-          key,
-          state: candidateState,
-          total,
-          updatedAt: candidateState.meta?.localSavedAt || "",
-          label: candidateState.account?.email || candidateState.profile?.name || key.replace(/^ymEstudos\./, ""),
-          counts: getRecoveryDataCounts(candidateState).filter((item) => item.count > 0),
-        });
+        candidates.push(makeRecoveryCandidate(key, candidateState, key.startsWith(AUXILIARY_BACKUP_KEY_PREFIX) ? "Cofre auxiliar local" : "Navegador"));
       } catch (error) {
         console.warn("Backup local ignorado:", key, error);
       }
@@ -2330,19 +2531,20 @@ function getLocalRecoveryCandidates() {
     console.warn("Falha ao listar backups locais:", error);
   }
 
-  return candidates.sort((a, b) => b.total - a.total || timestampMs(b.updatedAt) - timestampMs(a.updatedAt));
+  localRecoveryCandidateCache = mergeRecoveryCandidates([...localRecoveryCandidateCache, ...candidates]);
+  return localRecoveryCandidateCache;
 }
 
 function findLocalRecoveryCandidate(key) {
-  return getLocalRecoveryCandidates().find((candidate) => candidate.key === key) || null;
+  return localRecoveryCandidateCache.find((candidate) => candidate.key === key) || getLocalRecoveryCandidates().find((candidate) => candidate.key === key) || null;
 }
 
-function renderLocalRecoveryList() {
+function renderLocalRecoveryList(candidates = null) {
   const list = $("#localRecoveryList");
   if (!list) return;
-  const candidates = getLocalRecoveryCandidates();
-  list.innerHTML = candidates.length
-    ? candidates
+  const items = candidates || getLocalRecoveryCandidates();
+  list.innerHTML = items.length
+    ? items
         .map((candidate) => {
           const updatedAt = candidate.updatedAt ? new Date(candidate.updatedAt).toLocaleString("pt-BR") : "sem data";
           const counts = candidate.counts.map((item) => `${item.label}: ${item.count}`).join(" | ");
@@ -2350,7 +2552,7 @@ function renderLocalRecoveryList() {
             <article class="local-recovery-card">
               <div>
                 <strong>${escapeHTML(candidate.label)}</strong>
-                <small>${escapeHTML(updatedAt)} - ${candidate.total} itens encontrados</small>
+                <small>${escapeHTML(candidate.sourceLabel)} - ${escapeHTML(updatedAt)} - ${candidate.total} itens encontrados</small>
                 <span>${escapeHTML(counts)}</span>
               </div>
               <div class="inline-actions">
@@ -2362,6 +2564,19 @@ function renderLocalRecoveryList() {
         })
         .join("")
     : `<div class="empty-state">Nenhuma copia local com dados foi encontrada neste navegador.</div>`;
+}
+
+async function scanLocalRecoveryCandidates() {
+  const localCandidates = getLocalRecoveryCandidates();
+  renderLocalRecoveryList(localCandidates);
+  const indexedCandidates = await getIndexedRecoveryCandidates();
+  localRecoveryCandidateCache = mergeRecoveryCandidates([...localCandidates, ...indexedCandidates]);
+  renderLocalRecoveryList(localRecoveryCandidateCache);
+  showToast(
+    localRecoveryCandidateCache.length
+      ? `${localRecoveryCandidateCache.length} copia(s) local(is) encontrada(s). Baixe antes de restaurar.`
+      : "Nenhuma copia local com dados foi encontrada neste navegador."
+  );
 }
 
 function downloadLocalRecoveryCandidate(key) {
@@ -8388,8 +8603,12 @@ function handleAction(action) {
   }
 
   if (type === "scanLocalRecovery") {
-    renderLocalRecoveryList();
-    showToast("Busca por copias locais concluida.");
+    scanLocalRecoveryCandidates();
+    return;
+  }
+
+  if (type === "createAuxiliaryBackup") {
+    createAuxiliaryBackupNow();
     return;
   }
 

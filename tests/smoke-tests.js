@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260725-local-recovery"), "Cache do HTML nao foi atualizado para recuperacao local.");
-assert(html.includes("supabase-config.js?v=20260725-local-recovery"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20260727-auxiliary-backup"), "Cache do HTML nao foi atualizado para backup auxiliar.");
+assert(html.includes("supabase-config.js?v=20260727-auxiliary-backup"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -54,6 +54,7 @@ assert(html.includes("reportCompetitionFilter"), "Filtro de relatorios por concu
 assert(html.includes("reportCompetitionHint"), "Resumo do filtro de concurso ausente.");
 assert(html.includes("localRecoveryList"), "Lista de recuperacao local ausente.");
 assert(html.includes("data-action=\"scanLocalRecovery\""), "Botao de busca de backups locais ausente.");
+assert(html.includes("data-action=\"createAuxiliaryBackup\""), "Botao manual de backup auxiliar ausente.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
@@ -114,6 +115,12 @@ assert(app.includes("Protecao ativada: o app bloqueou um envio vazio"), "Bloquei
 assert(app.includes("function getLocalRecoveryCandidates"), "Busca de backups locais no navegador ausente.");
 assert(app.includes("function restoreLocalRecoveryCandidate"), "Restauracao de backup local ausente.");
 assert(app.includes("data-action=\"restoreLocalRecovery\""), "Acao de restauracao local nao e renderizada.");
+assert(app.includes("AUXILIARY_BACKUP_KEY_PREFIX"), "Chave do backup auxiliar local ausente.");
+assert(app.includes("AUXILIARY_BACKUP_DB_NAME"), "Banco IndexedDB de backup auxiliar ausente.");
+assert(app.includes("function writeAuxiliaryBackupSnapshot"), "Gravacao automatica do backup auxiliar ausente.");
+assert(app.includes("writeAuxiliaryBackupSnapshot(serializedState, savedAt);"), "saveState nao dispara backup auxiliar automatico.");
+assert(app.includes("function createAuxiliaryBackupNow"), "Criacao manual do backup auxiliar ausente.");
+assert(app.includes("function getIndexedRecoveryCandidates"), "Leitura de backups auxiliares no IndexedDB ausente.");
 assert(app.includes("POMODORO_CHECKPOINT_KEY_PREFIX"), "Chave de checkpoint do Pomodoro ausente.");
 assert(app.includes("function writePomodoroCheckpoint"), "Pre-salvamento do Pomodoro ausente.");
 assert(app.includes("function restorePomodoroCheckpoint"), "Recuperacao do Pomodoro interrompido ausente.");

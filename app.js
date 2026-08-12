@@ -68,6 +68,7 @@ let timer = {
   subjectId: "",
   topicId: "",
   competitionId: "",
+  lastTickAt: 0,
 };
 const syncingSources = new Set();
 let pomodoroAudioContext = null;
@@ -944,6 +945,7 @@ function createPomodoroCheckpoint() {
       subjectId: timer.subjectId || $("#timerSubject")?.value || "",
       topicId: timer.topicId || $("#timerTopic")?.value || "",
       competitionId: timer.competitionId || $("#timerCompetition")?.value || "",
+      lastTickAt: timer.running ? Math.round(Number(timer.lastTickAt) || Date.now()) : 0,
     },
   };
 }
@@ -1019,6 +1021,7 @@ function restorePomodoroCheckpoint() {
   timer.subjectId = scope.subjectId;
   timer.topicId = scope.topicId;
   timer.competitionId = scope.competitionId;
+  timer.lastTickAt = 0;
 
   if ($("#timerSubject") && timer.subjectId) {
     $("#timerSubject").value = timer.subjectId;
@@ -6331,6 +6334,7 @@ function restoreUnsavedFormDrafts() {
 }
 
 function persistBeforePageExit() {
+  syncTimerWithClock({ renderUpdates: false, writeCheckpoint: false });
   writeUnsavedFormDrafts();
   if (!isProfileAuthenticated()) return;
   writePomodoroCheckpoint();
@@ -6352,7 +6356,11 @@ function bindUnsavedDraftTracking() {
   window.addEventListener("beforeunload", persistBeforePageExit);
   window.addEventListener("pagehide", persistBeforePageExit);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") persistBeforePageExit();
+    if (document.visibilityState === "hidden") {
+      persistBeforePageExit();
+      return;
+    }
+    syncTimerWithClock({ renderUpdates: true });
   });
 }
 
@@ -6625,6 +6633,7 @@ function fillStudyLogForm(log) {
 }
 
 function renderPomodoro() {
+  syncTimerWithClock({ renderUpdates: false });
   const activeTopicId = timer.topicId || $("#timerTopic").value;
   const activeSubjectId = timer.subjectId || getTopic(activeTopicId)?.subjectId || $("#timerSubject").value;
   const activeCompetitionId = timer.competitionId || $("#timerCompetition")?.value || "";
@@ -7332,6 +7341,7 @@ function resetTimer() {
   timer.subjectId = "";
   timer.topicId = "";
   timer.competitionId = "";
+  timer.lastTickAt = 0;
   clearPomodoroCheckpoint();
   renderPomodoro();
 }
@@ -7439,6 +7449,58 @@ function toggleLofiTick() {
   showToast(state.settings.tickLofiEnabled ? "Lofi tic-tac ligado." : "Lofi tic-tac desligado.");
 }
 
+function applyTimerElapsed(elapsedSeconds) {
+  let secondsLeft = clamp(Math.floor(Number(elapsedSeconds) || 0), 0, 12 * 60 * 60);
+  const originalSeconds = secondsLeft;
+  let transitions = 0;
+
+  while (secondsLeft > 0 && timer.running && transitions < 96) {
+    if (!Number.isFinite(timer.remaining) || timer.remaining <= 0) {
+      timer.remaining = getPomodoroModeDuration(timer.mode);
+    }
+
+    const step = Math.min(timer.remaining, secondsLeft);
+    timer.remaining -= step;
+    if (timer.mode === "focus") timer.elapsedFocusSeconds += step;
+    if (timer.mode !== "longBreak") timer.elapsedSinceLongBreakSeconds += step;
+    secondsLeft -= step;
+
+    if (timer.remaining <= 0) {
+      completeTimerBlock();
+      transitions += 1;
+    }
+  }
+
+  return originalSeconds - secondsLeft;
+}
+
+function syncTimerWithClock(options = {}) {
+  const { renderUpdates = false, writeCheckpoint = true } = options;
+  if (!timer.running) return 0;
+
+  const now = Date.now();
+  const previousTick = Number(timer.lastTickAt) || 0;
+  if (!Number.isFinite(previousTick) || previousTick <= 0 || previousTick > now) {
+    timer.lastTickAt = now;
+    return 0;
+  }
+
+  const elapsedSeconds = Math.floor((now - previousTick) / 1000);
+  if (elapsedSeconds <= 0) return 0;
+
+  timer.lastTickAt = previousTick + elapsedSeconds * 1000;
+  const appliedSeconds = applyTimerElapsed(elapsedSeconds);
+
+  if (writeCheckpoint) writePomodoroCheckpoint();
+  if (renderUpdates) {
+    renderPomodoro();
+    renderDashboard();
+    renderReports();
+  }
+
+  return appliedSeconds;
+}
+
 function startTimer() {
   if (timer.running) return;
   const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
@@ -7452,6 +7514,8 @@ function startTimer() {
   if (!timer.topicId) timer.topicId = topicId;
   if (!timer.competitionId) timer.competitionId = competitionId;
   timer.running = true;
+  timer.lastTickAt = Date.now();
+  window.clearInterval(timer.interval);
   timer.interval = window.setInterval(tickTimer, 1000);
   startLofiTick();
   writePomodoroCheckpoint();
@@ -7459,27 +7523,18 @@ function startTimer() {
 }
 
 function pauseTimer() {
+  syncTimerWithClock({ renderUpdates: false, writeCheckpoint: false });
   window.clearInterval(timer.interval);
   stopLofiTick();
   timer.interval = null;
   timer.running = false;
+  timer.lastTickAt = 0;
   writePomodoroCheckpoint();
   renderPomodoro();
 }
 
 function tickTimer() {
-  timer.remaining -= 1;
-  if (timer.mode === "focus") timer.elapsedFocusSeconds += 1;
-  if (timer.mode !== "longBreak") timer.elapsedSinceLongBreakSeconds += 1;
-
-  if (timer.remaining <= 0) {
-    completeTimerBlock();
-  }
-
-  writePomodoroCheckpoint();
-  renderPomodoro();
-  renderDashboard();
-  renderReports();
+  syncTimerWithClock({ renderUpdates: true });
 }
 
 function longBreakIsDue() {
@@ -7533,6 +7588,7 @@ function completeTimerBlock(options = {}) {
 }
 
 function skipTimerStep() {
+  syncTimerWithClock({ renderUpdates: false, writeCheckpoint: false });
   if (!timer.subjectId && timer.mode === "focus") {
     const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
     if (!subjectId) {
@@ -7574,6 +7630,7 @@ function logPomodoroFocus() {
 }
 
 function finishTimerManually() {
+  syncTimerWithClock({ renderUpdates: false, writeCheckpoint: false });
   if (timer.mode !== "focus" || timer.elapsedFocusSeconds < 60) {
     showToast("O foco precisa ter pelo menos 1 minuto para registrar.");
     return;

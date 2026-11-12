@@ -1,0 +1,1717 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>estudos track</title>
+    <link rel="icon" href="assets/favicon-estudos-track.png" type="image/png" sizes="512x512" />
+    <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
+    <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
+    <meta name="theme-color" content="#0f766e" />
+    <link rel="stylesheet" href="styles.css?v=20260812-pomodoro-clock" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <button class="brand home-brand" data-view="dashboard" data-scroll-top="true" type="button" aria-label="Ir para o Painel inicial">
+          <img class="brand-logo-full" src="assets/logo-estudos-track.png" alt="Estudos Track" />
+        </button>
+
+        <nav class="side-nav" aria-label="Navegação principal">
+          <button class="nav-button active" data-view="dashboard">Painel</button>
+          <button class="nav-button" data-view="controle">Controle</button>
+          <button class="nav-button" data-view="plano">Matérias</button>
+          <button class="nav-button" data-view="concursos">Concursos</button>
+          <button class="nav-button" data-view="edital">Edital</button>
+          <button class="nav-button" data-view="questoes">Questões</button>
+          <button class="nav-button" data-view="flashcards">Flashcards</button>
+          <button class="nav-button" data-view="anotacoes">Anotações</button>
+          <button class="nav-button" data-view="jurisprudencias">Jurisprudências</button>
+          <button class="nav-button" data-view="pomodoro">Pomodoro</button>
+          <button class="nav-button" data-view="relatorios">Relatórios</button>
+          <button class="nav-button" data-view="conta">Conta</button>
+        </nav>
+
+        <div class="quick-panel">
+          <p class="eyebrow">Hoje</p>
+          <strong id="sideTodayHours">0h</strong>
+          <span id="sideTodayMeta">Nenhuma sessão registrada.</span>
+        </div>
+
+        <form class="profile-panel" id="profileForm">
+          <p class="eyebrow">Acesso individual</p>
+          <strong id="profileLabel">Entrar no meu perfil</strong>
+          <label>
+            E-mail ou nome do perfil
+            <input id="profileName" type="text" autocomplete="username" placeholder="seu@email.com ou nome local" />
+          </label>
+          <label>
+            Senha ou PIN
+            <input id="profilePin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Senha online ou PIN local" />
+          </label>
+          <div class="profile-actions">
+            <button class="button secondary" id="profileAccessBtn" type="submit">Entrar</button>
+            <button class="button primary" id="profileSignupBtn" type="button">Criar conta</button>
+            <button class="button ghost" id="logoutProfileBtn" type="button">Sair</button>
+          </div>
+          <div class="profile-recovery-actions">
+            <button class="button ghost" id="forgotPasswordBtn" type="button">Esqueci a senha</button>
+          </div>
+          <span id="profileStatus">Com Supabase configurado, cada conta entra por e-mail e senha. Sem Supabase, cada perfil local entra por nome e PIN.</span>
+        </form>
+
+        <div class="storage-actions">
+          <button class="button secondary" data-action="downloadBackup" type="button">Backup</button>
+          <button class="button ghost" id="exportBtn" type="button">Exportar</button>
+          <label class="button ghost import-label" for="importInput">
+            Importar
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Rotina de estudos</p>
+            <h1 id="pageTitle">Painel</h1>
+          </div>
+          <form class="global-search" id="globalSearchForm" role="search">
+            <label class="sr-only" for="globalSearchInput">Buscar em todo o Estudos Track</label>
+            <input id="globalSearchInput" type="search" autocomplete="off" placeholder="Buscar em tudo..." />
+            <button class="mini-button" id="globalSearchClearBtn" type="button">Limpar</button>
+            <div class="global-search-results" id="globalSearchResults"></div>
+          </form>
+          <div class="topbar-actions">
+            <span id="syncStatus" class="sync-status">Local</span>
+            <button class="button ghost" id="themeToggleBtn" type="button" aria-pressed="false">Modo escuro</button>
+            <span id="currentDate" class="date-pill"></span>
+            <button class="button secondary" data-view="pomodoro" type="button">Abrir Pomodoro</button>
+            <button class="button primary" data-view="plano" type="button">Nova matéria</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard" aria-labelledby="dashboardTitle">
+          <div class="dashboard-visual">
+            <div class="visual-copy">
+              <p class="eyebrow">Visão geral</p>
+              <h2 id="dashboardTitle">Acompanhe o que rende e o que precisa de reforço</h2>
+              <div class="quick-actions">
+                <button class="button primary" data-view="questoes" type="button">Lançar questões</button>
+                <button class="button secondary" data-view="edital" type="button">Importar edital</button>
+                <button class="button secondary" data-view="flashcards" type="button">Revisar flashcards</button>
+                <button class="button secondary" data-view="anotacoes" type="button">Anotar lei</button>
+                <button class="button secondary" data-view="jurisprudencias" type="button">Salvar julgado</button>
+                <button class="button ghost" data-view="controle" type="button">Ver controle</button>
+              </div>
+            </div>
+            <canvas id="studyCanvas" width="620" height="330" aria-label="Resumo visual do progresso"></canvas>
+          </div>
+
+          <div class="stat-grid" id="statGrid"></div>
+
+          <section class="panel backup-shortcut-panel" id="backupShortcutPanel">
+            <div>
+              <p class="eyebrow">Segurança dos dados</p>
+              <strong>Faça backup antes de testar mudanças ou trocar de navegador</strong>
+              <span>O arquivo guarda matérias, pomodoros, questões, flashcards, fontes, leis, tabelas e anotações deste perfil.</span>
+            </div>
+            <div class="backup-shortcut-actions">
+              <button class="button secondary" data-action="downloadBackup" type="button">Baixar backup</button>
+              <button class="button ghost" data-view="conta" type="button">Restaurar backup</button>
+            </div>
+          </section>
+
+          <section class="panel consistency-panel" id="consistencyPanel" aria-labelledby="consistencyTitle">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Constância e retenção</p>
+                <h2 id="consistencyTitle">Ofensiva, Meta Piso e Ignição do Dia</h2>
+              </div>
+              <div class="consistency-badges" id="consistencyBadges"></div>
+            </div>
+
+            <div class="heatmap-box">
+              <div class="heatmap-header">
+                <strong>Mapa de constância (últimos 28 dias)</strong>
+                <span class="music-note">Cinza: sem estudo • Âmbar: Meta Piso (15min, 1 revisão ou 3 erros) • Verde: 50min+</span>
+              </div>
+              <div class="consistency-heatmap" id="consistencyHeatmap"></div>
+            </div>
+
+            <div class="content-grid two-columns consistency-ignition-grid">
+              <div class="ignition-box">
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="eyebrow">Fixação ativa</p>
+                    <h3>Revisões espaçadas de hoje (<span id="dueSpacedReviewsCount">0</span>)</h3>
+                  </div>
+                </div>
+                <div class="spaced-review-list" id="spacedReviewList"></div>
+              </div>
+
+              <div class="ignition-box">
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="eyebrow">Caderno de erros</p>
+                    <h3>Desafio rápido (<span id="dueErrorNotebookCount">0</span> pendentes)</h3>
+                  </div>
+                  <button class="mini-button" data-view="questoes" type="button">Abrir caderno</button>
+                </div>
+                <div id="dashboardErrorTrainer" class="error-trainer-card"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel daily-review-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Hoje</p>
+                <h2>Revisao diaria sugerida</h2>
+              </div>
+              <button class="button ghost" data-view="pomodoro" type="button">Estudar agora</button>
+            </div>
+            <div class="daily-review-grid" id="dailyReviewList"></div>
+          </section>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Tempo</p>
+                  <h2>Últimos 7 dias</h2>
+                </div>
+              </div>
+              <div class="bar-chart" id="weekChart"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Diagnóstico</p>
+                  <h2>Pontos fortes e fracos</h2>
+                </div>
+              </div>
+              <div id="strengthList" class="insight-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="plano" aria-labelledby="planoTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Planejamento</p>
+              <h2 id="planoTitle">Matérias e assuntos</h2>
+            </div>
+            <button class="button ghost danger" id="resetDemoBtn" type="button">Restaurar exemplo</button>
+          </div>
+
+          <div class="content-grid two-columns">
+            <form class="panel form-panel" id="subjectForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matéria</p>
+                  <h3 id="subjectFormTitle">Adicionar materia</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="subjectName" name="subjectName" type="text" placeholder="Ex.: Direito Administrativo" required />
+              </label>
+              <label>
+                Meta semanal em horas
+                <input id="subjectGoal" name="subjectGoal" type="number" min="0" step="0.5" value="3" required />
+              </label>
+              <label>
+                Cor
+                <input id="subjectColor" name="subjectColor" type="color" value="#0f766e" />
+              </label>
+              <div class="subject-color-palette" aria-label="Cores rapidas para materia">
+                <button class="subject-color-swatch" data-subject-color="#0f766e" style="--swatch:#0f766e" type="button" title="Verde estudo" aria-label="Selecionar verde estudo"></button>
+                <button class="subject-color-swatch" data-subject-color="#2563eb" style="--swatch:#2563eb" type="button" title="Azul" aria-label="Selecionar azul"></button>
+                <button class="subject-color-swatch" data-subject-color="#7c3aed" style="--swatch:#7c3aed" type="button" title="Roxo" aria-label="Selecionar roxo"></button>
+                <button class="subject-color-swatch" data-subject-color="#db2777" style="--swatch:#db2777" type="button" title="Rosa" aria-label="Selecionar rosa"></button>
+                <button class="subject-color-swatch" data-subject-color="#dc2626" style="--swatch:#dc2626" type="button" title="Vermelho" aria-label="Selecionar vermelho"></button>
+                <button class="subject-color-swatch" data-subject-color="#ea580c" style="--swatch:#ea580c" type="button" title="Laranja" aria-label="Selecionar laranja"></button>
+                <button class="subject-color-swatch" data-subject-color="#ca8a04" style="--swatch:#ca8a04" type="button" title="Amarelo escuro" aria-label="Selecionar amarelo escuro"></button>
+                <button class="subject-color-swatch" data-subject-color="#16a34a" style="--swatch:#16a34a" type="button" title="Verde" aria-label="Selecionar verde"></button>
+                <button class="subject-color-swatch" data-subject-color="#0891b2" style="--swatch:#0891b2" type="button" title="Ciano" aria-label="Selecionar ciano"></button>
+                <button class="subject-color-swatch" data-subject-color="#475569" style="--swatch:#475569" type="button" title="Grafite" aria-label="Selecionar grafite"></button>
+              </div>
+              <div class="inline-actions form-actions">
+                <button class="button primary" id="subjectSubmitBtn" type="submit">Adicionar materia</button>
+                <button class="button ghost hidden" id="cancelSubjectEditBtn" type="button">Cancelar edicao</button>
+              </div>
+            </form>
+
+            <form class="panel form-panel" id="topicForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Assunto</p>
+                  <h3 id="topicFormTitle">Adicionar assunto</h3>
+                </div>
+              </div>
+              <label>
+                Matéria
+                <select id="topicSubject" required></select>
+              </label>
+              <label>
+                Assunto
+                <input id="topicName" type="text" placeholder="Ex.: Controle de constitucionalidade" required />
+              </label>
+              <label>
+                Prioridade
+                <select id="topicPriority">
+                  <option value="Alta">Alta</option>
+                  <option value="Média" selected>Média</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
+              <div class="inline-actions form-actions">
+                <button class="button primary" id="topicSubmitBtn" type="submit">Adicionar assunto</button>
+                <button class="button ghost hidden" id="cancelTopicEditBtn" type="button">Cancelar edicao</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="subject-board" id="subjectBoard"></div>
+        </section>
+
+        <section class="view" id="concursos" aria-labelledby="concursosTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Foco por prova</p>
+              <h2 id="concursosTitle">Concursos</h2>
+            </div>
+            <button class="button secondary" data-view="pomodoro" type="button">Estudar para concurso</button>
+          </div>
+
+          <div class="content-grid two-columns">
+            <form class="panel form-panel" id="competitionForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Concurso</p>
+                  <h3>Cadastrar concurso</h3>
+                </div>
+              </div>
+              <label>
+                Nome do concurso
+                <input id="competitionName" type="text" placeholder="Ex.: TJSP, TRT, INSS..." required />
+              </label>
+              <label>
+                Data da prova
+                <input id="competitionDate" type="date" />
+              </label>
+              <label>
+                Observações
+                <textarea id="competitionNotes" rows="3" placeholder="Cargo, banca, edital ou meta principal"></textarea>
+              </label>
+              <button class="button primary" type="submit">Salvar concurso</button>
+            </form>
+
+            <form class="panel form-panel" id="competitionSubjectForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matérias</p>
+                  <h3>Vincular matéria ao concurso</h3>
+                </div>
+              </div>
+              <label>
+                Concurso
+                <select id="competitionSelect" required></select>
+              </label>
+              <label>
+                Matéria
+                <select id="competitionSubjectSelect" required></select>
+              </label>
+              <button class="button secondary" type="submit">Vincular matéria</button>
+            </form>
+          </div>
+
+          <div class="competition-board" id="competitionBoard"></div>
+        </section>
+
+        <section class="view" id="edital" aria-labelledby="editalTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Cronograma por prova</p>
+              <h2 id="editalTitle">Importar edital e montar plano de estudo</h2>
+            </div>
+            <button class="button secondary" id="editalImportPlanBtn" type="button">Importar para Matérias</button>
+          </div>
+
+          <div class="content-grid edital-grid">
+            <form class="panel form-panel" id="editalForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Edital</p>
+                  <h3>Dados da prova</h3>
+                </div>
+              </div>
+              <label>
+                Nome da prova
+                <input id="editalExamName" type="text" placeholder="Ex.: TJ, TRT, Prefeitura..." />
+              </label>
+              <label>
+                Cargo ou área a analisar
+                <input id="editalTargetRole" type="text" placeholder="Ex.: Analista Judiciário - Área Judiciária" />
+              </label>
+              <label>
+                Data da prova
+                <input id="editalExamDate" type="date" required />
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Horas por semana
+                  <input id="editalWeeklyHours" type="number" min="1" max="80" step="0.5" value="15" required />
+                </label>
+                <label>
+                  Bloco de estudo
+                  <input id="editalSessionMinutes" type="number" min="15" max="240" step="5" value="50" required />
+                </label>
+              </div>
+              <label>
+                Arquivo do edital
+                <input id="editalFile" type="file" accept=".pdf,.txt,.html,.htm,application/pdf,text/plain,text/html" />
+              </label>
+              <label>
+                Conteúdo programático do cargo
+                <textarea id="editalText" class="edital-textarea" rows="12" placeholder="Cole o edital ou somente o conteúdo programático. Informe o cargo acima para o app separar o que é matéria cobrada do que é regra administrativa do edital."></textarea>
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" type="submit">Gerar cronograma</button>
+                <button class="button ghost danger" id="editalClearBtn" type="button">Limpar edital</button>
+              </div>
+            </form>
+
+            <section class="panel edital-summary-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Análise</p>
+                  <h3 id="editalSummaryTitle">Matérias cobradas identificadas</h3>
+                </div>
+              </div>
+              <div class="edital-stat-grid" id="editalStats"></div>
+              <div class="edital-alert" id="editalAdvice">Importe ou cole o edital para gerar um plano proporcional até a prova.</div>
+              <div class="edital-detected-list" id="editalDetectedList"></div>
+              <form class="edital-manual-form" id="editalManualForm">
+                <div class="split-inputs">
+                  <label>
+                    Materia
+                    <input id="editalManualSubject" type="text" placeholder="Ex.: Direito Constitucional" />
+                  </label>
+                  <label>
+                    Assunto
+                    <input id="editalManualTopic" type="text" placeholder="Ex.: Controle de constitucionalidade" />
+                  </label>
+                </div>
+                <button class="button secondary" type="submit">Adicionar ao edital</button>
+              </form>
+              <div class="inline-actions">
+                <button class="button ghost" id="copyEditalScheduleBtn" type="button">Copiar cronograma</button>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Semanas até a prova</p>
+                <h3>Roteiro sugerido</h3>
+              </div>
+            </div>
+            <div class="edital-schedule-list" id="editalScheduleList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="questoes" aria-labelledby="questoesTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Desempenho</p>
+              <h2 id="questoesTitle">Controle de acertos e erros</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="questionForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Questões</p>
+                  <h3 id="questionFormTitle">Novo lançamento</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="questionSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="questionTopic" required></select>
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Acertos
+                  <input id="questionCorrect" type="number" min="0" value="0" required />
+                </label>
+                <label>
+                  Erros
+                  <input id="questionWrong" type="number" min="0" value="0" required />
+                </label>
+              </div>
+              <label>
+                Data
+                <input id="questionDate" type="date" required />
+              </label>
+              <label>
+                Observações
+                <textarea id="questionNotes" rows="4" placeholder="Ex.: revisar prazos e competência"></textarea>
+              </label>
+              <label class="checkbox-line">
+                <input id="questionScheduleReview" type="checkbox" checked />
+                Agendar ciclo de revisão espaçada (1, 7, 15 e 30 dias) para este assunto
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" id="questionSubmitBtn" type="submit">Salvar questões</button>
+                <button class="button ghost hidden" id="questionCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h3>Lançamentos recentes</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Assunto</th>
+                      <th>Acertos</th>
+                      <th>Erros</th>
+                      <th>%</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="questionHistory"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Mapa</p>
+                <h3>Precisão por assunto</h3>
+              </div>
+            </div>
+            <div class="question-precision-tools">
+              <div class="segmented" role="tablist" aria-label="Periodo da precisao">
+                <button class="segment" data-question-precision-range="day" type="button">Dia</button>
+                <button class="segment active" data-question-precision-range="week" type="button">Semana</button>
+                <button class="segment" data-question-precision-range="month" type="button">Mês</button>
+                <button class="segment" data-question-precision-range="year" type="button">Ano</button>
+              </div>
+              <p class="question-precision-summary" id="questionPrecisionSummary">Sem questões no período.</p>
+            </div>
+            <div class="topic-performance" id="topicPerformance"></div>
+            <div class="review-reminder-list" id="questionReviewReminders"></div>
+          </section>
+
+          <section class="panel error-notebook-panel" aria-labelledby="errorNotebookHeading">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Diagnóstico de falhas</p>
+                <h3 id="errorNotebookHeading">Caderno de Erros Acionável</h3>
+              </div>
+              <span class="tag" id="errorNotebookSummary">0 erros ativos</span>
+            </div>
+
+            <div class="content-grid form-and-list">
+              <form class="form-panel" id="errorNotebookForm">
+                <div class="split-inputs">
+                  <label>
+                    Matéria
+                    <select id="errorSubject" required></select>
+                  </label>
+                  <label>
+                    Assunto
+                    <select id="errorTopic" required></select>
+                  </label>
+                </div>
+                <label>
+                  Tipo de falha
+                  <select id="errorType" required>
+                    <option value="Lacuna teórica">Lacuna teórica</option>
+                    <option value="Troca de prazo/conceito">Troca de prazo/conceito</option>
+                    <option value="Atenção/leitura">Atenção / leitura apressada</option>
+                    <option value="Jurisprudência/Súmula">Jurisprudência / Súmula</option>
+                  </select>
+                </label>
+                <label>
+                  Gatilho do erro (A pegadinha ou dúvida em 1 frase)
+                  <textarea id="errorTrigger" rows="2" placeholder="Ex.: Confundi os efeitos da anulação com os da revogação..." required></textarea>
+                </label>
+                <label>
+                  Regra de Ouro / Artigo / Fundamento correto
+                  <textarea id="errorGoldenRule" rows="3" placeholder="Ex.: Súmula 473 STF: Anulação = ilegalidade (ex tunc); Revogação = mérito (ex nunc)." required></textarea>
+                </label>
+                <div class="inline-actions">
+                  <button class="button primary" id="errorSubmitBtn" type="submit">Salvar no Caderno de Erros</button>
+                  <button class="button ghost hidden" id="errorCancelEditBtn" type="button">Cancelar edição</button>
+                </div>
+              </form>
+
+              <div>
+                <div class="segmented" style="margin-bottom: 14px;" role="tablist" aria-label="Filtro do caderno de erros">
+                  <button class="segment active" data-error-filter="active" type="button">Pendentes de domínio</button>
+                  <button class="segment" data-error-filter="mastered" type="button">Dominados (3/3)</button>
+                  <button class="segment" data-error-filter="all" type="button">Todos</button>
+                </div>
+                <div class="control-list" id="errorNotebookList"></div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="jurisprudencias" aria-labelledby="jurisTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Julgados</p>
+              <h2 id="jurisTitle">Jurisprudências STJ e STF</h2>
+            </div>
+            <div class="segmented" role="tablist" aria-label="Tribunal">
+              <button class="segment active" data-case-tab="STJ" role="tab" type="button">STJ</button>
+              <button class="segment" data-case-tab="STF" role="tab" type="button">STF</button>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="caseForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="caseCourtLabel">STJ</p>
+                  <h3>Nova jurisprudência</h3>
+                </div>
+              </div>
+              <label>
+                Título
+                <input id="caseTitle" type="text" placeholder="Ex.: Tema repetitivo sobre improbidade" required />
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Tribunal do julgado
+                  <select id="caseCourtSelect" required>
+                    <option value="STJ">STJ</option>
+                    <option value="STF">STF</option>
+                  </select>
+                </label>
+                <label>
+                  Data
+                  <input id="caseDate" type="date" required />
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria relacionada
+                  <select id="caseSubject"></select>
+                </label>
+                <label>
+                  Assunto relacionado
+                  <select id="caseTopic"></select>
+                </label>
+              </div>
+              <label>
+                Tema ou classe
+                <input id="caseTheme" type="text" placeholder="Ex.: Tema 1199, ADI, REsp" />
+              </label>
+              <div class="editor-field">
+                <span class="field-title">Tese, resumo ou ementa</span>
+                <div class="rich-editor-toolbar" data-editor="#caseSummaryEditor" aria-label="Editor da jurisprudência">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                  <button class="mini-button text-red" data-rich-preset-color="red" type="button">Vermelho</button>
+                  <button class="mini-button text-green" data-rich-preset-color="green" type="button">Verde</button>
+                  <button class="mini-button text-yellow" data-rich-preset-color="yellow" type="button">Amarelo</button>
+                  <button class="mini-button text-blue" data-rich-preset-color="blue" type="button">Azul</button>
+                  <button class="mini-button" data-rich-preset-color="original" type="button">Cor original</button>
+                  <button class="mini-button marker-red" data-rich-highlight="red" type="button">Fundo vermelho</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Fundo amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Fundo verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Fundo azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="caseTextColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#caseTextColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="caseSummaryEditor" class="note-editor rich-text-editor official-document-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Escreva a tese, resumo ou ementa. Cole tabelas do Word/Excel, imagens e edite como documento oficial."></div>
+              </div>
+              <label>
+                Hashtags
+                <input id="caseTags" type="text" placeholder="#improbidade #tema1199 #controle" />
+              </label>
+              <label>
+                Fonte
+                <input id="caseSource" type="url" placeholder="https://..." />
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" id="caseSubmitBtn" type="submit">Salvar jurisprudência</button>
+                <button class="button ghost hidden" id="caseCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="caseListScopeLabel">Aba atual</p>
+                  <h3 id="caseListTitle">STJ</h3>
+                </div>
+              </div>
+              <form class="case-filter-form" id="caseFilterForm">
+                <label>
+                  Buscar
+                  <input id="caseSearch" type="search" placeholder="Título, tese, tema, matéria ou assunto" />
+                </label>
+                <div class="case-search-scope-row">
+                  <span>Pesquisar em</span>
+                  <div class="segmented compact-segmented" role="tablist" aria-label="Escopo da pesquisa">
+                    <button class="segment active" data-case-search-scope="current" type="button">Aba atual</button>
+                    <button class="segment" data-case-search-scope="all" type="button">STJ + STF</button>
+                  </div>
+                </div>
+                <div class="split-inputs">
+                  <label>
+                    Matéria
+                    <select id="caseSubjectFilter"></select>
+                  </label>
+                  <label>
+                    Assunto
+                    <select id="caseTopicFilter"></select>
+                  </label>
+                </div>
+                <div class="filter-footer">
+                  <span id="caseFilterSummary">Todos os julgados cadastrados.</span>
+                  <button class="button ghost" id="clearCaseFiltersBtn" type="button">Limpar filtros</button>
+                </div>
+              </form>
+              <div class="case-list" id="caseList"></div>
+            </section>
+          </div>
+
+          <section class="panel legal-material-panel" aria-labelledby="legalMaterialTitleHeading">
+            <div class="panel-header legal-material-panel-header">
+              <div>
+                <p class="eyebrow">Material de apoio</p>
+                <h3 id="legalMaterialTitleHeading">Leis e tabelas</h3>
+              </div>
+              <span class="tag" id="legalMaterialSummary">0 materiais salvos.</span>
+            </div>
+
+            <div class="content-grid form-and-list legal-material-grid">
+              <form class="form-panel legal-material-form" id="legalMaterialForm">
+                <div class="split-inputs">
+                  <label>
+                    Tipo
+                    <select id="legalMaterialType">
+                      <option value="law">Lei</option>
+                      <option value="table">Tabela</option>
+                      <option value="note">Anotação</option>
+                      <option value="image">Imagem/foto</option>
+                    </select>
+                  </label>
+                  <label>
+                    Matéria relacionada
+                    <select id="legalMaterialSubject"></select>
+                  </label>
+                </div>
+                <label>
+                  Assunto relacionado
+                  <select id="legalMaterialTopic"></select>
+                </label>
+                <label>
+                  Título
+                  <input id="legalMaterialTitle" type="text" placeholder="Ex.: Lei 8.112/90" required />
+                </label>
+                <label>
+                  Referência
+                  <input id="legalMaterialReference" type="text" placeholder="Ex.: art. 37 ou quadro de prazos" />
+                </label>
+                <div class="editor-field">
+                  <span class="field-title">Documento oficial, texto ou tabela</span>
+                  <div class="rich-editor-toolbar" data-editor="#legalMaterialContentEditor" aria-label="Editor de leis e tabelas">
+                    <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                    <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                    <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                    <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                    <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                    <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                    <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                    <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                    <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                    <button class="mini-button text-red" data-rich-preset-color="red" type="button">Vermelho</button>
+                    <button class="mini-button text-green" data-rich-preset-color="green" type="button">Verde</button>
+                    <button class="mini-button text-yellow" data-rich-preset-color="yellow" type="button">Amarelo</button>
+                    <button class="mini-button text-blue" data-rich-preset-color="blue" type="button">Azul</button>
+                    <button class="mini-button" data-rich-preset-color="original" type="button">Cor original</button>
+                    <button class="mini-button marker-red" data-rich-highlight="red" type="button">Fundo vermelho</button>
+                    <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Fundo amarelo</button>
+                    <button class="mini-button marker-green" data-rich-highlight="green" type="button">Fundo verde</button>
+                    <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Fundo azul</button>
+                    <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                  </div>
+                  <div id="legalMaterialContentEditor" class="note-editor rich-text-editor official-document-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Cole aqui o documento oficial, tabela do Word/Excel ou texto da lei. Depois edite cores, negrito, itálico e células da tabela."></div>
+                  <textarea id="legalMaterialContent" class="hidden" rows="1"></textarea>
+                </div>
+                <label>
+                  Foto ou imagem
+                  <input id="legalMaterialImage" type="file" accept="image/*" />
+                </label>
+                <p class="music-note">Para tabelas, cole direto do Word, Excel ou editor de texto. Para fotos, escolha um arquivo ou cole a imagem copiada no campo acima.</p>
+                <label>
+                  Fonte
+                  <input id="legalMaterialSource" type="url" placeholder="https://..." />
+                </label>
+                <div class="inline-actions">
+                  <button class="button primary" id="legalMaterialSubmitBtn" type="submit">Salvar material</button>
+                  <button class="button ghost hidden" id="legalMaterialCancelEditBtn" type="button">Cancelar edição</button>
+                </div>
+              </form>
+
+              <section class="legal-material-results" aria-label="Leis e tabelas salvas">
+                <form class="case-filter-form" id="legalMaterialFilterForm">
+                  <label>
+                    Buscar em leis e tabelas
+                    <input id="legalMaterialSearch" type="search" placeholder="Texto, referência, matéria, assunto ou título" />
+                  </label>
+                  <div class="split-inputs">
+                    <label>
+                      Matéria
+                      <select id="legalMaterialSubjectFilter"></select>
+                    </label>
+                    <label>
+                      Assunto
+                      <select id="legalMaterialTopicFilter"></select>
+                    </label>
+                  </div>
+                  <div class="filter-footer">
+                    <span id="legalMaterialFilterSummary">Todos os materiais cadastrados.</span>
+                    <button class="button ghost" id="clearLegalMaterialFiltersBtn" type="button">Limpar filtros</button>
+                  </div>
+                </form>
+                <div class="legal-material-list" id="legalMaterialList"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="pomodoro" aria-labelledby="pomodoroTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Foco</p>
+              <h2 id="pomodoroTitle">Pomodoro e tempo de estudo</h2>
+            </div>
+          </div>
+
+          <div class="content-grid pomodoro-grid">
+            <section class="panel timer-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="timerMode">Foco</p>
+                  <h3 id="timerTopicLabel">Selecione uma matéria</h3>
+                </div>
+                <span class="cycle-pill" id="cycleCounter">Ciclo 1</span>
+              </div>
+
+              <div class="timer-face" aria-live="polite">
+                <span id="timerDisplay">25:00</span>
+                <div class="break-visual" aria-hidden="true">
+                  <span class="steam steam-one"></span>
+                  <span class="steam steam-two"></span>
+                  <span class="steam steam-three"></span>
+                  <span class="coffee-cup">
+                    <span class="coffee-handle"></span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="timer-controls">
+                <button class="button primary" id="startTimerBtn" type="button">Iniciar</button>
+                <button class="button secondary" id="pauseTimerBtn" type="button">Pausar</button>
+                <button class="button secondary" id="skipTimerBtn" type="button">Pular etapa</button>
+                <button class="button ghost" id="tickLofiToggleBtn" type="button">Desligar lofi</button>
+                <button class="button ghost" id="resetTimerBtn" type="button">Zerar</button>
+                <button class="button ghost" id="finishTimerBtn" type="button">Registrar</button>
+              </div>
+              <p class="pomodoro-save-status" id="pomodoroCheckpointStatus">Pre-salvamento pronto para o proximo Pomodoro.</p>
+            </section>
+
+            <form class="panel form-panel" id="timerSettingsForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Sessão</p>
+                  <h3>Configurar Pomodoro</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="timerSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="timerTopic"></select>
+                </label>
+              </div>
+              <label>
+                Concurso
+                <select id="timerCompetition"></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Foco
+                  <input id="focusMinutes" type="number" min="1" max="240" value="25" required />
+                </label>
+                <label>
+                  Pausa curta
+                  <input id="breakMinutes" type="number" min="1" max="120" value="5" required />
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Descanso longo
+                  <input id="longBreakMinutes" type="number" min="1" max="180" value="30" required />
+                </label>
+                <label>
+                  A cada (min)
+                  <input id="longBreakEveryMinutes" type="number" min="15" max="480" value="120" required />
+                </label>
+              </div>
+              <label>
+                Ciclos por rodada
+                <input id="cycleTotal" type="number" min="1" max="8" value="4" required />
+              </label>
+              <button class="button secondary" type="submit">Aplicar ajustes</button>
+            </form>
+
+            <form class="panel form-panel" id="studyLogForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Tempo</p>
+                  <h3 id="studyFormTitle">Registro manual</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="studySubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="studyTopic"></select>
+                </label>
+              </div>
+              <label>
+                Concurso
+                <select id="studyCompetition"></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Minutos
+                  <input id="studyMinutes" type="number" min="1" value="30" required />
+                </label>
+                <label>
+                  Data
+                  <input id="studyDate" type="date" required />
+                </label>
+              </div>
+              <label>
+                Nota
+                <input id="studyNote" type="text" placeholder="Ex.: leitura de lei seca" />
+              </label>
+              <label class="checkbox-line">
+                <input id="studyScheduleReview" type="checkbox" checked />
+                Gerar ciclo de revisão espaçada (1, 7, 15 e 30 dias)
+              </label>
+              <div class="inline-actions study-form-actions">
+                <button class="button primary" id="studySubmitBtn" type="submit">Registrar tempo</button>
+                <button class="button ghost hidden" id="cancelStudyEditBtn" type="button">Cancelar edicao</button>
+              </div>
+            </form>
+
+            <section class="panel form-panel media-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Música</p>
+                  <h3>Música de foco</h3>
+                </div>
+              </div>
+              <form class="music-form" id="musicForm">
+                <label>
+                  Link do YouTube ou Spotify
+                  <input id="musicUrl" type="url" placeholder="Cole o link da música, playlist ou vídeo" />
+                </label>
+                <div class="music-actions">
+                  <button class="button primary" type="submit">Salvar player</button>
+                  <button class="button ghost" id="clearMusicBtn" type="button">Limpar</button>
+                </div>
+              </form>
+              <div class="music-player" id="musicPlayer"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Sessões</p>
+                <h3>Tempo registrado</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Assunto</th>
+                    <th>Tempo</th>
+                    <th>Origem</th>
+                    <th>Concurso</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody id="studyHistory"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="controle" aria-labelledby="controleTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Controle</p>
+              <h2 id="controleTitle">Controle de estudos</h2>
+            </div>
+            <div class="segmented" aria-label="Período de controle">
+              <button class="segment active" data-control-range="day" type="button">Dia</button>
+              <button class="segment" data-control-range="week" type="button">Semana</button>
+              <button class="segment" data-control-range="month" type="button">Mês</button>
+              <button class="segment" data-control-range="year" type="button">Ano</button>
+            </div>
+          </div>
+
+          <section class="panel control-period-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Período específico</p>
+                <h3>Escolha o intervalo do controle</h3>
+              </div>
+            </div>
+            <div class="period-picker-grid">
+              <label data-period-field="day">
+                Dia
+                <input id="controlDayDate" type="date" />
+              </label>
+              <label data-period-field="week">
+                Semana de referência
+                <input id="controlWeekDate" type="date" />
+              </label>
+              <label data-period-field="month">
+                Mês
+                <input id="controlMonthInput" type="month" />
+              </label>
+              <label data-period-field="year">
+                Ano
+                <input id="controlYearInput" type="number" min="2000" max="2100" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel external-import-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Historico externo</p>
+                <h3>Importar do Aprovado</h3>
+              </div>
+              <a class="button ghost" href="bookmarklet-aprovado.txt" download>Baixar coletor</a>
+            </div>
+            <div class="external-import-grid">
+              <div>
+                <p class="music-note">No Aprovado, abra a linha do tempo, role ate carregar o periodo desejado e use o coletor. Depois importe aqui o JSON ou CSV gerado.</p>
+                <div class="inline-actions form-actions">
+                  <label class="button secondary import-label" for="externalStudyImportInput">
+                    Importar arquivo
+                    <input id="externalStudyImportInput" type="file" accept=".json,.csv,application/json,text/csv,text/plain" />
+                  </label>
+                  <button class="button ghost" id="clearExternalImportPreviewBtn" type="button">Limpar previa</button>
+                </div>
+              </div>
+              <div class="external-import-preview" id="externalImportPreview">Nenhum arquivo importado ainda.</div>
+            </div>
+          </section>
+
+          <div class="stat-grid" id="controlStats"></div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Linha do tempo</p>
+                  <h3 id="controlTimelineTitle">Período atual</h3>
+                </div>
+              </div>
+              <div class="control-list" id="controlTimeline"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Metas</p>
+                  <h3>Meta por matéria</h3>
+                </div>
+              </div>
+              <div class="control-list" id="controlGoals"></div>
+            </section>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="goalForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Objetivo</p>
+                  <h3>Novo objetivo</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="goalTitle" type="text" placeholder="Ex.: Prova do TJ, revisão final, simulado" required />
+              </label>
+              <label>
+                Data-alvo
+                <input id="goalDate" type="date" required />
+              </label>
+              <label>
+                Categoria
+                <input id="goalCategory" type="text" placeholder="Ex.: Concurso, revisão, meta pessoal" />
+              </label>
+              <button class="button primary" type="submit">Salvar objetivo</button>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Contagem</p>
+                  <h3>Objetivos salvos</h3>
+                </div>
+              </div>
+              <div class="goal-list" id="goalList"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Histórico</p>
+                <h3>Atividades do período</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Tipo</th>
+                    <th>Assunto</th>
+                    <th>Resultado</th>
+                  </tr>
+                </thead>
+                <tbody id="controlHistory"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="flashcards" aria-labelledby="flashcardsTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Memorização</p>
+              <h2 id="flashcardsTitle">Flashcards</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="flashcardForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Novo cartão</p>
+                  <h3>Cadastrar flashcard</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="flashcardSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="flashcardTopic"></select>
+                </label>
+              </div>
+              <div class="editor-field">
+                <span class="field-title">Frente</span>
+                <div class="rich-editor-toolbar" data-editor="#flashcardFrontEditor" aria-label="Editor da frente do flashcard">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="flashcardFrontColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#flashcardFrontColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="flashcardFrontEditor" class="note-editor rich-text-editor compact-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Pergunta, conceito ou enunciado"></div>
+              </div>
+              <div class="editor-field">
+                <span class="field-title">Verso</span>
+                <div class="rich-editor-toolbar" data-editor="#flashcardBackEditor" aria-label="Editor do verso do flashcard">
+                  <button class="mini-button" data-rich-command="bold" type="button">B</button>
+                  <button class="mini-button" data-rich-command="italic" type="button">I</button>
+                  <button class="mini-button" data-rich-command="underline" type="button">U</button>
+                  <button class="mini-button" data-rich-command="justifyLeft" type="button">Esq.</button>
+                  <button class="mini-button" data-rich-command="justifyCenter" type="button">Centro</button>
+                  <button class="mini-button" data-rich-command="justifyRight" type="button">Dir.</button>
+                  <button class="mini-button" data-rich-command="justifyFull" type="button">Justificar</button>
+                  <button class="mini-button" data-rich-command="insertParagraph" type="button">Parágrafo</button>
+                  <button class="mini-button" data-rich-command="spacer" type="button">Espaço</button>
+                  <button class="mini-button marker-yellow" data-rich-highlight="yellow" type="button">Amarelo</button>
+                  <button class="mini-button marker-green" data-rich-highlight="green" type="button">Verde</button>
+                  <button class="mini-button marker-blue" data-rich-highlight="blue" type="button">Azul</button>
+                  <label class="color-control">
+                    Cor
+                    <input id="flashcardBackColor" type="color" value="#0f172a" />
+                  </label>
+                  <button class="mini-button" data-rich-color="#flashcardBackColor" type="button">Aplicar cor</button>
+                  <button class="mini-button marker-clear" data-rich-command="removeFormat" type="button">Limpar</button>
+                </div>
+                <div id="flashcardBackEditor" class="note-editor rich-text-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Resposta, regra, exceção ou observação"></div>
+              </div>
+              <label>
+                Prioridade
+                <select id="flashcardPriority">
+                  <option value="Alta">Alta</option>
+                  <option value="Média" selected>Média</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
+              <label>
+                Dificuldade de repetição
+                <select id="flashcardDifficulty">
+                  <option value="hard">Difícil</option>
+                  <option value="medium" selected>Média</option>
+                  <option value="easy">Fácil</option>
+                </select>
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" id="flashcardSubmitBtn" type="submit">Salvar flashcard</button>
+                <button class="button ghost hidden" id="flashcardCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <section class="panel flashcard-review-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Revisão</p>
+                  <h3>Flashcard da vez</h3>
+                </div>
+                <span class="cycle-pill" id="flashcardDueCount">0 pendentes</span>
+              </div>
+              <div id="flashcardReview" class="flashcard-review"></div>
+            </section>
+
+            <form class="panel form-panel" id="flashcardReviewForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Sessão</p>
+                  <h3>Escolher revisão</h3>
+                </div>
+              </div>
+              <label>
+                Ordem dos cartões
+                <select id="flashcardReviewOrder">
+                  <option value="random">Sortear pendentes</option>
+                  <option value="due">Fila por vencimento</option>
+                </select>
+              </label>
+              <label>
+                Fila inteligente
+                <select id="flashcardReviewQueue">
+                  <option value="today">Revisar hoje</option>
+                  <option value="overdue">Atrasados</option>
+                  <option value="hard">Difíceis</option>
+                  <option value="allDue">Todos pendentes</option>
+                </select>
+              </label>
+              <label>
+                Estudar
+                <select id="flashcardReviewScope">
+                  <option value="all">Todos os flashcards</option>
+                  <option value="subject">Uma matéria</option>
+                  <option value="topic">Um assunto</option>
+                </select>
+              </label>
+              <label>
+                Matéria
+                <select id="flashcardReviewSubject"></select>
+              </label>
+              <label>
+                Assunto
+                <select id="flashcardReviewTopic"></select>
+              </label>
+              <p class="music-note" id="flashcardReviewSummary">0 cartões pendentes.</p>
+              <button class="button secondary" type="submit">Aplicar revisão</button>
+            </form>
+
+            <form class="panel form-panel" id="flashcardSettingsForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Repetição</p>
+                  <h3>Intervalos por dificuldade</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Difícil
+                  <input id="hardInterval" type="number" min="1" max="99" value="4" required />
+                </label>
+                <label>
+                  Média
+                  <input id="mediumInterval" type="number" min="1" max="99" value="8" required />
+                </label>
+              </div>
+              <label>
+                Fácil
+                <input id="easyInterval" type="number" min="1" max="99" value="12" required />
+              </label>
+              <button class="button secondary" type="submit">Salvar intervalos</button>
+            </form>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Biblioteca</p>
+                <h3>Flashcards cadastrados</h3>
+              </div>
+            </div>
+            <div class="flashcard-library" id="flashcardLibrary"></div>
+          </section>
+        </section>
+
+        <section class="view" id="anotacoes" aria-labelledby="anotacoesTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Estudo ativo</p>
+              <h2 id="anotacoesTitle">Anotações e fontes</h2>
+            </div>
+          </div>
+
+          <div class="notebook-layout">
+            <section class="panel form-panel notebook-sidebar source-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Fonte</p>
+                  <h3>Adicionar site base</h3>
+                </div>
+              </div>
+              <form class="form-panel" id="sourceForm">
+                <label>
+                  Categoria salva
+                  <select id="sourceCategorySelect"></select>
+                </label>
+                <label>
+                  Nova categoria
+                  <input id="sourceCategoryNew" type="text" placeholder="Ex.: Constitucional, Leis, Planalto" />
+                </label>
+                <label>
+                  Nome da fonte
+                  <input id="sourceTitle" type="text" placeholder="Ex.: Constituição Federal - Planalto" required />
+                </label>
+                <label>
+                  Link
+                  <input id="sourceUrl" type="url" placeholder="https://www.planalto.gov.br/..." required />
+                </label>
+                <div class="sync-options">
+                  <label class="checkbox-line">
+                    <input id="sourceAutoSync" type="checkbox" />
+                    Tentar sincronizar automaticamente pelo link quando o site permitir
+                  </label>
+                  <div class="inline-actions source-form-actions">
+                    <button class="button secondary" id="importSourceUrlBtn" type="button">Importar texto do link</button>
+                  </div>
+                  <p class="music-note">A sincronização funciona quando o site autoriza leitura pelo navegador. Se o site bloquear, copie o trecho original e cole o texto no leitor.</p>
+                </div>
+                <div class="editor-field">
+                  <span class="field-title">Texto hospedado no app</span>
+                  <div class="highlight-toolbar" aria-label="Marca-texto da fonte">
+                    <button class="mini-button marker-yellow" data-source-highlight="yellow" type="button">Amarelo</button>
+                    <button class="mini-button marker-green" data-source-highlight="green" type="button">Verde</button>
+                    <button class="mini-button marker-blue" data-source-highlight="blue" type="button">Azul</button>
+                    <label class="color-control">
+                      Cor
+                      <input id="sourceHighlightColor" type="color" value="#fff59d" />
+                    </label>
+                    <button class="mini-button" data-source-highlight="custom" type="button">Cor escolhida</button>
+                    <button class="mini-button marker-clear" data-source-highlight="clear" type="button">Limpar</button>
+                  </div>
+                  <div id="sourceContentEditor" class="note-editor law-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+                  <p class="music-note">Cole aqui o texto da lei ou do site base. Os grifos ficam salvos nesta fonte e vinculados ao link original.</p>
+                </div>
+                <div class="inline-actions source-form-actions">
+                  <button class="button primary" id="sourceSubmitBtn" type="submit">Salvar fonte</button>
+                  <button class="button ghost hidden" id="cancelSourceEditBtn" type="button">Cancelar edição</button>
+                </div>
+              </form>
+              <div class="notebook-divider">
+                <span>Fontes salvas</span>
+              </div>
+              <div class="source-library" id="sourceLibrary"></div>
+            </section>
+
+            <section class="panel notebook-page source-viewer">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Visualização</p>
+                  <h3>Fonte selecionada</h3>
+                </div>
+                <button class="button ghost" id="refreshSourceBtn" type="button">Atualizar fonte</button>
+              </div>
+              <label>
+                Fonte
+                <select id="activeSourceSelect"></select>
+              </label>
+              <div class="source-preview" id="sourcePreview"></div>
+            </section>
+          </div>
+
+          <section class="panel category-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Categorias</p>
+                <h3>Organizar fontes e anotações</h3>
+              </div>
+            </div>
+            <form class="split-inputs" id="categoryForm">
+              <label>
+                Nova categoria
+                <input id="categoryName" type="text" placeholder="Ex.: Direito Constitucional" />
+              </label>
+              <button class="button secondary" type="submit">Adicionar categoria</button>
+            </form>
+            <div class="category-list" id="categoryList"></div>
+          </section>
+
+          <div class="notebook-notes-area">
+            <form class="panel form-panel notebook-editor" id="noteForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Anotação</p>
+                  <h3 id="noteFormTitle">Nova anotação</h3>
+                </div>
+              </div>
+              <label>
+                Título
+                <input id="noteTitle" type="text" placeholder="Ex.: Art. 37 - Administração Pública" required />
+              </label>
+              <label>
+                Categoria
+                <select id="noteCategorySelect"></select>
+              </label>
+              <label>
+                Nova categoria
+                <input id="noteCategoryNew" type="text" placeholder="Ex.: Administrativo" />
+              </label>
+              <label>
+                Fonte usada como base
+                <select id="noteSource"></select>
+              </label>
+              <div class="highlight-toolbar" aria-label="Ferramentas de marca-texto">
+                <button class="mini-button marker-yellow" data-highlight="yellow" type="button">Amarelo</button>
+                <button class="mini-button marker-green" data-highlight="green" type="button">Verde</button>
+                <button class="mini-button marker-blue" data-highlight="blue" type="button">Azul</button>
+                <label class="color-control">
+                  Cor
+                  <input id="noteHighlightColor" type="color" value="#fff59d" />
+                </label>
+                <button class="mini-button" data-highlight="custom" type="button">Cor escolhida</button>
+                <button class="mini-button marker-clear" data-highlight="clear" type="button">Limpar</button>
+              </div>
+              <div id="noteEditor" class="note-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+              <div class="inline-actions">
+                <button class="button primary" id="noteSubmitBtn" type="submit">Salvar anotação</button>
+                <button class="button ghost hidden" id="noteCancelEditBtn" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <section class="panel notebook-library-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Biblioteca</p>
+                  <h3>Anotações salvas</h3>
+                </div>
+              </div>
+              <div class="note-library" id="noteLibrary"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="conta" aria-labelledby="contaTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Conta</p>
+              <h2 id="contaTitle">Conta online e backup</h2>
+            </div>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Status</p>
+                  <h3>Conta e sincronizacao</h3>
+                </div>
+              </div>
+              <div class="account-status-list" id="accountStatusList"></div>
+              <div class="profile-actions">
+                <button class="button secondary" id="forceSyncBtn" type="button">Salvar agora</button>
+                <button class="button ghost danger" id="deleteAccountDataBtn" type="button">Excluir meus dados</button>
+              </div>
+              <p class="music-note">A exclusao apaga os dados de estudo desta conta. A remocao definitiva do usuario de autenticacao deve ser feita no painel do Supabase, em Authentication &gt; Users.</p>
+            </section>
+
+            <form class="panel form-panel" id="accountForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Identificação</p>
+                  <h3>Identificação da conta</h3>
+                </div>
+              </div>
+              <label>
+                Nome
+                <input id="accountName" type="text" placeholder="Seu nome" />
+              </label>
+              <label>
+                E-mail
+                <input id="accountEmail" type="email" placeholder="voce@email.com" />
+              </label>
+              <button class="button primary" type="submit">Salvar identificação</button>
+              <p class="music-note">Com Supabase configurado, os dados ficam vinculados ao e-mail da conta. Sem Supabase, continuam separados apenas neste navegador.</p>
+            </form>
+
+            <form class="panel form-panel" id="passwordForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Segurança</p>
+                  <h3>Senha da conta online</h3>
+                </div>
+              </div>
+              <label>
+                Nova senha
+                <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="8+ com maiuscula, minuscula, numero e simbolo" />
+              </label>
+              <div class="profile-actions">
+                <button class="button primary" id="updatePasswordBtn" type="submit">Alterar senha</button>
+                <button class="button ghost" id="sendRecoveryFromAccountBtn" type="button">Enviar recuperação</button>
+              </div>
+              <p class="music-note">Use esta área para trocar a senha quando estiver logado ou depois de abrir o link de recuperação enviado pelo Supabase.</p>
+            </form>
+
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Manutenção</p>
+                  <h3>Resetar estatísticas</h3>
+                </div>
+              </div>
+              <button class="button ghost danger" id="resetStatsBtn" type="button">Zerar estatísticas do site</button>
+              <p class="music-note">Zera tempo, questões, relatórios e estatísticas dos flashcards. Matérias, assuntos, fontes, anotações, objetivos e os flashcards cadastrados serão mantidos.</p>
+            </section>
+
+            <section class="panel form-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Backup</p>
+                  <h3>Salvar ou restaurar estudos</h3>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="button secondary" id="generateBackupBtn" type="button">Gerar backup</button>
+                <button class="button ghost" id="downloadBackupBtn" type="button">Baixar arquivo</button>
+              </div>
+              <label>
+                Código de backup
+                <textarea id="backupCode" rows="8" placeholder="Gere um backup ou cole aqui um backup antigo"></textarea>
+              </label>
+              <div class="profile-actions">
+                <button class="button primary" id="restoreBackupBtn" type="button">Restaurar backup</button>
+                <button class="button ghost" id="copyBackupBtn" type="button">Copiar</button>
+              </div>
+              <p class="music-note">Guarde o código ou arquivo de backup. Ele leva seus estudos para outro navegador ou computador.</p>
+            </section>
+            <section class="panel form-panel local-recovery-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Recuperacao</p>
+                  <h3>Procurar copias locais</h3>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="button secondary" data-action="createAuxiliaryBackup" type="button">Criar backup auxiliar agora</button>
+                <button class="button ghost" data-action="scanLocalRecovery" type="button">Procurar backups locais</button>
+              </div>
+              <div class="local-recovery-list" id="localRecoveryList"></div>
+              <p class="music-note">Use se o Supabase abriu vazio. A busca procura copias antigas salvas neste navegador antes de reenviar para a conta online.</p>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="relatorios" aria-labelledby="relatoriosTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Análise</p>
+              <h2 id="relatoriosTitle">Relatórios por período</h2>
+            </div>
+          </div>
+
+          <section class="panel report-workbench">
+            <div class="report-view-tabs" aria-label="Tipo de relatório">
+              <button class="report-view-tab active" data-report-mode="timeline" type="button">Linha do tempo</button>
+              <button class="report-view-tab" data-report-mode="time" type="button">Tempo de estudo</button>
+            </div>
+
+            <div class="report-options">
+              <label class="report-radio">
+                <input data-report-group="subjects" name="reportGroup" type="radio" value="subjects" checked />
+                <span>
+                  <strong>Matérias</strong>
+                  <small>Veja a duração agrupada por matérias.</small>
+                </span>
+              </label>
+              <label class="report-radio">
+                <input data-report-group="topics" name="reportGroup" type="radio" value="topics" />
+                <span>
+                  <strong>Conteúdos</strong>
+                  <small>Veja a duração agrupada por assuntos e matéria.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="report-filter-row">
+              <label>
+                Concurso
+                <select id="reportCompetitionFilter">
+                  <option value="">Todos os concursos</option>
+                </select>
+              </label>
+              <span id="reportCompetitionHint">Mostrando todo o histórico do período.</span>
+            </div>
+
+            <div class="report-stage">
+              <button class="report-nav-button" data-report-shift="-1" type="button" aria-label="Período anterior">◀</button>
+              <div class="report-chart-card">
+                <h3 id="reportPeriodTitle">Hoje</h3>
+                <div class="report-timeline-chart" id="reportTimelineChart"></div>
+              </div>
+              <button class="report-nav-button" data-report-shift="1" type="button" aria-label="Próximo período">▶</button>
+              <aside class="report-total-card">
+                <strong id="reportTotalMinutes">0min</strong>
+                <span id="reportPeriodCaption">Tempo total no período selecionado.</span>
+                <div class="report-legend" id="reportTimelineLegend"></div>
+              </aside>
+            </div>
+
+            <form class="report-custom-form hidden" id="reportCustomForm">
+              <label>
+                Início
+                <input id="reportCustomStart" type="date" />
+              </label>
+              <label>
+                Fim
+                <input id="reportCustomEnd" type="date" />
+              </label>
+              <button class="button secondary" type="submit">Aplicar período</button>
+            </form>
+
+            <div class="segmented report-range-segments" aria-label="Período do relatório">
+              <button class="segment active" data-report-range="day" type="button">Dia</button>
+              <button class="segment" data-report-range="week" type="button">Semana</button>
+              <button class="segment" data-report-range="month" type="button">Mês</button>
+              <button class="segment" data-report-range="year" type="button">Ano</button>
+              <button class="segment" data-report-range="total" type="button">Total</button>
+              <button class="segment" data-report-range="custom" type="button">Customizar</button>
+            </div>
+          </section>
+
+          <div class="stat-grid" id="reportStats"></div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Matérias</p>
+                  <h3>Tempo por matéria</h3>
+                </div>
+              </div>
+              <div class="bar-chart horizontal" id="subjectTimeChart"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Questões</p>
+                  <h3>Precisão por matéria</h3>
+                </div>
+              </div>
+              <div id="subjectAccuracyList" class="insight-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <button id="scrollTopBtn" class="scroll-top-button" type="button" aria-label="Voltar ao topo da página" title="Voltar ao topo">
+      <span aria-hidden="true">↑</span>
+      <span>Topo</span>
+    </button>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      if (!window.supabase) {
+        document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
+      }
+    </script>
+    <script src="supabase-config.js?v=20260812-pomodoro-clock"></script>
+    <script src="app.js?v=20260812-pomodoro-clock"></script>
+  </body>
+</html>

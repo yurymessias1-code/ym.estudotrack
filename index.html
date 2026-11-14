@@ -8,28 +8,39 @@
     <link rel="shortcut icon" href="assets/favicon-estudos-track.png" type="image/png" />
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
-    <link rel="stylesheet" href="styles.css?v=20260812-pomodoro-clock" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="styles.css?v=20261113-hoje" />
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
-        <button class="brand home-brand" data-view="dashboard" data-scroll-top="true" type="button" aria-label="Ir para o Painel inicial">
+      <aside class="sidebar" id="sidebarSheet">
+        <button class="brand home-brand" data-view="hoje" data-scroll-top="true" type="button" aria-label="Ir para Hoje">
           <img class="brand-logo-full" src="assets/logo-estudos-track.png" alt="Estudos Track" />
         </button>
 
         <nav class="side-nav" aria-label="Navegação principal">
-          <button class="nav-button active" data-view="dashboard">Painel</button>
-          <button class="nav-button" data-view="controle">Controle</button>
-          <button class="nav-button" data-view="plano">Matérias</button>
-          <button class="nav-button" data-view="concursos">Concursos</button>
-          <button class="nav-button" data-view="edital">Edital</button>
-          <button class="nav-button" data-view="questoes">Questões</button>
-          <button class="nav-button" data-view="flashcards">Flashcards</button>
-          <button class="nav-button" data-view="anotacoes">Anotações</button>
-          <button class="nav-button" data-view="jurisprudencias">Jurisprudências</button>
-          <button class="nav-button" data-view="pomodoro">Pomodoro</button>
-          <button class="nav-button" data-view="relatorios">Relatórios</button>
-          <button class="nav-button" data-view="conta">Conta</button>
+          <button class="nav-button active" data-view="hoje"><span>Hoje</span><b class="nav-count hidden" data-nav-count="hoje"></b></button>
+          <p class="nav-group-title">Planejar</p>
+          <button class="nav-button" data-view="semana"><span>Plano semanal</span></button>
+          <button class="nav-button" data-view="plano"><span>Matérias</span></button>
+          <button class="nav-button" data-view="concursos"><span>Concursos</span></button>
+          <button class="nav-button" data-view="edital"><span>Edital</span></button>
+          <p class="nav-group-title">Estudar</p>
+          <button class="nav-button" data-view="pomodoro"><span>Pomodoro</span></button>
+          <button class="nav-button" data-view="questoes"><span>Questões</span></button>
+          <button class="nav-button" data-view="leiseca"><span>Lei seca</span><b class="nav-count hidden" data-nav-count="leiseca"></b></button>
+          <p class="nav-group-title">Fixar</p>
+          <button class="nav-button" data-view="revisao"><span>Revisão</span><b class="nav-count hidden" data-nav-count="revisao"></b></button>
+          <button class="nav-button" data-view="erros"><span>Caderno de erros</span><b class="nav-count hidden" data-nav-count="erros"></b></button>
+          <button class="nav-button" data-view="flashcards"><span>Flashcards</span></button>
+          <p class="nav-group-title">Registrar</p>
+          <button class="nav-button" data-view="anotacoes"><span>Anotações</span></button>
+          <button class="nav-button" data-view="jurisprudencias"><span>Jurisprudências</span></button>
+          <p class="nav-group-title">Acompanhar</p>
+          <button class="nav-button" data-view="dashboard"><span>Visão geral</span></button>
+          <button class="nav-button" data-view="controle"><span>Controle</span></button>
+          <button class="nav-button" data-view="relatorios"><span>Relatórios</span></button>
+          <button class="nav-button" data-view="conta"><span>Conta</span></button>
         </nav>
 
         <div class="quick-panel">
@@ -91,7 +102,9 @@
           </div>
         </header>
 
-        <section class="view active" id="dashboard" aria-labelledby="dashboardTitle">
+        <div class="review-banner hidden" id="reviewBanner" role="status" aria-live="polite"></div>
+
+        <section class="view" id="dashboard" aria-labelledby="dashboardTitle">
           <div class="dashboard-visual">
             <div class="visual-copy">
               <p class="eyebrow">Visão geral</p>
@@ -109,6 +122,16 @@
           </div>
 
           <div class="stat-grid" id="statGrid"></div>
+
+          <section class="panel cycle-panel" aria-labelledby="cyclePanelTitle">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Ciclo de estudos</p>
+                <h2 id="cyclePanelTitle">Estudar, praticar, corrigir, revisar e ler a lei</h2>
+              </div>
+            </div>
+            <div class="cycle-strip" id="cycleStripDashboard"></div>
+          </section>
 
           <section class="panel backup-shortcut-panel" id="backupShortcutPanel">
             <div>
@@ -477,6 +500,460 @@
             <div class="topic-performance" id="topicPerformance"></div>
             <div class="review-reminder-list" id="questionReviewReminders"></div>
           </section>
+        </section>
+
+        <section class="view active" id="hoje" aria-labelledby="hojeTitle">
+          <div class="panel today-hero">
+            <div class="today-hero-text">
+              <p class="eyebrow" id="todayDate"></p>
+              <h2 id="hojeTitle">Seu dia de estudos</h2>
+              <p class="muted-note" id="todaySub"></p>
+            </div>
+            <div class="today-progress" aria-live="polite">
+              <strong id="todayPct">0%</strong>
+              <small id="todayCount"></small>
+              <div class="progress-track"><div class="progress-fill" id="todayBar" style="--progress: 0%"></div></div>
+            </div>
+            <button class="button primary" id="startDayBtn" data-cycle-action="startDay" type="button">Começar o dia</button>
+          </div>
+
+          <div class="review-banner hidden" id="todayBackup"></div>
+
+          <div class="today-grid" id="todayTasks"></div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Atenção</p>
+                <h3>Pontos de atenção do seu desempenho</h3>
+              </div>
+            </div>
+            <div class="insight-list" id="todayInsights"></div>
+          </section>
+        </section>
+
+        <section class="view" id="semana" aria-labelledby="semanaTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Ciclo de estudos</p>
+              <h2 id="semanaTitle">Plano semanal por matéria</h2>
+            </div>
+          </div>
+
+          <div class="stat-grid" id="weekStats"></div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="weekForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Sua semana</p>
+                  <h3>Tempo e dias de estudo</h3>
+                </div>
+              </div>
+              <label>
+                Horas de estudo por semana
+                <input id="weekHours" type="number" min="1" max="80" step="0.5" value="15" />
+              </label>
+              <div class="weekday-field">
+                <span class="field-title">Dias de estudo</span>
+                <div class="weekday-picker" id="weekDays"></div>
+              </div>
+              <div class="inline-actions">
+                <button class="button primary" type="submit">Salvar plano</button>
+                <button class="button secondary" data-cycle-action="weekImport" type="button">Usar pesos do edital</button>
+                <button class="button ghost" data-cycle-action="weekReset" type="button">Redefinir pesos</button>
+              </div>
+              <p class="muted-note">
+                O tempo da semana é dividido entre as matérias pelo peso de cada uma. A cada dia, o plano sugere quanto estudar para fechar a meta da semana,
+                recalculando o que faltou. O que você registra no Pomodoro ou no estudo manual entra na conta sozinho.
+                As horas semanais são as mesmas da aba Edital.
+              </p>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Ciclo</p>
+                  <h3>Divisão por matéria</h3>
+                </div>
+              </div>
+              <div id="weekTable"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="erros" aria-labelledby="errosTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Aprendizado</p>
+              <h2 id="errosTitle">Caderno de erros: transforme cada erro em ponto</h2>
+            </div>
+          </div>
+
+          <div class="stat-grid" id="errorStats"></div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="errorForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Novo erro</p>
+                  <h3 id="errorFormTitle">Registrar erro</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="errorSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="errorTopic"></select>
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Data
+                  <input id="errorDate" type="date" />
+                </label>
+                <label>
+                  Banca / prova / fonte
+                  <input id="errorSource" type="text" placeholder="Ex.: Cebraspe 2024, simulado 3" />
+                </label>
+              </div>
+              <label>
+                Questão ou dúvida
+                <textarea id="errorStatement" rows="4" placeholder="Cole ou resuma o enunciado / a afirmação que você errou"></textarea>
+              </label>
+              <label>
+                O que eu respondi ou pensei
+                <input id="errorMyAnswer" type="text" placeholder="Ex.: marquei CERTO por achar que o prazo era de 10 dias" />
+              </label>
+              <label>
+                Resposta correta
+                <textarea id="errorCorrect" rows="3" placeholder="Gabarito e a explicação em uma ou duas frases"></textarea>
+              </label>
+              <label>
+                Por que errei?
+                <select id="errorReason"></select>
+              </label>
+              <label>
+                Fundamento (lei, artigo, súmula)
+                <input id="errorFoundation" type="text" placeholder="Ex.: art. 37, XXI, CF; Súmula 331 do TST" />
+              </label>
+              <label>
+                Como não errar de novo
+                <textarea id="errorRule" rows="3" placeholder="Regra, macete ou palavra-chave para reconhecer essa pegadinha"></textarea>
+              </label>
+              <label>
+                Tags
+                <input id="errorTags" type="text" placeholder="#prazos #licitacao" />
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" id="errorSubmitBtn" type="submit">Salvar no caderno</button>
+                <button class="button ghost hidden" id="errorCancelBtn" data-cycle-action="cancelErrorEdit" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Caderno</p>
+                  <h3>Seus erros</h3>
+                  <p class="muted-note" id="errorListSummary"></p>
+                </div>
+              </div>
+              <div class="error-filters">
+                <label class="sr-only" for="errorSearch">Buscar no caderno</label>
+                <input id="errorSearch" type="search" autocomplete="off" placeholder="Buscar no caderno..." />
+                <select id="errorFilterSubject" aria-label="Filtrar por matéria"></select>
+                <select id="errorFilterReason" aria-label="Filtrar por motivo"></select>
+                <select id="errorFilterStatus" aria-label="Filtrar por situação">
+                  <option value="pending">Não dominados</option>
+                  <option value="due">Para refazer hoje</option>
+                  <option value="mastered">Dominados</option>
+                  <option value="all">Todos</option>
+                </select>
+                <button class="mini-button" data-cycle-action="clearErrorFilters" type="button">Limpar</button>
+              </div>
+              <div class="error-list" id="errorList"></div>
+            </section>
+          </div>
+
+          <div class="content-grid two-columns">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Diagnóstico</p>
+                  <h3>Por que eu erro</h3>
+                </div>
+              </div>
+              <div class="insight-list" id="errorReasonChart"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Diagnóstico</p>
+                  <h3>Onde eu mais erro</h3>
+                </div>
+              </div>
+              <div class="insight-list" id="errorSubjectChart"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="revisao" aria-labelledby="revisaoTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Fixação</p>
+              <h2 id="revisaoTitle">Revise no tempo certo para não esquecer</h2>
+            </div>
+          </div>
+
+          <section class="panel cycle-panel">
+            <div class="cycle-strip" id="cycleStripRevisao"></div>
+          </section>
+
+          <div class="stat-grid" id="revisionStats"></div>
+
+          <div class="content-grid two-columns revision-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Hoje</p>
+                  <h3>Fila de revisão</h3>
+                </div>
+              </div>
+              <div class="revision-list" id="revisionQueue"></div>
+            </section>
+
+            <section class="panel revision-session-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Modo revisão ativa</p>
+                  <h3>Lembre primeiro, confira depois</h3>
+                </div>
+              </div>
+              <div id="revisionSession"></div>
+            </section>
+          </div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="revisionForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Manual</p>
+                  <h3>Agendar uma revisão</h3>
+                </div>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Matéria
+                  <select id="revisionSubject" required></select>
+                </label>
+                <label>
+                  Assunto
+                  <select id="revisionTopic"></select>
+                </label>
+              </div>
+              <label>
+                Data em que estudei
+                <input id="revisionBaseDate" type="date" />
+              </label>
+              <label class="checkbox-line">
+                <input id="revisionToday" type="checkbox" />
+                Revisar hoje (em vez de seguir o primeiro intervalo)
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" type="submit">Agendar revisão</button>
+              </div>
+            </form>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Agenda</p>
+                  <h3>Próximas revisões</h3>
+                </div>
+              </div>
+              <div class="upcoming-list" id="revisionUpcoming"></div>
+            </section>
+          </div>
+
+          <section class="panel revision-trail-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Trilha de fixação</p>
+                <h3>Do aprendizado à memória de longo prazo</h3>
+                <p class="muted-note" id="revisionTrailLegend"></p>
+              </div>
+            </div>
+            <div class="trail-list" id="revisionTrail"></div>
+          </section>
+
+          <form class="panel form-panel reminder-panel" id="reminderForm">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Lembretes automáticos</p>
+                <h3>Seja avisado na hora de revisar</h3>
+              </div>
+            </div>
+            <p class="reminder-status" id="reminderStatus"></p>
+            <div class="split-inputs">
+              <label>
+                Aviso da manhã
+                <input id="reminderTime" type="time" value="08:00" required />
+              </label>
+              <label>
+                Aviso da noite (opcional)
+                <input id="eveningTime" type="time" />
+              </label>
+            </div>
+            <label>
+              Máximo de revisões por dia ao redistribuir atrasadas
+              <input id="dailyLimit" type="number" min="1" max="200" value="12" />
+            </label>
+            <label>
+              Lembrar de fazer backup a cada (dias; 0 desliga)
+              <input id="backupDays" type="number" min="0" max="90" value="7" />
+            </label>
+            <div class="inline-actions">
+              <button class="button primary" type="submit">Salvar horários</button>
+              <button class="button secondary" id="notifyToggleBtn" data-cycle-action="notifyToggle" type="button">Ativar notificações neste dispositivo</button>
+              <button class="button ghost" data-cycle-action="notifyTest" type="button">Testar aviso</button>
+            </div>
+            <div class="inline-actions">
+              <button class="button secondary" data-cycle-action="exportIcs" type="button">Exportar agenda (.ics)</button>
+              <button class="button ghost hidden" id="installAppBtn" data-cycle-action="installApp" type="button">Instalar como app</button>
+            </div>
+            <p class="muted-note">
+              O site é estático, então ele avisa quando está aberto (aba ou app instalado): notificação no horário, número de pendências no título da aba e banner no topo.
+              Para ser avisado com o navegador fechado, exporte a agenda (.ics) e importe no Google Agenda ou no calendário do celular; exporte de novo de tempos em tempos para incluir as revisões novas.
+              No iPhone, instale o site na Tela de Início para receber notificações.
+            </p>
+          </form>
+
+          <form class="panel form-panel cycle-settings" id="cycleSettingsForm">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Ajustes</p>
+                <h3>Intervalos do ciclo</h3>
+              </div>
+            </div>
+            <div class="split-inputs">
+              <label>
+                Revisões de assuntos (dias entre cada uma)
+                <input id="cycleIntervals" type="text" placeholder="1, 7, 30, 60" />
+              </label>
+              <label>
+                Caderno de erros (dias entre cada refação)
+                <input id="cycleErrorIntervals" type="text" placeholder="1, 3, 7, 15, 30" />
+              </label>
+            </div>
+            <label class="checkbox-line">
+              <input id="cycleAutoStudy" type="checkbox" />
+              Agendar revisões automaticamente quando eu registrar estudo (a partir de 10 minutos por assunto no dia)
+            </label>
+            <label class="checkbox-line">
+              <input id="cycleAutoWeak" type="checkbox" />
+              Criar um reforço de revisão quando o acerto em um assunto ficar baixo
+            </label>
+            <div class="split-inputs">
+              <label>
+                Acerto mínimo (%)
+                <input id="cycleWeakAccuracy" type="number" min="30" max="95" value="70" />
+              </label>
+              <label>
+                Mínimo de questões no assunto
+                <input id="cycleWeakMin" type="number" min="5" max="100" value="10" />
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button class="button primary" type="submit">Salvar ajustes</button>
+              <button class="button secondary" data-cycle-action="backfillRevisions" type="button">Gerar revisões dos últimos 14 dias</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="view" id="leiseca" aria-labelledby="leisecaTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Letra da lei</p>
+              <h2 id="leisecaTitle">Cronograma de leitura de lei seca</h2>
+            </div>
+          </div>
+
+          <div class="stat-grid" id="lawStats"></div>
+
+          <div class="content-grid form-and-list">
+            <form class="panel form-panel" id="lawForm">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Plano</p>
+                  <h3 id="lawFormTitle">Novo plano de leitura</h3>
+                </div>
+              </div>
+              <label>
+                Título
+                <input id="lawTitle" type="text" required placeholder="Ex.: CF/88, arts. 1º a 250" />
+              </label>
+              <label>
+                Matéria
+                <select id="lawSubject"></select>
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Unidade
+                  <input id="lawUnitLabel" type="text" value="artigos" />
+                </label>
+                <label>
+                  Nº de leituras
+                  <input id="lawPasses" type="number" min="1" max="10" value="1" />
+                </label>
+              </div>
+              <div class="split-inputs">
+                <label>
+                  Do nº
+                  <input id="lawStartUnit" type="number" min="1" value="1" required />
+                </label>
+                <label>
+                  Até o nº
+                  <input id="lawEndUnit" type="number" min="1" required />
+                </label>
+              </div>
+              <label id="lawAlreadyReadLabel">
+                Já li até o nº (opcional)
+                <input id="lawAlreadyRead" type="number" min="1" />
+              </label>
+              <div class="split-inputs">
+                <label>
+                  Início
+                  <input id="lawStartDate" type="date" required />
+                </label>
+                <label>
+                  Data final (prova ou meta)
+                  <input id="lawEndDate" type="date" required />
+                </label>
+              </div>
+              <div class="weekday-field">
+                <span class="field-title">Dias da semana para ler</span>
+                <div class="weekday-picker" id="lawWeekdays"></div>
+              </div>
+              <label>
+                Link da lei (opcional)
+                <input id="lawUrl" type="url" placeholder="https://www.planalto.gov.br/..." />
+              </label>
+              <label class="checkbox-line">
+                <input id="lawRevisions" type="checkbox" checked />
+                Agendar revisões espaçadas do que eu ler
+              </label>
+              <div class="inline-actions">
+                <button class="button primary" id="lawSubmitBtn" type="submit">Criar plano</button>
+                <button class="button ghost hidden" id="lawCancelBtn" data-cycle-action="cancelLawEdit" type="button">Cancelar edição</button>
+              </div>
+            </form>
+
+            <div class="law-plans" id="lawPlans"></div>
+          </div>
         </section>
 
         <section class="view" id="jurisprudencias" aria-labelledby="jurisTitle">
@@ -1607,7 +2084,32 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-    <script src="supabase-config.js?v=20260812-pomodoro-clock"></script>
-    <script src="app.js?v=20260812-pomodoro-clock"></script>
+        <nav class="bottom-nav" aria-label="Atalhos">
+      <button class="bottom-nav-item active" data-view="hoje" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h14V10" /></svg>
+        <span>Hoje</span><b class="nav-count hidden" data-nav-count="hoje"></b>
+      </button>
+      <button class="bottom-nav-item" data-view="revisao" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 013-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 01-3 3H3" /></svg>
+        <span>Revisar</span><b class="nav-count hidden" data-nav-count="revisao"></b>
+      </button>
+      <button class="bottom-nav-item" data-view="questoes" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></svg>
+        <span>Questões</span>
+      </button>
+      <button class="bottom-nav-item" data-view="erros" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2L12 3zM12 10v5M12 18v.5" /></svg>
+        <span>Erros</span><b class="nav-count hidden" data-nav-count="erros"></b>
+      </button>
+      <button class="bottom-nav-item" id="menuToggleBtn" data-cycle-action="toggleMenu" aria-expanded="false" aria-controls="sidebarSheet" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        <span>Mais</span>
+      </button>
+    </nav>
+
+    <script src="supabase-config.js?v=20261113-hoje"></script>
+    <script src="ciclo.js?v=20261113-hoje"></script>
+    <script src="hoje.js?v=20261113-hoje"></script>
+    <script src="app.js?v=20261113-hoje"></script>
   </body>
 </html>

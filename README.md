@@ -27,7 +27,16 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - modo claro e modo escuro, com reforço de legibilidade para textos colados, jurisprudências, tabelas e editores;
 - botão discreto para voltar ao topo da página após rolagem;
 - exportação, importação e backup dos dados em JSON.
-- reset global de estatísticas sem apagar cadastros, fontes e anotações.
+- reset global de estatísticas sem apagar cadastros, fontes e anotações;
+- **ciclo de estudos**: estudar, praticar, corrigir erros, revisar e ler a lei seca, com faixa de resumo no Painel;
+- **revisão espaçada** automática dos assuntos estudados, com modo de revisão ativa (lembrar primeiro, conferir depois);
+- **caderno de erros** com motivo do erro, fundamento, regra para não errar de novo, refação espaçada e geração de flashcard;
+- **cronograma de leitura de lei seca** com meta diária recalculada, várias leituras do mesmo texto e revisões agendadas;
+- **tela Hoje** como início, com o checklist do dia e o botão **Começar o dia**;
+- **plano semanal por matéria** (ciclo clássico), com peso do edital;
+- **reforço automático** quando o acerto em um assunto fica baixo;
+- **lembrete semanal de backup**;
+- **menu agrupado** e, no celular, **barra inferior** com o painel **Mais**.
 
 ## Como publicar no GitHub
 
@@ -218,3 +227,69 @@ Se já houver grifos, o app preserva sua versão marcada e mostra uma atualizaç
 
 Alguns sites oficiais podem bloquear visualização ou sincronização dentro do app.
 Nesse caso, use o botão **Abrir site base**, copie o trecho necessário e cole manualmente no leitor da fonte.
+
+
+## Ciclo de estudos (revisão, caderno de erros e lei seca)
+
+O fluxo pensado é: **estudar → resolver questões → anotar o que errou → revisar no tempo certo → ler a lei seca**.
+A faixa **Ciclo de estudos** na **Visão geral** e no topo da aba **Revisão** mostra, em cinco passos, o que está pendente hoje e leva direto para cada aba.
+O código fica em `ciclo.js` (carregado antes do `app.js`); os dados entram no mesmo backup, exportação e Supabase.
+
+### Revisão
+
+- Ao registrar estudo (Pomodoro, registro manual ou importação recente) com **10 minutos ou mais por assunto no dia**, o app agenda as revisões automaticamente. Só vale para estudos feitos a partir do primeiro acesso a esta versão; use **Gerar revisões dos últimos 14 dias** para trazer o que ficou para trás.
+- Intervalos padrão entre revisões: **1, 7, 30 e 60 dias** (editáveis em **Ajustes**). Também dá para agendar revisões à mão.
+- O **modo revisão ativa** primeiro pede para você lembrar o assunto sem olhar nada (o texto fica no histórico) e só depois mostra o que você tem sobre ele: flashcards, erros abertos, leis e julgados cadastrados e a precisão em questões.
+- Você avalia a lembrança: **Esqueci** (volta ao início), **Difícil** (repete a etapa com metade do intervalo), **Bom** (próxima etapa) ou **Fácil** (próxima etapa com intervalo 50% maior). Cada botão mostra quando a revisão volta.
+- A **retenção dos últimos 30 dias** aparece nas estatísticas.
+
+### Caderno de erros
+
+- Registre matéria, assunto, banca/fonte, enunciado, o que você respondeu, a resposta correta, **o motivo do erro** (não sabia, literalidade, interpretação, atenção, confusão de institutos, jurisprudência, chute, tempo), o fundamento e **como não errar de novo**.
+- Na aba **Questões**, lançamentos com erros ganham o botão **Anotar erro**, que abre o caderno já com matéria, assunto e data.
+- **Refazer agora** esconde o gabarito até você tentar responder. Acertar leva o erro adiante (padrão: 1, 3, 7, 15 e 30 dias; ao fim ele vira **dominado**); errar de novo volta para o início e conta como recorrência.
+- Filtros por texto, matéria, motivo e situação, gráficos de **por que erro** e **onde mais erro**, e o botão **Gerar flashcard**.
+
+### Lei seca
+
+- Crie um plano com título, matéria, unidade (artigos, páginas...), intervalo (do nº ao nº), **número de leituras**, datas de início e fim e **dias da semana** de leitura. Dá para informar até onde você já leu.
+- O app distribui o que falta pelos dias de leitura restantes. A **meta de hoje** não encolhe enquanto você lê; se ler menos, o restante vai para os próximos dias; se ler mais, o ritmo futuro diminui.
+- Registre com **Concluí a meta de hoje** ou **Li até o nº...**; **Desfazer último registro** corrige enganos. O selo mostra se você está em dia, adiantado ou atrasado, ou se o prazo venceu.
+- Cada leitura registrada pode agendar revisões espaçadas (desmarque no plano se não quiser).
+
+### Lembretes automáticos (funciona no GitHub Pages)
+
+O Estudos Track é um site estático: não há servidor que envie push com o navegador fechado. Por isso o lembrete usa cinco camadas, que se complementam:
+
+1. **Banner "Hora de revisar"** no topo de qualquer aba sempre que houver revisões ou erros vencidos, com atalho **Revisar agora**.
+2. **Número de pendências no título da aba** (por exemplo, `(3) estudos track`) e, no app instalado, selo no ícone.
+3. **Notificação do navegador** nos horários da manhã e da noite (Revisão > Lembretes automáticos > Ativar notificações neste dispositivo). Sai uma vez por horário, por dia, assim que o site estiver aberto; se você abrir o site depois do horário, o aviso do dia sai na hora.
+4. **App instalável (PWA)**: o botão **Instalar como app** (ou "Adicionar à tela inicial" no celular) abre o site em janela própria e funciona sem internet. No iPhone, as notificações exigem o site instalado na Tela de Início.
+5. **Agenda `.ics`**: **Exportar agenda (.ics)** gera os próximos 60 dias (revisões, erros para refazer e metas de lei seca) com alarme no horário escolhido. Importe no Google Agenda ou no calendário do celular para ser avisado **mesmo com tudo fechado**. A agenda é uma foto do momento: exporte de novo de tempos em tempos, porque as próximas revisões de cada assunto só são marcadas depois que você conclui a anterior.
+
+Cada dispositivo ativa suas próprias notificações (o navegador exige permissão por aparelho); horários e intervalos ficam na sua conta e sincronizam.
+
+**Trilha de fixação**: na aba Revisão, cada assunto mostra em que etapa está: Aprendizado, R1 (revisão), R2 a R4 (revisões espaçadas) e Fixado, com a data da próxima.
+
+**Voltei de uma pausa e acumulou tudo**: use **Redistribuir atrasadas**. Ele espalha as revisões vencidas pelos próximos dias, respeitando o máximo por dia que você definiu (padrão: 12) e começando pelas mais antigas.
+
+Arquivos novos: `manifest.json` e `sw.js` (publique-os na raiz do repositório, junto do `index.html`).
+
+### Hoje, plano semanal, reforço por desempenho e backup
+
+**Tela Hoje (início do app).** O site sempre abre em **Hoje**. Ela junta, num só lugar, as revisões vencidas, os erros para refazer, a meta de lei seca e o estudo sugerido pelo plano semanal, com o progresso do dia ("7 de 17 tarefas"), os dias que faltam para a prova (da aba Edital) e **pontos de atenção** do seu desempenho. O botão **Começar o dia** leva você pelas etapas em ordem (revisões, caderno de erros, lei seca e estudo) e, ao terminar cada uma, já abre a próxima.
+
+**Plano semanal por matéria** (aba **Plano semanal**, em Planejar). Defina as horas por semana (as mesmas da aba Edital) e os dias de estudo; o tempo é dividido entre as matérias pelo **peso** de cada uma. Sem pesos definidos, o app usa o número de assuntos de cada matéria no edital (ou peso igual, se não houver edital). **Usar pesos do edital** grava esses pesos para você ajustar; peso 0 tira a matéria do plano. A cada dia o plano recalcula o que faltou para fechar a semana e sugere quanto estudar hoje; o que você registra no Pomodoro ou no estudo manual entra na conta sozinho. A semana vai de segunda a domingo.
+
+**Reforço automático por desempenho.** Quando o acerto em um assunto fica abaixo da meta (padrão: 70%, com pelo menos 10 questões nos últimos 45 dias), o app agenda uma revisão de **Reforço** para hoje. Não duplica enquanto houver um pendente e só cria outro depois que você resolver novas questões do tema e o acerto continuar baixo. Os números e o liga/desliga ficam em **Revisão > Intervalos do ciclo**. Se um motivo de erro domina o caderno (por exemplo, 40% por confundir prazos), a tela Hoje avisa e sugere o que fazer.
+
+**Lembrete semanal de backup.** Em **Revisão > Lembretes automáticos** você escolhe a cada quantos dias quer ser lembrado (padrão: 7; 0 desliga). O aviso aparece na tela Hoje e na notificação do dia, some assim que você baixa um backup (ou exporta os dados) e pode ser adiado para amanhã. Cada aparelho guarda a sua própria data de último backup.
+
+**Menu.** No computador, o menu lateral é agrupado em **Planejar, Estudar, Fixar, Registrar e Acompanhar**, com contadores nas abas que têm pendências. No celular, uma barra inferior dá acesso a **Hoje, Revisar, Questões e Erros**, e o botão **Mais** abre o menu completo. A antiga tela de painel agora se chama **Visão geral**.
+
+## Testes
+
+```bash
+node tests/smoke-tests.js     # estrutura do app e dos novos módulos; também roda os testes abaixo
+node tests/ciclo-tests.js     # lógica de revisão espaçada e do cronograma de lei seca
+```

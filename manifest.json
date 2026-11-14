@@ -1,0 +1,15 @@
+{
+  "name": "Estudos Track",
+  "short_name": "Estudos Track",
+  "description": "Controle de estudos para concursos com revisão espaçada, caderno de erros e lei seca.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f8fb",
+  "theme_color": "#0f766e",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "assets/favicon-estudos-track.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/favicon-estudos-track.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

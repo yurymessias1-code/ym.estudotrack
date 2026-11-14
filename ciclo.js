@@ -1,0 +1,2298 @@
+/*
+ * Ciclo de estudos: revisão espaçada, caderno de erros e cronograma de lei seca.
+ * Carregado ANTES do app.js. Usa o estado global (`state`) e os helpers do app.js
+ * apenas em tempo de execução (dentro das funções), então a ordem de carga é segura.
+ */
+
+const CYCLE_DEFAULT_INTERVALS = [1, 7, 30, 60];
+const CYCLE_DEFAULT_ERROR_INTERVALS = [1, 3, 7, 15, 30];
+const CYCLE_MIN_AUTO_MINUTES = 10;
+const CYCLE_BACKFILL_DAYS = 14;
+const CYCLE_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const CYCLE_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const CYCLE_DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5, 6];
+const CYCLE_RESULT_LABELS = { forgot: "Esqueci", hard: "Difícil", ok: "Bom", easy: "Fácil" };
+const ERROR_REASONS = {
+  conhecimento: "Não sabia o conteúdo",
+  literalidade: "Literalidade da lei",
+  interpretacao: "Interpretação do enunciado",
+  atencao: "Falta de atenção",
+  confusao: "Confundi institutos ou prazos",
+  jurisprudencia: "Jurisprudência / súmula",
+  chute: "Chutei",
+  tempo: "Tempo / cansaço",
+};
+
+// Estado só de interface (não persiste entre recarregamentos).
+const cycleUI = {
+  sessionId: "",
+  revealed: false,
+  recall: "",
+  errorEditId: "",
+  errorPrefill: null,
+  errorRetest: { id: "", open: false },
+  errorFilters: { search: "", subject: "", reason: "", status: "pending" },
+  lawEditId: "",
+  lawSchedule: {},
+  bannerHidden: false,
+  badgeCount: 0,
+  installPrompt: null,
+};
+
+/* ------------------------------------------------------------------ */
+/* Datas e utilitários independentes do app.js                         */
+/* ------------------------------------------------------------------ */
+
+function cycleDate(iso) {
+  const [year, month, day] = String(iso).split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function cycleISO(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function cycleAddDays(iso, days) {
+  const date = cycleDate(iso);
+  date.setDate(date.getDate() + days);
+  return cycleISO(date);
+}
+
+function cycleToday() {
+  return cycleISO(new Date());
+}
+
+function cycleIsISO(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function cycleUid() {
+  const random = globalThis.crypto?.randomUUID;
+  return typeof random === "function" ? random.call(globalThis.crypto) : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function cycleIsTime(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ""));
+}
+
+function cycleText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function cycleInt(value, min, max, fallback) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function cyclePlural(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function cycleWeekdayShort(iso) {
+  return cycleDate(iso).toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", "");
+}
+
+/* ------------------------------------------------------------------ */
+/* Normalização (chamada pelo normalizeState do app.js)                */
+/* ------------------------------------------------------------------ */
+
+function normalizeCycleIntervals(value, fallback) {
+  const raw = Array.isArray(value) ? value : String(value || "").split(/[\s,;]+/);
+  const list = raw.map((n) => Math.round(Number(n))).filter((n) => Number.isFinite(n) && n >= 1 && n <= 365);
+  return list.length ? list.slice(0, 8) : [...fallback];
+}
+
+function normalizeWeights(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  Object.entries(raw).forEach(([key, value]) => {
+    const id = String(key || "").trim();
+    const number = Number(value);
+    if (id && Number.isFinite(number)) out[id] = Math.min(200, Math.max(0, Math.round(number)));
+  });
+  return out;
+}
+
+function normalizeStudyWeekdays(raw) {
+  const days = [...new Set((Array.isArray(raw) ? raw : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))];
+  return days.length ? days : [...CYCLE_DEFAULT_WEEKDAYS];
+}
+
+function normalizeCycleSettings(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    intervals: normalizeCycleIntervals(source.intervals, CYCLE_DEFAULT_INTERVALS),
+    errorIntervals: normalizeCycleIntervals(source.errorIntervals, CYCLE_DEFAULT_ERROR_INTERVALS),
+    autoFromStudy: source.autoFromStudy !== false,
+    autoSince: cycleIsISO(source.autoSince) ? source.autoSince : cycleToday(),
+    reminderTime: cycleIsTime(source.reminderTime) ? source.reminderTime : "08:00",
+    eveningTime: cycleIsTime(source.eveningTime) ? source.eveningTime : "",
+    dailyLimit: cycleInt(source.dailyLimit, 1, 200, 12),
+    autoWeak: source.autoWeak !== false,
+    weakAccuracy: cycleInt(source.weakAccuracy, 30, 95, 70),
+    weakMinQuestions: cycleInt(source.weakMinQuestions, 5, 100, 10),
+    backupDays: source.backupDays === 0 || source.backupDays === "0" ? 0 : cycleInt(source.backupDays, 0, 90, 7),
+    studyWeekdays: normalizeStudyWeekdays(source.studyWeekdays),
+    weights: normalizeWeights(source.weights),
+  };
+}
+
+function normalizeRevision(item = {}) {
+  const validResults = Object.keys(CYCLE_RESULT_LABELS);
+  const history = Array.isArray(item.history) ? item.history : [];
+  return {
+    id: item.id || cycleUid(),
+    kind: ["study", "manual", "law", "weak"].includes(item.kind) ? item.kind : "manual",
+    subjectId: cycleText(item.subjectId),
+    topicId: cycleText(item.topicId),
+    label: cycleText(item.label),
+    originKey: cycleText(item.originKey),
+    baseDate: cycleIsISO(item.baseDate) ? item.baseDate : cycleToday(),
+    stage: cycleInt(item.stage, 0, 20, 0),
+    dueDate: cycleIsISO(item.dueDate) ? item.dueDate : cycleToday(),
+    status: item.status === "done" ? "done" : "pending",
+    lawPlanId: cycleText(item.lawPlanId),
+    lawFromWork: Number.isFinite(Number(item.lawFromWork)) && item.lawFromWork !== null && item.lawFromWork !== "" ? Number(item.lawFromWork) : null,
+    lawToWork: Number.isFinite(Number(item.lawToWork)) && item.lawToWork !== null && item.lawToWork !== "" ? Number(item.lawToWork) : null,
+    history: history.slice(-30).map((entry) => ({
+      date: cycleIsISO(entry?.date) ? entry.date : "",
+      stage: cycleInt(entry?.stage, 0, 20, 0),
+      result: validResults.includes(entry?.result) ? entry.result : "ok",
+      note: cycleText(entry?.note).slice(0, 500),
+    })),
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || "",
+  };
+}
+
+function normalizeErrorEntry(item = {}) {
+  const date = cycleIsISO(item.date) ? item.date : cycleToday();
+  // Não ler `state` aqui: este normalizador roda durante `let state = loadState()` (zona morta).
+  const firstGap = CYCLE_DEFAULT_ERROR_INTERVALS[0];
+  const reason = Object.prototype.hasOwnProperty.call(ERROR_REASONS, item.reason) ? item.reason : "conhecimento";
+  const mastered = Boolean(item.mastered);
+  return {
+    id: item.id || cycleUid(),
+    subjectId: cycleText(item.subjectId),
+    topicId: cycleText(item.topicId),
+    date,
+    source: cycleText(item.source),
+    statement: cycleText(item.statement),
+    myAnswer: cycleText(item.myAnswer),
+    correctAnswer: cycleText(item.correctAnswer),
+    reason,
+    foundation: cycleText(item.foundation),
+    rule: cycleText(item.rule),
+    tags: typeof normalizeHashtags === "function" ? normalizeHashtags(item.tags) : [],
+    stage: cycleInt(item.stage, 0, 20, 0),
+    dueDate: mastered ? "" : cycleIsISO(item.dueDate) ? item.dueDate : cycleAddDays(date, firstGap),
+    attempts: cycleInt(item.attempts, 0, 9999, 0),
+    lapses: cycleInt(item.lapses, 0, 9999, 0),
+    lastResult: item.lastResult === "ok" || item.lastResult === "wrong" ? item.lastResult : "",
+    lastReviewed: cycleIsISO(item.lastReviewed) ? item.lastReviewed : "",
+    mastered,
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || "",
+  };
+}
+
+function normalizeLawPlan(item = {}) {
+  const startUnit = cycleInt(item.startUnit, 1, 99999, 1);
+  const endUnit = Math.max(startUnit, cycleInt(item.endUnit, 1, 99999, startUnit));
+  const passes = cycleInt(item.passes, 1, 10, 1);
+  const total = (endUnit - startUnit + 1) * passes;
+  const startDate = cycleIsISO(item.startDate) ? item.startDate : cycleToday();
+  let endDate = cycleIsISO(item.endDate) ? item.endDate : cycleAddDays(startDate, 30);
+  if (endDate < startDate) endDate = startDate;
+  const weekdays = [...new Set((Array.isArray(item.weekdays) ? item.weekdays : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))];
+  const readLog = (Array.isArray(item.readLog) ? item.readLog : [])
+    .map((entry) => ({
+      id: entry?.id || cycleUid(),
+      date: cycleIsISO(entry?.date) ? entry.date : cycleToday(),
+      fromWork: cycleInt(entry?.fromWork, 0, total, 0),
+      toWork: cycleInt(entry?.toWork, 0, total, 0),
+    }))
+    .filter((entry) => entry.toWork > entry.fromWork)
+    .slice(-400);
+  return {
+    id: item.id || cycleUid(),
+    title: cycleText(item.title) || "Plano de leitura",
+    subjectId: cycleText(item.subjectId),
+    unitLabel: cycleText(item.unitLabel) || "artigos",
+    url: cycleText(item.url),
+    startUnit,
+    endUnit,
+    passes,
+    startDate,
+    endDate,
+    weekdays: weekdays.length ? weekdays : [...CYCLE_DEFAULT_WEEKDAYS],
+    doneWork: cycleInt(item.doneWork, 0, total, 0),
+    readLog,
+    scheduleRevisions: item.scheduleRevisions !== false,
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || "",
+  };
+}
+
+function ensureCycleState() {
+  if (!state) return;
+  if (!Array.isArray(state.revisions)) state.revisions = [];
+  if (!Array.isArray(state.errorNotebook)) state.errorNotebook = [];
+  if (!Array.isArray(state.lawPlans)) state.lawPlans = [];
+  if (!state.cycleSettings || typeof state.cycleSettings !== "object") state.cycleSettings = normalizeCycleSettings();
+}
+
+/* ------------------------------------------------------------------ */
+/* Lógica pura: revisão espaçada                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Próximo passo de uma revisão.
+ * result: "forgot" volta ao início; "hard" repete a etapa com metade do intervalo;
+ * "ok" avança; "easy" avança com intervalo 50% maior. Passando da última etapa, encerra.
+ */
+function cycleReviewStep(stage, result, intervals) {
+  const last = intervals.length;
+  if (result === "forgot") return { done: false, stage: 0, gap: intervals[0] };
+  if (result === "hard") {
+    const base = intervals[Math.min(stage, last - 1)];
+    return { done: false, stage, gap: Math.max(1, Math.ceil(base / 2)) };
+  }
+  const next = stage + 1;
+  if (next >= last) return { done: true, stage: last, gap: 0 };
+  let gap = intervals[next];
+  if (result === "easy") gap = Math.round(gap * 1.5);
+  return { done: false, stage: next, gap };
+}
+
+/* ------------------------------------------------------------------ */
+/* Lógica pura: cronograma de leitura de lei seca                      */
+/* ------------------------------------------------------------------ */
+
+function lawUnitsPerPass(plan) {
+  return plan.endUnit - plan.startUnit + 1;
+}
+
+function lawTotalWork(plan) {
+  return lawUnitsPerPass(plan) * plan.passes;
+}
+
+/** Converte um intervalo de trabalho [from, to) em trechos por leitura. */
+function lawWorkSegments(plan, fromWork, toWork) {
+  const per = lawUnitsPerPass(plan);
+  const segments = [];
+  let work = fromWork;
+  while (work < toWork) {
+    const offset = work % per;
+    const take = Math.min(toWork - work, per - offset);
+    segments.push({
+      pass: Math.floor(work / per) + 1,
+      from: plan.startUnit + offset,
+      to: plan.startUnit + offset + take - 1,
+      count: take,
+    });
+    work += take;
+  }
+  return segments;
+}
+
+function lawSegmentsLabel(plan, segments) {
+  return segments
+    .map((segment) => {
+      const range = segment.from === segment.to ? `${segment.from}` : `${segment.from}–${segment.to}`;
+      const text = `${plan.unitLabel} ${range}`;
+      return plan.passes > 1 ? `${segment.pass}ª leitura: ${text}` : text;
+    })
+    .join(" + ");
+}
+
+function lawWorkLabel(plan, fromWork, toWork) {
+  return lawSegmentsLabel(plan, lawWorkSegments(plan, fromWork, toWork));
+}
+
+function lawReadingDays(plan, fromISO, toISO) {
+  const days = [];
+  let cursor = fromISO;
+  for (let guard = 0; cursor <= toISO && guard < 1500; guard += 1) {
+    if (plan.weekdays.includes(cycleDate(cursor).getDay())) days.push(cursor);
+    cursor = cycleAddDays(cursor, 1);
+  }
+  return days;
+}
+
+function lawDistribute(total, count) {
+  if (count <= 0) return [];
+  const base = Math.floor(total / count);
+  const extra = total % count;
+  return Array.from({ length: count }, (_, index) => base + (index < extra ? 1 : 0));
+}
+
+function lawNextReadingDay(plan, fromISO) {
+  let cursor = fromISO;
+  for (let guard = 0; guard < 14; guard += 1) {
+    if (plan.weekdays.includes(cycleDate(cursor).getDay())) return cursor;
+    cursor = cycleAddDays(cursor, 1);
+  }
+  return fromISO;
+}
+
+/**
+ * Cronograma dinâmico: redistribui o que falta pelos dias de leitura restantes.
+ * A meta de hoje parte do que faltava no início do dia, então não encolhe enquanto você lê.
+ */
+function buildLawSchedule(plan, today) {
+  const total = lawTotalWork(plan);
+  const done = plan.doneWork;
+  const per = lawUnitsPerPass(plan);
+  const readToday = plan.readLog.filter((entry) => entry.date === today).reduce((sum, entry) => sum + (entry.toWork - entry.fromWork), 0);
+  const startOfToday = Math.max(0, done - readToday);
+  const info = {
+    total,
+    done,
+    remaining: total - done,
+    pct: total ? (done / total) * 100 : 0,
+    readToday,
+    todayTarget: 0,
+    todayIsReading: false,
+    todayLabel: "",
+    rows: [],
+    remainingDays: 0,
+    pacePerDay: 0,
+    delta: 0,
+    status: "Em dia",
+    tone: "good",
+    finished: done >= total,
+    overdue: false,
+    notStarted: today < plan.startDate,
+    currentPass: Math.min(plan.passes, Math.floor(done / per) + 1),
+  };
+
+  // Posição frente ao ritmo original (até ontem), para o selo de status.
+  const originalDays = lawReadingDays(plan, plan.startDate, plan.endDate);
+  const idealYesterday = originalDays.length ? Math.round((total * originalDays.filter((day) => day < today).length) / originalDays.length) : today > plan.endDate ? total : 0;
+  info.delta = done - idealYesterday;
+
+  if (info.finished) {
+    info.status = "Concluído";
+    info.tone = "good";
+    return info;
+  }
+
+  const firstDay = today > plan.startDate ? today : plan.startDate;
+  let days = lawReadingDays(plan, firstDay, plan.endDate);
+  if (!days.length) {
+    info.overdue = plan.endDate < today;
+    days = [info.overdue ? today : lawNextReadingDay(plan, firstDay)];
+  }
+  info.remainingDays = days.length;
+  info.pacePerDay = Math.ceil((total - done) / days.length);
+
+  const makeRow = (date, fromWork, toWork) => ({
+    date,
+    fromWork,
+    toWork,
+    count: toWork - fromWork,
+    label: lawWorkLabel(plan, fromWork, toWork),
+    isToday: date === today,
+  });
+
+  const rows = [];
+  if (days[0] === today) {
+    info.todayIsReading = true;
+    const todayAlloc = Math.ceil((total - startOfToday) / days.length);
+    const todayEnd = Math.min(total, startOfToday + todayAlloc);
+    rows.push(makeRow(today, startOfToday, todayEnd));
+    let cursor = Math.max(done, todayEnd);
+    const futureDays = days.slice(1);
+    lawDistribute(total - cursor, futureDays.length).forEach((count, index) => {
+      if (count > 0) rows.push(makeRow(futureDays[index], cursor, cursor + count));
+      cursor += count;
+    });
+    info.todayTarget = rows[0].count;
+    info.todayLabel = rows[0].label;
+  } else {
+    let cursor = done;
+    lawDistribute(total - cursor, days.length).forEach((count, index) => {
+      if (count > 0) rows.push(makeRow(days[index], cursor, cursor + count));
+      cursor += count;
+    });
+  }
+  info.rows = rows;
+
+  if (today > plan.endDate) {
+    info.status = "Prazo vencido";
+    info.tone = "bad";
+  } else if (info.delta < 0) {
+    info.status = `${-info.delta} ${plan.unitLabel} atrasado`;
+    info.tone = info.delta < -Math.max(5, Math.round(total * 0.05)) ? "bad" : "warn";
+  } else if (info.notStarted) {
+    info.status = "Ainda não começou";
+    info.tone = "warn";
+  } else {
+    info.status = info.delta > 0 ? `${info.delta} ${plan.unitLabel} adiantado` : "Em dia";
+    info.tone = "good";
+  }
+  return info;
+}
+
+function lawRegisterWork(plan, units, today) {
+  const total = lawTotalWork(plan);
+  const count = Math.min(Math.max(0, Math.floor(units)), total - plan.doneWork);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  plan.readLog.push({ id: cycleUid(), date: today, fromWork: plan.doneWork, toWork: plan.doneWork + count });
+  plan.readLog = plan.readLog.slice(-400);
+  plan.doneWork += count;
+  plan.updatedAt = new Date().toISOString();
+  return count;
+}
+
+/** "Li até o nº N" na leitura em andamento → quantas unidades isso representa. */
+function lawUnitsFromPosition(plan, number) {
+  const per = lawUnitsPerPass(plan);
+  if (plan.doneWork >= lawTotalWork(plan)) return { error: "Este plano já foi concluído." };
+  const target = Math.floor(Number(number)) - plan.startUnit + 1;
+  if (!Number.isFinite(target) || target < 1 || target > per) {
+    return { error: `Informe um número entre ${plan.startUnit} e ${plan.endUnit}.` };
+  }
+  const alreadyDone = plan.doneWork % per;
+  if (target <= alreadyDone) return { error: `Você já registrou a leitura até ${plan.startUnit + alreadyDone - 1}.` };
+  return { units: target - alreadyDone };
+}
+
+/* ------------------------------------------------------------------ */
+/* Revisões: criação, agendamento automático e conclusão               */
+/* ------------------------------------------------------------------ */
+
+function revisionIntervals() {
+  return state.cycleSettings.intervals;
+}
+
+function createRevision(data) {
+  const intervals = revisionIntervals();
+  const baseDate = cycleIsISO(data.baseDate) ? data.baseDate : cycleToday();
+  const revision = normalizeRevision({
+    ...data,
+    baseDate,
+    stage: 0,
+    dueDate: cycleIsISO(data.dueDate) ? data.dueDate : cycleAddDays(baseDate, intervals[0]),
+    createdAt: new Date().toISOString(),
+  });
+  state.revisions.push(revision);
+  return revision;
+}
+
+/** Cria uma cadeia de revisões por assunto/dia estudado (sem duplicar). */
+function syncAutoRevisions(options = {}) {
+  ensureCycleState();
+  const settings = state.cycleSettings;
+  if (!settings.autoFromStudy && !options.force) return 0;
+  const since = options.since || settings.autoSince;
+  const groups = new Map();
+  state.studyLogs.forEach((log) => {
+    if (!cycleIsISO(log.date) || log.date < since) return;
+    const topic = log.topicId ? getTopic(log.topicId) : null;
+    const subjectId = topic?.subjectId || log.subjectId || "";
+    if (!subjectId || !getSubject(subjectId)) return;
+    const topicId = topic ? topic.id : "";
+    const key = `study:${topicId || subjectId}:${log.date}`;
+    const group = groups.get(key) || { key, subjectId, topicId, date: log.date, minutes: 0 };
+    group.minutes += Number(log.minutes) || 0;
+    groups.set(key, group);
+  });
+  const known = new Set(state.revisions.map((revision) => revision.originKey));
+  let created = 0;
+  groups.forEach((group) => {
+    if (known.has(group.key) || group.minutes < CYCLE_MIN_AUTO_MINUTES) return;
+    createRevision({ kind: "study", subjectId: group.subjectId, topicId: group.topicId, originKey: group.key, baseDate: group.date });
+    created += 1;
+  });
+  return created;
+}
+
+function revisionLabel(revision) {
+  if (revision.kind === "law") {
+    const plan = state.lawPlans.find((item) => item.id === revision.lawPlanId);
+    if (plan && revision.lawFromWork !== null && revision.lawToWork !== null) {
+      return `${plan.title}: ${lawWorkLabel(plan, revision.lawFromWork, revision.lawToWork)}`;
+    }
+    return revision.label || "Leitura de lei seca";
+  }
+  const prefix = revision.kind === "weak" ? "Reforço: " : "";
+  if (revision.topicId && getTopic(revision.topicId)) return `${prefix}${getTopicLabel(revision.topicId)}`;
+  const subject = getSubject(revision.subjectId);
+  return subject ? `${prefix}${subject.name}` : revision.label || "Assunto removido";
+}
+
+function revisionStageLabel(revision) {
+  const total = revisionIntervals().length;
+  return `R${Math.min(revision.stage + 1, total)}/${total}`;
+}
+
+function getDueRevisions(today = cycleToday()) {
+  return state.revisions
+    .filter((revision) => revision.status === "pending" && revision.dueDate <= today)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || revisionLabel(a).localeCompare(revisionLabel(b)));
+}
+
+function completeRevision(id, result, note = "") {
+  const revision = state.revisions.find((item) => item.id === id);
+  if (!revision || revision.status === "done") return null;
+  const today = cycleToday();
+  const step = cycleReviewStep(revision.stage, result, revisionIntervals());
+  revision.history.push({ date: today, stage: revision.stage, result, note: cycleText(note).slice(0, 500) });
+  revision.history = revision.history.slice(-30);
+  revision.stage = step.stage;
+  if (step.done) {
+    revision.status = "done";
+  } else {
+    revision.dueDate = cycleAddDays(today, step.gap);
+  }
+  revision.updatedAt = new Date().toISOString();
+  return step;
+}
+
+function scheduleLawRevision(plan, fromWork, toWork, today) {
+  const key = `law:${plan.id}:${today}`;
+  const existing = state.revisions.find((revision) => revision.originKey === key && revision.status === "pending" && revision.history.length === 0);
+  if (existing) {
+    existing.lawFromWork = Math.min(existing.lawFromWork ?? fromWork, fromWork);
+    existing.lawToWork = Math.max(existing.lawToWork ?? toWork, toWork);
+    existing.label = `${plan.title}: ${lawWorkLabel(plan, existing.lawFromWork, existing.lawToWork)}`;
+    existing.updatedAt = new Date().toISOString();
+    return existing;
+  }
+  return createRevision({
+    kind: "law",
+    subjectId: plan.subjectId,
+    originKey: key,
+    baseDate: today,
+    lawPlanId: plan.id,
+    lawFromWork: fromWork,
+    lawToWork: toWork,
+    label: `${plan.title}: ${lawWorkLabel(plan, fromWork, toWork)}`,
+  });
+}
+
+function getRevisionMaterials(revision) {
+  const { subjectId, topicId } = revision;
+  const empty = { cards: [], errors: [], legal: [], cases: [], stats: null };
+  if (!subjectId && !topicId) return empty;
+  const inScope = (item) => (topicId ? item.topicId === topicId : getEntrySubjectId(item) === subjectId);
+  const stats = topicId ? getTopicStats(topicId) : null;
+  return {
+    cards: state.flashcards.filter(inScope).slice(0, 6),
+    errors: state.errorNotebook.filter((entry) => !entry.mastered && inScope(entry)).slice(0, 5),
+    legal: (state.legalMaterials || []).filter(inScope).slice(0, 5),
+    cases: ["STJ", "STF"].flatMap((court) => (state.cases?.[court] || []).filter(inScope).map((item) => ({ ...item, court }))).slice(0, 5),
+    stats: stats && stats.total > 0 ? stats : null,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Caderno de erros: lógica                                            */
+/* ------------------------------------------------------------------ */
+
+function errorStatus(entry) {
+  if (entry.mastered) return "mastered";
+  return entry.attempts > 0 ? "review" : "open";
+}
+
+function errorStatusLabel(entry) {
+  return { open: "Aberto", review: "Em revisão", mastered: "Dominado" }[errorStatus(entry)];
+}
+
+function retestErrorEntry(id, isCorrect) {
+  const entry = state.errorNotebook.find((item) => item.id === id);
+  if (!entry) return null;
+  const today = cycleToday();
+  const intervals = state.cycleSettings.errorIntervals;
+  const step = cycleReviewStep(entry.stage, isCorrect ? "ok" : "forgot", intervals);
+  entry.attempts += 1;
+  entry.lastReviewed = today;
+  entry.lastResult = isCorrect ? "ok" : "wrong";
+  if (!isCorrect) entry.lapses += 1;
+  entry.stage = step.stage;
+  if (step.done) {
+    entry.mastered = true;
+    entry.dueDate = "";
+  } else {
+    entry.mastered = false;
+    entry.dueDate = cycleAddDays(today, step.gap);
+  }
+  entry.updatedAt = new Date().toISOString();
+  return step;
+}
+
+function getDueErrors(today = cycleToday()) {
+  return state.errorNotebook.filter((entry) => !entry.mastered && entry.dueDate && entry.dueDate <= today);
+}
+
+/* ------------------------------------------------------------------ */
+/* Resumo do ciclo (painel e abas)                                     */
+/* ------------------------------------------------------------------ */
+
+function getCycleSummary() {
+  ensureCycleState();
+  const today = cycleToday();
+  const sum = (list, key) => list.reduce((total, item) => total + Number(item[key] || 0), 0);
+  const weekStudy = state.studyLogs.filter(getRangePredicate("week"));
+  const weekQuestions = state.questionLogs.filter(getRangePredicate("week"));
+  const correct = sum(weekQuestions, "correct");
+  const wrong = sum(weekQuestions, "wrong");
+  const dueRevisions = getDueRevisions(today);
+  const dueErrors = getDueErrors(today);
+  const laws = state.lawPlans.map((plan) => ({ plan, info: buildLawSchedule(plan, today) }));
+  const lawToday = laws.filter(({ info }) => !info.finished && info.todayIsReading && info.readToday < info.todayTarget);
+  const unitLabels = [...new Set(lawToday.map(({ plan }) => plan.unitLabel))];
+  return {
+    today,
+    weekMinutes: sum(weekStudy, "minutes"),
+    qTotal: correct + wrong,
+    qAcc: correct + wrong ? (correct / (correct + wrong)) * 100 : 0,
+    revDue: dueRevisions.length,
+    revOverdue: dueRevisions.filter((revision) => revision.dueDate < today).length,
+    errorsDue: dueErrors.length,
+    errorsOpen: state.errorNotebook.filter((entry) => !entry.mastered).length,
+    laws,
+    lawToday,
+    lawPendingUnits: lawToday.reduce((total, { info }) => total + (info.todayTarget - info.readToday), 0),
+    lawUnitLabel: unitLabels.length === 1 ? unitLabels[0] : "itens",
+  };
+}
+
+function getCycleDailyCards() {
+  try {
+    const summary = getCycleSummary();
+    const cards = [];
+    if (summary.revDue) {
+      cards.push({
+        label: summary.revOverdue ? "Revisão atrasada" : "Revisão",
+        title: `${summary.revDue} ${summary.revDue === 1 ? "revisão" : "revisões"} para hoje`,
+        meta: summary.revOverdue ? `${summary.revOverdue} já passaram do prazo` : "Fixe o que estudou nos últimos dias",
+        view: "revisao",
+      });
+    }
+    if (summary.errorsDue) {
+      cards.push({
+        label: "Caderno de erros",
+        title: `${summary.errorsDue} ${summary.errorsDue === 1 ? "erro" : "erros"} para refazer`,
+        meta: `${summary.errorsOpen} ainda não dominados`,
+        view: "erros",
+      });
+    }
+    if (summary.lawPendingUnits) {
+      const first = summary.lawToday[0];
+      cards.push({
+        label: "Lei seca",
+        title: `${first.plan.title}`,
+        meta: `${first.info.todayLabel} (${summary.lawPendingUnits} ${summary.lawUnitLabel} hoje)`,
+        view: "leiseca",
+      });
+    }
+    return cards;
+  } catch (error) {
+    console.error("Ciclo de estudos (cartões do painel):", error);
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Renderização                                                        */
+/* ------------------------------------------------------------------ */
+
+function renderCycle() {
+  try {
+    ensureCycleState();
+    if (typeof todayEnsureStartView === "function" && todayEnsureStartView()) return;
+    const created = syncAutoRevisions();
+    if (created > 0) {
+      saveState();
+      showToast(`${cyclePlural(created, "revisão agendada", "revisões agendadas")}: o site avisa no dia certo.`);
+    }
+    const weak = typeof syncWeakRevisions === "function" ? syncWeakRevisions() : [];
+    if (weak.length) {
+      saveState();
+      showToast(weak.length === 1 ? `Reforço agendado: ${getTopicLabel(weak[0].topicId)} (${Math.round(weak[0].accuracy)}% de acerto).` : `${weak.length} reforços agendados por acerto baixo.`);
+    }
+    const summary = getCycleSummary();
+    renderCycleStrips(summary);
+    renderReviewBanner(summary);
+    cycleApplyBadge(summary.revDue + summary.errorsDue + summary.lawToday.length);
+    cycleMaybeNotify(summary);
+    if (typeof renderTodayModule === "function") renderTodayModule(summary);
+    const view = state.ui.view;
+    if (view === "revisao") renderRevisions();
+    if (view === "erros") renderErrors();
+    if (view === "leiseca") renderLaw();
+  } catch (error) {
+    console.error("Ciclo de estudos:", error);
+  }
+}
+
+function renderCycleStrips(summary) {
+  const targets = ["#cycleStripDashboard", "#cycleStripRevisao"].map((selector) => $(selector)).filter(Boolean);
+  if (!targets.length) return;
+  const s = summary || getCycleSummary();
+  const steps = [
+    { view: "pomodoro", title: "Estudar", value: formatMinutes(s.weekMinutes), meta: "registrados na semana" },
+    { view: "questoes", title: "Questões", value: String(s.qTotal), meta: s.qTotal ? `${percent(s.qAcc)} de acerto na semana` : "nenhuma na semana" },
+    { view: "erros", title: "Caderno de erros", value: String(s.errorsDue), meta: s.errorsDue ? "para refazer hoje" : cyclePlural(s.errorsOpen, "não dominado", "não dominados") },
+    { view: "revisao", title: "Revisar", value: String(s.revDue), meta: s.revOverdue ? `${s.revOverdue} atrasada(s)` : "para hoje" },
+    { view: "leiseca", title: "Lei seca", value: String(s.lawPendingUnits), meta: s.lawPendingUnits ? `${s.lawUnitLabel} para ler hoje` : "sem meta pendente" },
+  ];
+  const html = steps
+    .map(
+      (step, index) => `
+        <button class="cycle-step" data-view="${step.view}" type="button">
+          <span class="cycle-step-number">${index + 1}</span>
+          <strong>${escapeHTML(step.title)}</strong>
+          <span class="cycle-step-value">${escapeHTML(step.value)}</span>
+          <small>${escapeHTML(step.meta)}</small>
+        </button>`
+    )
+    .join("");
+  targets.forEach((target) => {
+    target.innerHTML = html;
+  });
+}
+
+function cycleSetValueIfIdle(selector, value) {
+  const element = $(selector);
+  if (element && document.activeElement !== element) element.value = value;
+}
+
+function cycleStat(label, value, caption) {
+  return statCard(label, value, caption);
+}
+
+/* ---------- Revisão ---------- */
+
+function renderRevisions() {
+  const today = cycleToday();
+  populateSubjectSelect($("#revisionSubject"));
+  populateTopicSelect($("#revisionTopic"), { includeEmpty: true, subjectId: $("#revisionSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  $("#revisionSubject").disabled = state.subjects.length === 0;
+  $("#revisionTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#revisionSubject")?.value);
+  if (!$("#revisionBaseDate").value) $("#revisionBaseDate").value = today;
+  cycleSetValueIfIdle("#cycleIntervals", state.cycleSettings.intervals.join(", "));
+  cycleSetValueIfIdle("#cycleErrorIntervals", state.cycleSettings.errorIntervals.join(", "));
+  $("#cycleAutoStudy").checked = state.cycleSettings.autoFromStudy;
+  $("#cycleAutoWeak").checked = state.cycleSettings.autoWeak;
+  cycleSetValueIfIdle("#cycleWeakAccuracy", state.cycleSettings.weakAccuracy);
+  cycleSetValueIfIdle("#cycleWeakMin", state.cycleSettings.weakMinQuestions);
+
+  const pending = state.revisions.filter((revision) => revision.status === "pending");
+  const due = getDueRevisions(today);
+  const limit = cycleAddDays(today, 7);
+  const next7 = pending.filter((revision) => revision.dueDate > today && revision.dueDate <= limit).length;
+  const cutoff = cycleAddDays(today, -30);
+  const recent = state.revisions.flatMap((revision) => revision.history).filter((entry) => entry.date >= cutoff);
+  const kept = recent.filter((entry) => entry.result === "ok" || entry.result === "easy").length;
+  $("#revisionStats").innerHTML = [
+    cycleStat("Para hoje", String(due.length), due.length ? "revisões na fila" : "fila em dia"),
+    cycleStat("Atrasadas", String(due.filter((revision) => revision.dueDate < today).length), "passaram da data prevista"),
+    cycleStat("Próximos 7 dias", String(next7), `${cyclePlural(pending.length, "pendente", "pendentes")} no total`),
+    cycleStat("Retenção (30 dias)", recent.length ? percent((kept / recent.length) * 100) : "–", recent.length ? `${cyclePlural(recent.length, "revisão feita", "revisões feitas")}` : "sem revisões ainda"),
+  ].join("");
+
+  $("#revisionQueue").innerHTML = due.length
+    ? due
+        .map((revision) => {
+          const late = daysBetween(revision.dueDate, today);
+          const when = late > 0 ? `${late} ${late === 1 ? "dia" : "dias"} de atraso` : "para hoje";
+          return `
+            <article class="revision-row ${late > 0 ? "overdue" : ""}">
+              <div>
+                <strong>${escapeHTML(revisionLabel(revision))}</strong>
+                <small>${revisionStageLabel(revision)} · ${when} · estudado em ${formatDate(revision.baseDate)}</small>
+              </div>
+              <div class="inline-actions">
+                <button class="mini-button success" data-cycle-action="openRevision" data-id="${revision.id}" type="button">Revisar</button>
+                <button class="mini-button" data-cycle-action="finishRevision" data-id="${revision.id}" type="button">Encerrar</button>
+                <button class="mini-button bad" data-cycle-action="deleteRevision" data-id="${revision.id}" type="button">Excluir</button>
+              </div>
+            </article>`;
+        })
+        .join("")
+    : `<div class="empty-state">Nenhuma revisão pendente para hoje. Registre estudo no Pomodoro ou agende uma revisão manual.</div>`;
+
+  const overdueCount = due.filter((revision) => revision.dueDate < today).length;
+  if (overdueCount > 0) {
+    $("#revisionQueue").insertAdjacentHTML(
+      "beforeend",
+      `<div class="inline-actions"><button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(overdueCount, "atrasada", "atrasadas")} (até ${state.cycleSettings.dailyLimit} por dia)</button></div>`
+    );
+  }
+
+  renderRevisionSession(due);
+  renderRevisionUpcoming(pending, today);
+  renderRevisionTrail(today);
+  renderReminderPanel();
+}
+
+function renderRevisionSession(due) {
+  const box = $("#revisionSession");
+  const revision = state.revisions.find((item) => item.id === cycleUI.sessionId && item.status === "pending");
+  if (!revision) {
+    cycleUI.sessionId = "";
+    cycleUI.revealed = false;
+    box.innerHTML = due.length
+      ? `<div class="empty-state">${due.length} ${due.length === 1 ? "revisão aguarda" : "revisões aguardam"} você.</div>
+         <button class="button primary" data-cycle-action="startSession" type="button">Iniciar sessão de revisão</button>`
+      : `<div class="empty-state">Sem revisões para fazer agora. Quando houver, a sessão guiada aparece aqui.</div>`;
+    return;
+  }
+
+  const isLaw = revision.kind === "law";
+  const plan = isLaw ? state.lawPlans.find((item) => item.id === revision.lawPlanId) : null;
+  const prompt = isLaw
+    ? "Sem abrir a lei, recite o que lembra deste trecho: regra geral, prazos, exceções e palavras-chave."
+    : "Sem olhar nada, explique em voz alta ou por escrito o que você lembra deste assunto: conceito, regras, exceções e pegadinhas.";
+  const position = getDueRevisions().findIndex((item) => item.id === revision.id) + 1;
+
+  let body = `
+    <div class="recall-box">
+      <label>
+        O que eu lembro (opcional, fica salvo no histórico)
+        <textarea id="revisionRecall" rows="5" placeholder="Escreva com suas palavras antes de conferir...">${escapeHTML(cycleUI.recall)}</textarea>
+      </label>
+    </div>`;
+
+  if (!cycleUI.revealed) {
+    body += `<div class="inline-actions"><button class="button primary" data-cycle-action="revealSession" type="button">Mostrar material para conferir</button></div>`;
+  } else {
+    const materials = getRevisionMaterials(revision);
+    const sections = [];
+    if (materials.stats) {
+      sections.push(`<div class="session-block"><span class="field-title">Desempenho em questões</span><p>${percent(materials.stats.accuracy)} de acerto em ${materials.stats.total} ${materials.stats.total === 1 ? "questão" : "questões"}.</p></div>`);
+    }
+    if (materials.errors.length) {
+      sections.push(`<div class="session-block"><span class="field-title">Erros ainda abertos neste tema</span>${materials.errors
+        .map((entry) => `<p class="pre-wrap"><strong>${escapeHTML(cycleExcerpt(entry.statement, 110))}</strong><br />Correto: ${escapeHTML(cycleExcerpt(entry.correctAnswer, 140))}${entry.rule ? `<br />Regra: ${escapeHTML(cycleExcerpt(entry.rule, 140))}` : ""}</p>`)
+        .join("")}</div>`);
+    }
+    if (materials.cards.length) {
+      sections.push(`<div class="session-block"><span class="field-title">Flashcards deste tema</span>${materials.cards
+        .map((card) => `<p><strong>${escapeHTML(cycleExcerpt(richTextToPlain(card.front), 110))}</strong><br />${escapeHTML(cycleExcerpt(richTextToPlain(card.back), 180))}</p>`)
+        .join("")}</div>`);
+    }
+    const references = [
+      ...materials.legal.map((item) => `${item.title}${item.reference ? ` (${item.reference})` : ""}`),
+      ...materials.cases.map((item) => `${item.court}: ${item.title}`),
+    ];
+    if (references.length) {
+      sections.push(`<div class="session-block"><span class="field-title">Leis e julgados cadastrados</span><p>${references.map(escapeHTML).join("<br />")}</p></div>`);
+    }
+    if (isLaw && plan?.url) {
+      sections.push(`<div class="session-block"><a class="button secondary" href="${escapeHTML(plan.url)}" target="_blank" rel="noopener noreferrer">Abrir a lei para conferir</a></div>`);
+    }
+    if (!sections.length) {
+      sections.push(`<div class="session-block"><p>Não há flashcards, erros ou leis cadastrados para este tema. Confira no seu material e avalie sua lembrança.</p></div>`);
+    }
+    const intervals = revisionIntervals();
+    const hint = (result) => {
+      const step = cycleReviewStep(revision.stage, result, intervals);
+      return step.done ? "encerra" : `volta em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}`;
+    };
+    body += `
+      ${sections.join("")}
+      <div class="session-block">
+        <span class="field-title">Como foi a sua lembrança?</span>
+        <div class="rating-row">
+          ${["forgot", "hard", "ok", "easy"]
+            .map(
+              (result) => `<button class="button rating-${result}" data-cycle-action="rateRevision" data-result="${result}" data-id="${revision.id}" type="button">
+                <strong>${CYCLE_RESULT_LABELS[result]}</strong><small>${hint(result)}</small></button>`
+            )
+            .join("")}
+        </div>
+      </div>`;
+  }
+
+  box.innerHTML = `
+    <div class="session-head">
+      <div>
+        <p class="eyebrow">${revisionStageLabel(revision)} · revisão ${position} de ${due.length}</p>
+        <h3>${escapeHTML(revisionLabel(revision))}</h3>
+      </div>
+      <button class="mini-button" data-cycle-action="skipSession" type="button">Pular</button>
+    </div>
+    ${revision.kind === "weak" ? `<p class="session-note">Reforço automático: seu acerto neste assunto ficou abaixo da meta. Revise os erros abaixo e refaça questões do tema depois.</p>` : ""}
+    <p class="session-prompt">${escapeHTML(prompt)}</p>
+    ${body}`;
+}
+
+function cycleExcerpt(text, max = 120) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}…` : clean;
+}
+
+function renderRevisionUpcoming(pending, today) {
+  const container = $("#revisionUpcoming");
+  const horizon = cycleAddDays(today, 14);
+  const future = pending.filter((revision) => revision.dueDate > today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const shown = future.filter((revision) => revision.dueDate <= horizon);
+  if (!future.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma revisão futura agendada ainda.</div>`;
+    return;
+  }
+  const groups = new Map();
+  shown.forEach((revision) => {
+    const list = groups.get(revision.dueDate) || [];
+    list.push(revision);
+    groups.set(revision.dueDate, list);
+  });
+  const later = future.length - shown.length;
+  container.innerHTML =
+    [...groups.entries()]
+      .map(
+        ([date, list]) => `
+          <div class="upcoming-day">
+            <strong>${escapeHTML(cycleWeekdayShort(date))}, ${formatDate(date)}</strong>
+            <ul>${list.map((revision) => `<li>${escapeHTML(revisionLabel(revision))} <small>${revisionStageLabel(revision)}</small></li>`).join("")}</ul>
+          </div>`
+      )
+      .join("") + (later > 0 ? `<p class="muted-note">+ ${later} ${later === 1 ? "revisão" : "revisões"} depois dos próximos 14 dias.</p>` : "");
+  if (!shown.length) {
+    container.innerHTML = `<div class="empty-state">Nada nos próximos 14 dias. ${later} ${later === 1 ? "revisão agendada" : "revisões agendadas"} mais adiante.</div>`;
+  }
+}
+
+/* ---------- Caderno de erros ---------- */
+
+function cycleReasonOptions(selected, { withAll = false } = {}) {
+  const all = withAll ? `<option value="">Todos os motivos</option>` : "";
+  return all + Object.entries(ERROR_REASONS).map(([key, label]) => `<option value="${key}" ${key === selected ? "selected" : ""}>${escapeHTML(label)}</option>`).join("");
+}
+
+function renderErrors() {
+  const today = cycleToday();
+  const filters = cycleUI.errorFilters;
+
+  populateSubjectSelect($("#errorSubject"));
+  populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject")?.value || "", emptyLabel: "Sem assunto específico" });
+  $("#errorSubject").disabled = state.subjects.length === 0;
+  $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject")?.value);
+  const reasonSelect = $("#errorReason");
+  if (!reasonSelect.options.length) reasonSelect.innerHTML = cycleReasonOptions("conhecimento");
+  if (!$("#errorDate").value) $("#errorDate").value = today;
+
+  populateSubjectSelect($("#errorFilterSubject"), { includeEmpty: true, emptyLabel: "Todas as matérias" });
+  $("#errorFilterSubject").value = state.subjects.some((subject) => subject.id === filters.subject) ? filters.subject : "";
+  filters.subject = $("#errorFilterSubject").value;
+  $("#errorFilterReason").innerHTML = cycleReasonOptions(filters.reason, { withAll: true });
+  $("#errorFilterStatus").value = filters.status;
+  cycleSetValueIfIdle("#errorSearch", filters.search);
+
+  if (cycleUI.errorPrefill) {
+    const prefill = cycleUI.errorPrefill;
+    cycleUI.errorPrefill = null;
+    if (prefill.subjectId) $("#errorSubject").value = prefill.subjectId;
+    populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
+    $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
+    if (prefill.topicId) $("#errorTopic").value = prefill.topicId;
+    if (prefill.date) $("#errorDate").value = prefill.date;
+    window.setTimeout(() => $("#errorStatement")?.focus(), 80);
+  }
+
+  const all = state.errorNotebook;
+  const open = all.filter((entry) => !entry.mastered);
+  const dueCount = getDueErrors(today).length;
+  const reasonCounts = Object.keys(ERROR_REASONS).map((key) => ({ key, count: all.filter((entry) => entry.reason === key).length })).sort((a, b) => b.count - a.count);
+  const topReason = reasonCounts[0]?.count ? reasonCounts[0] : null;
+  $("#errorStats").innerHTML = [
+    cycleStat("Para refazer hoje", String(dueCount), dueCount ? "venceram na revisão" : "nada vencido"),
+    cycleStat("Não dominados", String(open.length), `${all.filter((entry) => errorStatus(entry) === "review").length} em revisão`),
+    cycleStat("Dominados", String(all.length - open.length), `${all.length} no caderno`),
+    cycleStat("Motivo mais comum", topReason ? ERROR_REASONS[topReason.key] : "–", topReason ? `${topReason.count} ${topReason.count === 1 ? "erro" : "erros"}` : "sem erros ainda"),
+  ].join("");
+
+  renderErrorCharts(reasonCounts);
+  updateErrorFormMode();
+
+  const search = typeof normalizeSearchText === "function" ? normalizeSearchText(filters.search) : filters.search.toLowerCase();
+  const matches = all
+    .filter((entry) => {
+      const status = errorStatus(entry);
+      if (filters.subject && entry.subjectId !== filters.subject) return false;
+      if (filters.reason && entry.reason !== filters.reason) return false;
+      if (filters.status === "pending" && status === "mastered") return false;
+      if (filters.status === "due" && !(status !== "mastered" && entry.dueDate && entry.dueDate <= today)) return false;
+      if (filters.status === "mastered" && status !== "mastered") return false;
+      if (search) {
+        const haystack = [entry.statement, entry.myAnswer, entry.correctAnswer, entry.foundation, entry.rule, entry.source, entry.tags.join(" "), getEntryScopeLabel(entry), ERROR_REASONS[entry.reason]].join(" ");
+        const normalized = typeof normalizeSearchText === "function" ? normalizeSearchText(haystack) : haystack.toLowerCase();
+        if (!normalized.includes(search)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => Number(a.mastered) - Number(b.mastered) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || b.date.localeCompare(a.date));
+
+  $("#errorListSummary").textContent = all.length
+    ? `${matches.length} de ${all.length} ${all.length === 1 ? "erro" : "erros"} no filtro atual.`
+    : "Seu caderno está vazio. Registre o primeiro erro ao lado.";
+  $("#errorList").innerHTML = matches.length
+    ? matches.map((entry) => errorCardHTML(entry, today)).join("")
+    : `<div class="empty-state">${all.length ? "Nenhum erro com esses filtros." : "Quando você errar uma questão, registre aqui o porquê e como não errar de novo."}</div>`;
+}
+
+function renderErrorCharts(reasonCounts) {
+  const all = state.errorNotebook;
+  const maxReason = Math.max(1, ...reasonCounts.map((item) => item.count));
+  const reasons = reasonCounts.filter((item) => item.count > 0);
+  $("#errorReasonChart").innerHTML = reasons.length
+    ? reasons
+        .map(
+          (item) => `
+            <div class="performance-row">
+              <div class="performance-top"><strong>${escapeHTML(ERROR_REASONS[item.key])}</strong><strong>${item.count}</strong></div>
+              <div class="progress-track"><div class="progress-fill" style="--progress:${(item.count / maxReason) * 100}%; --fill:var(--coral)"></div></div>
+            </div>`
+        )
+        .join("")
+    : `<div class="empty-state">O gráfico aparece quando houver erros registrados.</div>`;
+
+  const bySubject = state.subjects
+    .map((subject) => ({ subject, count: all.filter((entry) => getEntrySubjectId(entry) === subject.id).length }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+  const maxSubject = Math.max(1, ...bySubject.map((item) => item.count));
+  $("#errorSubjectChart").innerHTML = bySubject.length
+    ? bySubject
+        .map(
+          (item) => `
+            <div class="performance-row">
+              <div class="performance-top"><strong>${escapeHTML(item.subject.name)}</strong><strong>${item.count}</strong></div>
+              <div class="progress-track"><div class="progress-fill" style="--progress:${(item.count / maxSubject) * 100}%; --fill:${item.subject.color || "#0f766e"}"></div></div>
+            </div>`
+        )
+        .join("")
+    : `<div class="empty-state">Sem erros por matéria ainda.</div>`;
+}
+
+function errorCardHTML(entry, today) {
+  const status = errorStatus(entry);
+  const retesting = cycleUI.errorRetest.id === entry.id;
+  const answerHidden = retesting && !cycleUI.errorRetest.open;
+  const due = !entry.mastered && entry.dueDate && entry.dueDate <= today;
+  const nextText = entry.mastered ? "dominado" : entry.dueDate ? (due ? "refazer hoje" : `próxima em ${formatDate(entry.dueDate)}`) : "";
+  const tags = entry.tags.length ? `<div class="chip-row">${entry.tags.map((tag) => `<span class="tag">#${escapeHTML(tag)}</span>`).join("")}</div>` : "";
+  const retestArea = retesting
+    ? answerHidden
+      ? `<div class="retest-box"><p>Responda sem olhar o gabarito. Quando estiver pronto, confira.</p><button class="button primary" data-cycle-action="showErrorAnswer" data-id="${entry.id}" type="button">Mostrar gabarito</button></div>`
+      : `<div class="retest-box"><p>Você acertou desta vez?</p><div class="inline-actions">
+           <button class="button primary" data-cycle-action="errorResult" data-result="ok" data-id="${entry.id}" type="button">Acertei</button>
+           <button class="button ghost danger" data-cycle-action="errorResult" data-result="wrong" data-id="${entry.id}" type="button">Errei de novo</button>
+         </div></div>`
+    : "";
+  return `
+    <article class="error-card status-${status} ${due ? "is-due" : ""}">
+      <div class="performance-top">
+        <div>
+          <strong>${escapeHTML(getEntryScopeLabel(entry))}</strong>
+          <small>${formatDate(entry.date)}${entry.source ? ` · ${escapeHTML(entry.source)}` : ""}</small>
+        </div>
+        <div class="chip-row"><span class="tag reason-tag">${escapeHTML(ERROR_REASONS[entry.reason])}</span><span class="tag status-tag status-${status}">${errorStatusLabel(entry)}</span></div>
+      </div>
+      <div class="error-block"><span class="field-title">Questão ou dúvida</span><p class="pre-wrap">${escapeHTML(entry.statement)}</p></div>
+      ${entry.myAnswer && !answerHidden ? `<div class="error-block wrong"><span class="field-title">O que eu respondi</span><p class="pre-wrap">${escapeHTML(entry.myAnswer)}</p></div>` : ""}
+      ${answerHidden ? "" : `<div class="error-block right"><span class="field-title">Resposta correta</span><p class="pre-wrap">${escapeHTML(entry.correctAnswer)}</p></div>`}
+      ${entry.foundation && !answerHidden ? `<div class="error-block"><span class="field-title">Fundamento</span><p class="pre-wrap">${escapeHTML(entry.foundation)}</p></div>` : ""}
+      ${entry.rule && !answerHidden ? `<div class="error-block rule"><span class="field-title">Como não errar de novo</span><p class="pre-wrap">${escapeHTML(entry.rule)}</p></div>` : ""}
+      ${tags}
+      <div class="topic-meta">
+        <span>Refeito ${entry.attempts}×</span>
+        <span>Errou de novo ${entry.lapses}×</span>
+        ${nextText ? `<span>${escapeHTML(nextText)}</span>` : ""}
+      </div>
+      ${retestArea}
+      <div class="inline-actions">
+        ${entry.mastered ? `<button class="mini-button" data-cycle-action="reopenError" data-id="${entry.id}" type="button">Reabrir</button>` : `<button class="mini-button success" data-cycle-action="retestError" data-id="${entry.id}" type="button">${retesting ? "Reiniciar" : "Refazer agora"}</button>`}
+        <button class="mini-button" data-cycle-action="errorToFlashcard" data-id="${entry.id}" type="button">Gerar flashcard</button>
+        <button class="mini-button" data-cycle-action="editError" data-id="${entry.id}" type="button">Editar</button>
+        ${entry.mastered ? "" : `<button class="mini-button" data-cycle-action="masterError" data-id="${entry.id}" type="button">Marcar dominado</button>`}
+        <button class="mini-button bad" data-cycle-action="deleteError" data-id="${entry.id}" type="button">Excluir</button>
+      </div>
+    </article>`;
+}
+
+function updateErrorFormMode() {
+  const editing = Boolean(cycleUI.errorEditId);
+  $("#errorFormTitle").textContent = editing ? "Editar erro" : "Registrar erro";
+  $("#errorSubmitBtn").textContent = editing ? "Salvar edição" : "Salvar no caderno";
+  $("#errorCancelBtn").classList.toggle("hidden", !editing);
+}
+
+function resetErrorForm() {
+  cycleUI.errorEditId = "";
+  $("#errorForm").reset();
+  populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
+  $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
+  $("#errorDate").value = cycleToday();
+  updateErrorFormMode();
+}
+
+function fillErrorForm(entry) {
+  cycleUI.errorEditId = entry.id;
+  $("#errorSubject").value = getEntrySubjectId(entry);
+  populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
+  $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
+  $("#errorTopic").value = entry.topicId || "";
+  $("#errorDate").value = entry.date;
+  $("#errorSource").value = entry.source;
+  $("#errorStatement").value = entry.statement;
+  $("#errorMyAnswer").value = entry.myAnswer;
+  $("#errorCorrect").value = entry.correctAnswer;
+  $("#errorReason").value = entry.reason;
+  $("#errorFoundation").value = entry.foundation;
+  $("#errorRule").value = entry.rule;
+  $("#errorTags").value = typeof hashtagsToInput === "function" ? hashtagsToInput(entry.tags) : entry.tags.join(" ");
+  updateErrorFormMode();
+  $("#errorForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ---------- Lei seca ---------- */
+
+function renderLaw() {
+  populateSubjectSelect($("#lawSubject"), { includeEmpty: true, emptyLabel: "Sem matéria" });
+  $("#lawSubject").disabled = state.subjects.length === 0;
+  const picker = $("#lawWeekdays");
+  if (!picker.children.length) {
+    picker.innerHTML = CYCLE_WEEKDAY_ORDER.map(
+      (day) => `<label class="checkbox-line"><input type="checkbox" name="lawWeekday" value="${day}" ${CYCLE_DEFAULT_WEEKDAYS.includes(day) ? "checked" : ""} /> ${CYCLE_WEEKDAY_LABELS[day]}</label>`
+    ).join("");
+  }
+  if (!$("#lawStartDate").value) $("#lawStartDate").value = cycleToday();
+  if (!$("#lawEndDate").value) $("#lawEndDate").value = cycleAddDays(cycleToday(), 30);
+  updateLawFormMode();
+
+  const today = cycleToday();
+  const summary = getCycleSummary();
+  const infos = summary.laws;
+  const active = infos.filter(({ info }) => !info.finished);
+  const totalWork = infos.reduce((sum, { info }) => sum + info.total, 0);
+  const doneWork = infos.reduce((sum, { info }) => sum + info.done, 0);
+  const readTodayTotal = infos.reduce((sum, { info }) => sum + info.readToday, 0);
+  $("#lawStats").innerHTML = [
+    cycleStat("Planos ativos", String(active.length), `${infos.length - active.length} concluído(s)`),
+    cycleStat("Meta de hoje", String(summary.lawPendingUnits), summary.lawPendingUnits ? `${summary.lawUnitLabel} ainda para ler` : active.length ? "meta cumprida ou dia de folga" : "sem planos ativos"),
+    cycleStat("Lido hoje", String(readTodayTotal), "registrado nos planos"),
+    cycleStat("Progresso geral", totalWork ? percent((doneWork / totalWork) * 100) : "–", totalWork ? `${doneWork} de ${totalWork} unidades` : "sem planos"),
+  ].join("");
+
+  $("#lawPlans").innerHTML = infos.length
+    ? infos.map(({ plan, info }) => lawPlanCardHTML(plan, info, today)).join("")
+    : `<div class="empty-state">Crie o primeiro plano (por exemplo, CF/88 arts. 1º a 250) e o app distribui as leituras por dia até a data final.</div>`;
+}
+
+function lawPlanCardHTML(plan, info, today) {
+  const subject = getSubject(plan.subjectId);
+  const weekdays = CYCLE_WEEKDAY_ORDER.filter((day) => plan.weekdays.includes(day)).map((day) => CYCLE_WEEKDAY_LABELS[day]).join(", ");
+  const unit = plan.unitLabel;
+  let todayLine;
+  if (info.finished) {
+    todayLine = `<p class="law-today done">Plano concluído. Parabéns! Revise pelos agendamentos da aba Revisão.</p>`;
+  } else if (info.todayIsReading) {
+    const left = Math.max(0, info.todayTarget - info.readToday);
+    todayLine = left
+      ? `<p class="law-today">Hoje: <strong>${escapeHTML(info.todayLabel)}</strong> (${info.todayTarget} ${escapeHTML(unit)})${info.readToday ? ` · já registrou ${info.readToday}` : ""}</p>`
+      : `<p class="law-today done">Meta de hoje cumprida (${info.readToday} ${escapeHTML(unit)}).</p>`;
+  } else {
+    const next = info.rows[0];
+    todayLine = `<p class="law-today rest">${info.notStarted ? "O plano começa em" : "Hoje é dia de folga."} ${next ? `Próxima leitura: <strong>${escapeHTML(cycleWeekdayShort(next.date))}, ${formatDate(next.date)}</strong> — ${escapeHTML(next.label)}` : ""}</p>`;
+  }
+
+  const showSchedule = Boolean(cycleUI.lawSchedule[plan.id]);
+  let schedule = "";
+  if (showSchedule) {
+    const rows = info.rows.slice(0, 60);
+    const history = plan.readLog.slice(-6).reverse();
+    schedule = `
+      <div class="law-schedule">
+        <div class="table-wrap">
+          <table class="law-schedule-table">
+            <thead><tr><th>Data</th><th>Trecho</th><th>Qtde</th><th>Situação</th></tr></thead>
+            <tbody>
+              ${rows.length
+                ? rows
+                    .map((row) => {
+                      const doneToday = row.isToday && info.readToday >= row.count;
+                      const state_ = row.isToday ? (doneToday ? "Concluída" : "Hoje") : "Planejada";
+                      return `<tr class="${row.isToday ? "is-today" : ""}"><td>${escapeHTML(cycleWeekdayShort(row.date))}, ${formatDate(row.date)}</td><td>${escapeHTML(row.label)}</td><td>${row.count}</td><td>${state_}</td></tr>`;
+                    })
+                    .join("")
+                : `<tr><td colspan="4">Nada pendente.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        ${info.rows.length > 60 ? `<p class="muted-note">Mostrando os primeiros 60 dias de leitura.</p>` : ""}
+        ${history.length ? `<p class="muted-note"><strong>Últimos registros:</strong> ${history.map((entry) => `${formatShortDate(entry.date)} (${escapeHTML(lawWorkLabel(plan, entry.fromWork, entry.toWork))})`).join(" · ")}</p>` : ""}
+      </div>`;
+  }
+
+  const per = lawUnitsPerPass(plan);
+  const offset = plan.doneWork % per;
+  return `
+    <article class="law-plan-card">
+      <div class="performance-top">
+        <div>
+          <strong>${escapeHTML(plan.title)}</strong>
+          <small>${subject ? `${escapeHTML(subject.name)} · ` : ""}${escapeHTML(unit)} ${plan.startUnit}–${plan.endUnit}${plan.passes > 1 ? ` · ${plan.passes} leituras` : ""} · ${formatDate(plan.startDate)} a ${formatDate(plan.endDate)}</small>
+        </div>
+        <span class="tag tone-${info.tone}">${escapeHTML(info.status)}</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="--progress:${clamp(info.pct, 0, 100)}%; --fill:${subject?.color || "var(--teal)"}"></div></div>
+      <div class="topic-meta">
+        <span>${info.done} de ${info.total} ${escapeHTML(unit)} (${percent(info.pct)})</span>
+        ${plan.passes > 1 && !info.finished ? `<span>Leitura ${info.currentPass} de ${plan.passes}</span>` : ""}
+        ${info.finished ? "" : `<span>${info.remainingDays} ${info.remainingDays === 1 ? "dia" : "dias"} de leitura · ritmo ${info.pacePerDay}/dia</span>`}
+        <span>${escapeHTML(weekdays)}</span>
+      </div>
+      ${todayLine}
+      ${info.finished ? "" : `
+        <div class="law-register">
+          ${info.todayIsReading && info.readToday < info.todayTarget ? `<button class="button primary" data-cycle-action="lawDone" data-id="${plan.id}" type="button">Concluí a meta de hoje</button>` : ""}
+          <div class="law-register-field">
+            <input id="lawReadInput-${plan.id}" type="number" min="${plan.startUnit}" max="${plan.endUnit}" placeholder="Li até o nº…" aria-label="Li até o número" ${offset ? `title="Você está em ${plan.startUnit + offset - 1}"` : ""} />
+            <button class="button secondary" data-cycle-action="lawRegister" data-id="${plan.id}" type="button">Registrar</button>
+          </div>
+        </div>`}
+      <div class="inline-actions">
+        <button class="mini-button" data-cycle-action="toggleLawSchedule" data-id="${plan.id}" type="button">${showSchedule ? "Ocultar cronograma" : "Ver cronograma"}</button>
+        ${plan.url ? `<a class="mini-button" href="${escapeHTML(plan.url)}" target="_blank" rel="noopener noreferrer">Abrir lei</a>` : ""}
+        ${plan.readLog.length ? `<button class="mini-button" data-cycle-action="lawUndo" data-id="${plan.id}" type="button">Desfazer último registro</button>` : ""}
+        <button class="mini-button" data-cycle-action="editLaw" data-id="${plan.id}" type="button">Editar</button>
+        <button class="mini-button bad" data-cycle-action="deleteLaw" data-id="${plan.id}" type="button">Excluir</button>
+      </div>
+      ${schedule}
+    </article>`;
+}
+
+function updateLawFormMode() {
+  const editing = Boolean(cycleUI.lawEditId);
+  $("#lawFormTitle").textContent = editing ? "Editar plano de leitura" : "Novo plano de leitura";
+  $("#lawSubmitBtn").textContent = editing ? "Salvar plano" : "Criar plano";
+  $("#lawCancelBtn").classList.toggle("hidden", !editing);
+  $("#lawAlreadyReadLabel").classList.toggle("hidden", editing);
+}
+
+function resetLawForm() {
+  cycleUI.lawEditId = "";
+  $("#lawForm").reset();
+  $("#lawStartDate").value = cycleToday();
+  $("#lawEndDate").value = cycleAddDays(cycleToday(), 30);
+  $$("input[name='lawWeekday']").forEach((input) => {
+    input.checked = CYCLE_DEFAULT_WEEKDAYS.includes(Number(input.value));
+  });
+  updateLawFormMode();
+}
+
+function fillLawForm(plan) {
+  cycleUI.lawEditId = plan.id;
+  $("#lawTitle").value = plan.title;
+  $("#lawSubject").value = plan.subjectId;
+  $("#lawUnitLabel").value = plan.unitLabel;
+  $("#lawStartUnit").value = plan.startUnit;
+  $("#lawEndUnit").value = plan.endUnit;
+  $("#lawPasses").value = plan.passes;
+  $("#lawStartDate").value = plan.startDate;
+  $("#lawEndDate").value = plan.endDate;
+  $("#lawUrl").value = plan.url;
+  $("#lawRevisions").checked = plan.scheduleRevisions;
+  $("#lawAlreadyRead").value = "";
+  $$("input[name='lawWeekday']").forEach((input) => {
+    input.checked = plan.weekdays.includes(Number(input.value));
+  });
+  updateLawFormMode();
+  $("#lawForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ------------------------------------------------------------------ */
+/* Ações                                                               */
+/* ------------------------------------------------------------------ */
+
+function cycleRefresh() {
+  saveState();
+  render();
+}
+
+function cycleStartSession(id = "") {
+  const due = getDueRevisions();
+  const target = id ? state.revisions.find((revision) => revision.id === id) : due[0];
+  if (!target) return;
+  cycleUI.sessionId = target.id;
+  cycleUI.revealed = false;
+  cycleUI.recall = "";
+  renderCycle();
+  $("#revisionSession")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function cycleNextDue(excludeId) {
+  return getDueRevisions().find((revision) => revision.id !== excludeId) || null;
+}
+
+function handleCycleAction(button) {
+  const type = button.dataset.cycleAction;
+  const id = button.dataset.id || "";
+
+  if (typeof handleTodayAction === "function" && handleTodayAction(type, button)) return undefined;
+
+  /* lembretes */
+  if (type === "reviewNow") {
+    cycleUI.sessionId = "";
+    setView("revisao", { scrollTop: true });
+    cycleStartSession();
+    return undefined;
+  }
+  if (type === "dismissBanner") {
+    cycleUI.bannerHidden = true;
+    renderCycle();
+    return undefined;
+  }
+  if (type === "redistributeOverdue") {
+    cycleRedistributeAction();
+    return undefined;
+  }
+  if (type === "notifyToggle") {
+    cycleToggleNotifications();
+    return undefined;
+  }
+  if (type === "notifyTest") {
+    cycleTestNotification();
+    return undefined;
+  }
+  if (type === "exportIcs") {
+    cycleExportCalendar();
+    return undefined;
+  }
+  if (type === "installApp") {
+    cycleInstallApp();
+    return undefined;
+  }
+
+  /* revisão */
+  if (type === "startSession") return cycleStartSession();
+  if (type === "openRevision") return cycleStartSession(id);
+  if (type === "revealSession") {
+    cycleUI.revealed = true;
+    renderCycle();
+    return undefined;
+  }
+  if (type === "skipSession") {
+    const next = cycleNextDue(cycleUI.sessionId);
+    cycleUI.sessionId = next ? next.id : "";
+    cycleUI.revealed = false;
+    cycleUI.recall = "";
+    renderCycle();
+    return undefined;
+  }
+  if (type === "rateRevision") {
+    const result = button.dataset.result;
+    const step = completeRevision(id, result, cycleUI.recall);
+    if (!step) return undefined;
+    const next = cycleNextDue(id);
+    cycleUI.sessionId = next ? next.id : "";
+    cycleUI.revealed = false;
+    cycleUI.recall = "";
+    cycleRefresh();
+    showToast(
+      step.done
+        ? "Revisão concluída: assunto fixado."
+        : next
+          ? `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}. Segue a próxima da fila.`
+          : `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}. Fila de hoje concluída.`
+    );
+    if (typeof todayAfterAction === "function") todayAfterAction("rev");
+    return undefined;
+  }
+  if (type === "finishRevision") {
+    const revision = state.revisions.find((item) => item.id === id);
+    if (!revision) return undefined;
+    revision.status = "done";
+    revision.updatedAt = new Date().toISOString();
+    if (cycleUI.sessionId === id) cycleUI.sessionId = "";
+    cycleRefresh();
+    showToast("Revisão encerrada.");
+    return undefined;
+  }
+  if (type === "deleteRevision") {
+    if (!window.confirm("Excluir esta revisão agendada? Ela não será recriada automaticamente.")) return undefined;
+    state.revisions = state.revisions.filter((revision) => revision.id !== id);
+    if (cycleUI.sessionId === id) cycleUI.sessionId = "";
+    cycleRefresh();
+    showToast("Revisão excluída.");
+    return undefined;
+  }
+  if (type === "backfillRevisions") {
+    const since = cycleAddDays(cycleToday(), -CYCLE_BACKFILL_DAYS);
+    const created = syncAutoRevisions({ since, force: true });
+    cycleRefresh();
+    showToast(created ? `${created} ${created === 1 ? "revisão criada" : "revisões criadas"} a partir dos últimos ${CYCLE_BACKFILL_DAYS} dias.` : "Nada novo para criar nos últimos dias.");
+    return undefined;
+  }
+
+  /* caderno de erros */
+  if (type === "errorFromQuestion") {
+    const log = state.questionLogs.find((item) => item.id === id);
+    cycleUI.errorEditId = "";
+    cycleUI.errorPrefill = log ? { subjectId: getEntrySubjectId(log), topicId: log.topicId || "", date: log.date } : null;
+    setView("erros", { scrollTop: true });
+    return undefined;
+  }
+  if (type === "editError") {
+    const entry = state.errorNotebook.find((item) => item.id === id);
+    if (entry) fillErrorForm(entry);
+    return undefined;
+  }
+  if (type === "cancelErrorEdit") {
+    resetErrorForm();
+    return undefined;
+  }
+  if (type === "deleteError") {
+    if (!window.confirm("Excluir este erro do caderno?")) return undefined;
+    state.errorNotebook = state.errorNotebook.filter((entry) => entry.id !== id);
+    if (cycleUI.errorEditId === id) resetErrorForm();
+    cycleRefresh();
+    showToast("Erro excluído.");
+    return undefined;
+  }
+  if (type === "retestError") {
+    cycleUI.errorRetest = { id, open: false };
+    renderCycle();
+    return undefined;
+  }
+  if (type === "showErrorAnswer") {
+    cycleUI.errorRetest = { id, open: true };
+    renderCycle();
+    return undefined;
+  }
+  if (type === "errorResult") {
+    const ok = button.dataset.result === "ok";
+    const step = retestErrorEntry(id, ok);
+    cycleUI.errorRetest = { id: "", open: false };
+    cycleRefresh();
+    if (step) showToast(ok ? (step.done ? "Erro dominado!" : `Acertou. Volta em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}.`) : "Sem problema: volta amanhã para refazer.");
+    if (typeof todayAfterAction === "function") todayAfterAction("err");
+    return undefined;
+  }
+  if (type === "masterError" || type === "reopenError") {
+    const entry = state.errorNotebook.find((item) => item.id === id);
+    if (!entry) return undefined;
+    if (type === "masterError") {
+      entry.mastered = true;
+      entry.dueDate = "";
+    } else {
+      entry.mastered = false;
+      entry.stage = 0;
+      entry.dueDate = cycleAddDays(cycleToday(), state.cycleSettings.errorIntervals[0]);
+    }
+    entry.updatedAt = new Date().toISOString();
+    cycleRefresh();
+    return undefined;
+  }
+  if (type === "errorToFlashcard") {
+    const entry = state.errorNotebook.find((item) => item.id === id);
+    if (!entry) return undefined;
+    const subjectId = getEntrySubjectId(entry);
+    if (!subjectId) {
+      showToast("Vincule uma matéria ao erro para gerar o flashcard.");
+      return undefined;
+    }
+    const back = [entry.correctAnswer, entry.foundation ? `Fundamento: ${entry.foundation}` : "", entry.rule ? `Regra: ${entry.rule}` : ""].filter(Boolean).join("\n\n");
+    state.flashcards.push(normalizeFlashcard({ subjectId, topicId: entry.topicId, front: entry.statement, back, difficulty: "hard", priority: "Alta" }));
+    cycleRefresh();
+    showToast("Flashcard criado (dificuldade: difícil).");
+    return undefined;
+  }
+  if (type === "clearErrorFilters") {
+    cycleUI.errorFilters = { search: "", subject: "", reason: "", status: "pending" };
+    $("#errorSearch").value = "";
+    renderCycle();
+    return undefined;
+  }
+
+  /* lei seca */
+  const plan = state.lawPlans.find((item) => item.id === id);
+  if (type === "toggleLawSchedule") {
+    cycleUI.lawSchedule[id] = !cycleUI.lawSchedule[id];
+    renderCycle();
+    return undefined;
+  }
+  if (type === "cancelLawEdit") {
+    resetLawForm();
+    return undefined;
+  }
+  if (type === "editLaw") {
+    if (plan) fillLawForm(plan);
+    return undefined;
+  }
+  if (type === "deleteLaw") {
+    if (!plan || !window.confirm(`Excluir o plano "${plan.title}"? As revisões já agendadas são mantidas.`)) return undefined;
+    state.lawPlans = state.lawPlans.filter((item) => item.id !== id);
+    if (cycleUI.lawEditId === id) resetLawForm();
+    cycleRefresh();
+    showToast("Plano excluído.");
+    return undefined;
+  }
+  if (type === "lawDone" || type === "lawRegister") {
+    if (!plan) return undefined;
+    const today = cycleToday();
+    let units = 0;
+    if (type === "lawDone") {
+      const info = buildLawSchedule(plan, today);
+      units = Math.max(0, info.todayTarget - info.readToday);
+    } else {
+      const input = document.getElementById(`lawReadInput-${plan.id}`);
+      const result = lawUnitsFromPosition(plan, input?.value);
+      if (result.error) {
+        showToast(result.error);
+        return undefined;
+      }
+      units = result.units;
+    }
+    const from = plan.doneWork;
+    const registered = lawRegisterWork(plan, units, today);
+    if (!registered) {
+      showToast("Nada novo para registrar.");
+      return undefined;
+    }
+    if (plan.scheduleRevisions) scheduleLawRevision(plan, from, plan.doneWork, today);
+    cycleRefresh();
+    showToast(`${registered} ${plan.unitLabel} registrados${plan.scheduleRevisions ? "; revisões agendadas" : ""}.`);
+    if (typeof todayAfterAction === "function") todayAfterAction("law");
+    return undefined;
+  }
+  if (type === "lawUndo") {
+    if (!plan || !plan.readLog.length) return undefined;
+    const last = plan.readLog[plan.readLog.length - 1];
+    if (last.toWork !== plan.doneWork) {
+      showToast("Só é possível desfazer o registro mais recente.");
+      return undefined;
+    }
+    plan.readLog.pop();
+    plan.doneWork = last.fromWork;
+    plan.updatedAt = new Date().toISOString();
+    const key = `law:${plan.id}:${last.date}`;
+    const linked = state.revisions.find((revision) => revision.originKey === key && revision.status === "pending" && revision.history.length === 0);
+    if (linked) {
+      if ((linked.lawFromWork ?? 0) >= last.fromWork) {
+        state.revisions = state.revisions.filter((revision) => revision.id !== linked.id);
+      } else {
+        linked.lawToWork = last.fromWork;
+        linked.label = `${plan.title}: ${lawWorkLabel(plan, linked.lawFromWork, linked.lawToWork)}`;
+      }
+    }
+    cycleRefresh();
+    showToast("Último registro desfeito.");
+    return undefined;
+  }
+  return undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* Eventos                                                             */
+/* ------------------------------------------------------------------ */
+
+function bindCycleEvents() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cycle-action]");
+    if (button) handleCycleAction(button);
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target.id === "revisionRecall") cycleUI.recall = event.target.value;
+    if (event.target.id === "errorSearch") {
+      cycleUI.errorFilters.search = event.target.value;
+      renderCycle();
+    }
+  });
+
+  $("#revisionSubject").addEventListener("change", () => {
+    populateTopicSelect($("#revisionTopic"), { includeEmpty: true, subjectId: $("#revisionSubject").value, emptyLabel: "Sem assunto específico" });
+    $("#revisionTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#revisionSubject").value);
+  });
+  $("#errorSubject").addEventListener("change", () => {
+    populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
+    $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
+  });
+
+  [
+    ["#errorFilterSubject", "subject"],
+    ["#errorFilterReason", "reason"],
+    ["#errorFilterStatus", "status"],
+  ].forEach(([selector, key]) => {
+    $(selector).addEventListener("change", (event) => {
+      cycleUI.errorFilters[key] = event.target.value;
+      renderCycle();
+    });
+  });
+
+  $("#revisionForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const subjectId = $("#revisionSubject").value;
+    if (!subjectId) {
+      showToast("Escolha a matéria da revisão.");
+      return;
+    }
+    const topicId = $("#revisionTopic").value;
+    const baseDate = $("#revisionBaseDate").value || cycleToday();
+    const today = cycleToday();
+    createRevision({
+      kind: "manual",
+      subjectId,
+      topicId,
+      originKey: `manual:${cycleUid()}`,
+      baseDate,
+      dueDate: $("#revisionToday").checked ? today : "",
+    });
+    $("#revisionToday").checked = false;
+    $("#revisionBaseDate").value = today;
+    cycleRefresh();
+    showToast("Revisão agendada.");
+  });
+
+  $("#cycleSettingsForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.cycleSettings.intervals = normalizeCycleIntervals($("#cycleIntervals").value, CYCLE_DEFAULT_INTERVALS);
+    state.cycleSettings.errorIntervals = normalizeCycleIntervals($("#cycleErrorIntervals").value, CYCLE_DEFAULT_ERROR_INTERVALS);
+    state.cycleSettings.autoFromStudy = $("#cycleAutoStudy").checked;
+    state.cycleSettings.autoWeak = $("#cycleAutoWeak").checked;
+    state.cycleSettings.weakAccuracy = cycleInt($("#cycleWeakAccuracy").value, 30, 95, 70);
+    state.cycleSettings.weakMinQuestions = cycleInt($("#cycleWeakMin").value, 5, 100, 10);
+    $("#cycleIntervals").value = state.cycleSettings.intervals.join(", ");
+    $("#cycleErrorIntervals").value = state.cycleSettings.errorIntervals.join(", ");
+    cycleRefresh();
+    showToast("Configurações do ciclo salvas.");
+  });
+
+  $("#errorForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const subjectId = $("#errorSubject").value;
+    const statement = $("#errorStatement").value.trim();
+    const correctAnswer = $("#errorCorrect").value.trim();
+    if (!subjectId || !statement || !correctAnswer) {
+      showToast("Informe matéria, a questão/dúvida e a resposta correta.");
+      return;
+    }
+    const topicId = $("#errorTopic").value;
+    const existing = state.errorNotebook.find((entry) => entry.id === cycleUI.errorEditId);
+    const data = {
+      subjectId: getTopic(topicId)?.subjectId || subjectId,
+      topicId,
+      date: $("#errorDate").value || cycleToday(),
+      source: $("#errorSource").value,
+      statement,
+      myAnswer: $("#errorMyAnswer").value,
+      correctAnswer,
+      reason: $("#errorReason").value,
+      foundation: $("#errorFoundation").value,
+      rule: $("#errorRule").value,
+      tags: $("#errorTags").value,
+    };
+    if (existing) {
+      const updated = normalizeErrorEntry({ ...existing, ...data, updatedAt: new Date().toISOString() });
+      Object.assign(existing, updated);
+    } else {
+      const firstGap = state.cycleSettings.errorIntervals[0];
+      state.errorNotebook.push(normalizeErrorEntry({ ...data, dueDate: cycleAddDays(data.date, firstGap), createdAt: new Date().toISOString() }));
+    }
+    resetErrorForm();
+    cycleRefresh();
+    showToast(existing ? "Erro atualizado." : "Erro salvo. Ele volta para você refazer amanhã.");
+  });
+
+  $("#lawForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = $("#lawTitle").value.trim();
+    const startUnit = Number($("#lawStartUnit").value);
+    const endUnit = Number($("#lawEndUnit").value);
+    const startDate = $("#lawStartDate").value;
+    const endDate = $("#lawEndDate").value;
+    if (!title || !Number.isFinite(startUnit) || !Number.isFinite(endUnit) || endUnit < startUnit || !startDate || !endDate) {
+      showToast("Preencha título, intervalo (do nº ao nº) e as datas.");
+      return;
+    }
+    if (endDate < startDate) {
+      showToast("A data final não pode ser anterior ao início.");
+      return;
+    }
+    const weekdays = $$("input[name='lawWeekday']:checked").map((input) => Number(input.value));
+    if (!weekdays.length) {
+      showToast("Marque ao menos um dia da semana para ler.");
+      return;
+    }
+    const data = {
+      title,
+      subjectId: $("#lawSubject").value,
+      unitLabel: $("#lawUnitLabel").value,
+      url: $("#lawUrl").value,
+      startUnit,
+      endUnit,
+      passes: $("#lawPasses").value,
+      startDate,
+      endDate,
+      weekdays,
+      scheduleRevisions: $("#lawRevisions").checked,
+    };
+    const existing = state.lawPlans.find((plan) => plan.id === cycleUI.lawEditId);
+    if (existing) {
+      Object.assign(existing, normalizeLawPlan({ ...existing, ...data, updatedAt: new Date().toISOString() }));
+    } else {
+      const plan = normalizeLawPlan({ ...data });
+      const already = Number($("#lawAlreadyRead").value);
+      if (Number.isFinite(already) && already >= plan.startUnit) {
+        plan.doneWork = Math.min(lawUnitsPerPass(plan), already - plan.startUnit + 1);
+      }
+      state.lawPlans.push(plan);
+    }
+    resetLawForm();
+    cycleRefresh();
+    showToast(existing ? "Plano atualizado." : "Plano criado. O cronograma já está pronto.");
+  });
+
+  $("#reminderForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const morning = $("#reminderTime").value;
+    const evening = $("#eveningTime").value;
+    if (!cycleIsTime(morning)) {
+      showToast("Informe o horário do aviso da manhã.");
+      return;
+    }
+    state.cycleSettings.reminderTime = morning;
+    state.cycleSettings.eveningTime = cycleIsTime(evening) ? evening : "";
+    state.cycleSettings.dailyLimit = cycleInt($("#dailyLimit").value, 1, 200, 12);
+    state.cycleSettings.backupDays = cycleInt($("#backupDays").value, 0, 90, 7);
+    cycleRefresh();
+    showToast("Horários dos lembretes salvos.");
+  });
+
+  cycleRegisterServiceWorker();
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    cycleUI.installPrompt = event;
+    renderReminderPanel();
+  });
+  window.addEventListener("appinstalled", () => {
+    cycleUI.installPrompt = null;
+    renderReminderPanel();
+  });
+  window.setInterval(cycleReminderTick, 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) cycleReminderTick();
+  });
+  window.setTimeout(cycleReminderTick, 1500);
+  if (typeof bindTodayEvents === "function") bindTodayEvents();
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Lembretes automáticos (site estático: notificação, selo, banner,   */
+/* agenda .ics e app instalável)                                       */
+/* ------------------------------------------------------------------ */
+
+const CYCLE_NOTIFY_KEY_PREFIX = "ymEstudos.cycleNotify.";
+const CYCLE_ICS_DAYS = 60;
+
+/**
+ * Redistribui revisões atrasadas respeitando um máximo por dia.
+ * Mais antigas primeiro; não mexe no que já vence hoje ou depois.
+ */
+function cycleRedistributeOverdue(revisions, today, limit) {
+  const perDay = {};
+  revisions
+    .filter((revision) => revision.status === "pending" && revision.dueDate >= today)
+    .forEach((revision) => {
+      perDay[revision.dueDate] = (perDay[revision.dueDate] || 0) + 1;
+    });
+  const overdue = revisions
+    .filter((revision) => revision.status === "pending" && revision.dueDate < today)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const changes = [];
+  let day = today;
+  overdue.forEach((revision) => {
+    for (let guard = 0; (perDay[day] || 0) >= limit && guard < 400; guard += 1) day = cycleAddDays(day, 1);
+    perDay[day] = (perDay[day] || 0) + 1;
+    changes.push({ id: revision.id, dueDate: day });
+  });
+  return changes;
+}
+
+function cycleReminderMessage({ revDue = 0, revOverdue = 0, errorsDue = 0, lawLabel = "", backupDue = false } = {}) {
+  const parts = [];
+  if (revDue) {
+    parts.push(`${cyclePlural(revDue, "revisão", "revisões")}${revOverdue ? ` (${cyclePlural(revOverdue, "atrasada", "atrasadas")})` : ""}`);
+  }
+  if (errorsDue) parts.push(`${cyclePlural(errorsDue, "erro", "erros")} para refazer`);
+  if (lawLabel) parts.push(`Lei seca: ${lawLabel}`);
+  if (backupDue) parts.push("backup semanal pendente");
+  if (!parts.length) return null;
+  return {
+    title: revOverdue ? "Revisões atrasadas: não deixe o conteúdo esfriar" : revDue || errorsDue || lawLabel ? "Hora de revisar" : "Lembrete do Estudos Track",
+    body: parts.join(" · "),
+  };
+}
+
+function cycleMessageInput(summary) {
+  const first = summary.lawToday[0];
+  return {
+    revDue: summary.revDue,
+    revOverdue: summary.revOverdue,
+    errorsDue: summary.errorsDue,
+    lawLabel: first ? `${first.info.todayLabel}${summary.lawToday.length > 1 ? ` (+${summary.lawToday.length - 1})` : ""}` : "",
+    backupDue: typeof backupIsDue === "function" ? backupIsDue().due : false,
+  };
+}
+
+/* ---------- agenda .ics ---------- */
+
+function cycleIcsEscape(text) {
+  return String(text ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+}
+
+/** Dobra linhas em 75 octetos (RFC 5545), sem partir caracteres UTF-8. */
+function cycleIcsFold(line) {
+  const encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+  const size = (char) => (encoder ? encoder.encode(char).length : 1);
+  const out = [];
+  let current = "";
+  let bytes = 0;
+  for (const char of line) {
+    const width = size(char);
+    if (bytes + width > (out.length ? 74 : 75)) {
+      out.push(current);
+      current = "";
+      bytes = 0;
+    }
+    current += char;
+    bytes += width;
+  }
+  out.push(current);
+  return out.join("\r\n ");
+}
+
+function cycleIcsStamp(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+function cycleIcsLocal(dateISO, time, addMinutes = 0) {
+  const [year, month, day] = dateISO.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hour, minute + addMinutes);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
+}
+
+/** events: [{ uid, date: "AAAA-MM-DD", time: "HH:MM", minutes, summary, description }] */
+function buildIcs(events, { now = new Date(), calendarName = "Estudos Track: revisões" } = {}) {
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Estudos Track//Revisao//PT-BR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", `X-WR-CALNAME:${cycleIcsEscape(calendarName)}`];
+  events.forEach((event) => {
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${event.uid}`,
+      `DTSTAMP:${cycleIcsStamp(now)}`,
+      `DTSTART:${cycleIcsLocal(event.date, event.time)}`,
+      `DTEND:${cycleIcsLocal(event.date, event.time, event.minutes || 30)}`,
+      `SUMMARY:${cycleIcsEscape(event.summary)}`,
+      `DESCRIPTION:${cycleIcsEscape(event.description || "")}`,
+      "BEGIN:VALARM",
+      "TRIGGER:PT0M",
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${cycleIcsEscape(event.summary)}`,
+      "END:VALARM",
+      "END:VEVENT"
+    );
+  });
+  lines.push("END:VCALENDAR");
+  return `${lines.map(cycleIcsFold).join("\r\n")}\r\n`;
+}
+
+function getCycleCalendarEvents(days = CYCLE_ICS_DAYS) {
+  ensureCycleState();
+  const today = cycleToday();
+  const horizon = cycleAddDays(today, days);
+  const time = state.cycleSettings.reminderTime;
+  const byDate = new Map();
+  const bucket = (date) => {
+    const key = date < today ? today : date;
+    if (!byDate.has(key)) byDate.set(key, { rev: [], err: [], law: [] });
+    return byDate.get(key);
+  };
+  state.revisions
+    .filter((revision) => revision.status === "pending")
+    .forEach((revision) => bucket(revision.dueDate).rev.push(`${revisionLabel(revision)} (${revisionStageLabel(revision)})`));
+  state.errorNotebook
+    .filter((entry) => !entry.mastered && entry.dueDate)
+    .forEach((entry) => bucket(entry.dueDate).err.push(cycleExcerpt(entry.statement, 70)));
+  state.lawPlans.forEach((plan) => {
+    buildLawSchedule(plan, today).rows.forEach((row) => bucket(row.date).law.push(`${plan.title}: ${row.label}`));
+  });
+  return [...byDate.entries()]
+    .filter(([date]) => date <= horizon)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, group]) => {
+      const summaryParts = [];
+      if (group.rev.length) summaryParts.push(cyclePlural(group.rev.length, "revisão", "revisões"));
+      if (group.err.length) summaryParts.push(cyclePlural(group.err.length, "erro", "erros"));
+      if (group.law.length) summaryParts.push("lei seca");
+      const lines = [];
+      const section = (title, items) => {
+        if (!items.length) return;
+        lines.push(`${title}:`);
+        items.slice(0, 15).forEach((item) => lines.push(`- ${item}`));
+        if (items.length > 15) lines.push(`+ ${items.length - 15} outros`);
+      };
+      section("Revisões", group.rev);
+      section("Erros para refazer", group.err);
+      section("Lei seca", group.law);
+      return {
+        uid: `${date}-ciclo@estudostrack`,
+        date,
+        time,
+        minutes: 30,
+        summary: `Estudos Track: ${summaryParts.join(", ")}`,
+        description: lines.join("\n"),
+      };
+    });
+}
+
+function cycleExportCalendar() {
+  const events = getCycleCalendarEvents();
+  if (!events.length) {
+    showToast("Não há revisões, erros ou leituras agendados para exportar.");
+    return;
+  }
+  const blob = new Blob([buildIcs(events)], { type: "text/calendar;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `estudos-track-revisoes-${cycleToday()}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+  showToast(`Agenda com ${cyclePlural(events.length, "dia", "dias")} exportada. Importe no seu calendário.`);
+}
+
+/* ---------- notificações, selo e instalação ---------- */
+
+function cycleNotifyKey() {
+  return `${CYCLE_NOTIFY_KEY_PREFIX}${state?.profile?.id || "default"}`;
+}
+
+function cycleNotifyRead() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(cycleNotifyKey()) || "{}");
+    return { enabled: Boolean(raw.enabled), last: raw.last && typeof raw.last === "object" ? raw.last : {} };
+  } catch {
+    return { enabled: false, last: {} };
+  }
+}
+
+function cycleNotifyWrite(data) {
+  try {
+    localStorage.setItem(cycleNotifyKey(), JSON.stringify(data));
+  } catch {
+    /* armazenamento indisponível: o aviso apenas não é lembrado */
+  }
+}
+
+function cycleNotifySupported() {
+  return typeof Notification !== "undefined";
+}
+
+function cycleBaseTitle() {
+  return cycleUI.badgeCount > 0 ? `(${cycleUI.badgeCount}) ${APP_TITLE}` : APP_TITLE;
+}
+
+function cycleApplyBadge(count) {
+  cycleUI.badgeCount = count;
+  // Não sobrescreve o título do cronômetro do Pomodoro ("25:00 - Foco | ...").
+  if (!document.title.includes(" | ")) document.title = cycleBaseTitle();
+  try {
+    if (count > 0) navigator.setAppBadge?.(count);
+    else navigator.clearAppBadge?.();
+  } catch {
+    /* recurso opcional */
+  }
+}
+
+async function cycleShowNotification(message) {
+  if (!cycleNotifySupported() || Notification.permission !== "granted") return false;
+  const options = {
+    body: message.body,
+    icon: "assets/favicon-estudos-track.png",
+    badge: "assets/favicon-estudos-track.png",
+    tag: "estudos-track-revisao",
+    data: { view: "revisao" },
+  };
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    if (registration) {
+      await registration.showNotification(message.title, options);
+      return true;
+    }
+  } catch {
+    /* cai para a notificação comum */
+  }
+  try {
+    const notification = new Notification(message.title, options);
+    notification.onclick = () => {
+      window.focus();
+      setView("revisao", { scrollTop: true });
+      notification.close();
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Dispara o aviso do dia quando um horário configurado já passou e ainda não foi avisado. */
+function cycleMaybeNotify(summary) {
+  if (typeof isProfileAuthenticated !== "function" || !isProfileAuthenticated()) return;
+  const store = cycleNotifyRead();
+  if (!store.enabled || !cycleNotifySupported() || Notification.permission !== "granted") return;
+  const times = [state.cycleSettings.reminderTime, state.cycleSettings.eveningTime].filter(Boolean);
+  const now = new Date();
+  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const today = cycleToday();
+  const reached = times.filter((time) => clock >= time && store.last[time] !== today);
+  if (!reached.length) return;
+  reached.forEach((time) => {
+    store.last[time] = today;
+  });
+  cycleNotifyWrite(store);
+  const message = cycleReminderMessage(cycleMessageInput(summary));
+  if (message) cycleShowNotification(message);
+}
+
+function cycleReminderTick() {
+  try {
+    if (!state || typeof isProfileAuthenticated !== "function" || !isProfileAuthenticated()) {
+      cycleApplyBadge(0);
+      return;
+    }
+    ensureCycleState();
+    const summary = getCycleSummary();
+    cycleApplyBadge(summary.revDue + summary.errorsDue + summary.lawToday.length);
+    cycleMaybeNotify(summary);
+  } catch (error) {
+    console.error("Ciclo de estudos (lembretes):", error);
+  }
+}
+
+async function cycleToggleNotifications() {
+  const store = cycleNotifyRead();
+  if (store.enabled) {
+    store.enabled = false;
+    cycleNotifyWrite(store);
+    renderReminderPanel();
+    showToast("Notificações desativadas neste dispositivo.");
+    return;
+  }
+  if (!cycleNotifySupported()) {
+    showToast("Este navegador não oferece notificações. Use o banner e a agenda .ics.");
+    return;
+  }
+  let permission = Notification.permission;
+  // Pedir também quando reportado como "denied": em bloqueio real o navegador responde na hora, sem perguntar.
+  if (permission !== "granted") permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    renderReminderPanel();
+    showToast("As notificações estão bloqueadas. Libere nas configurações do site no navegador.");
+    return;
+  }
+  store.enabled = true;
+  cycleNotifyWrite(store);
+  renderReminderPanel();
+  cycleReminderTick();
+  showToast("Notificações ativadas neste dispositivo.");
+}
+
+async function cycleTestNotification() {
+  if (!cycleNotifySupported() || Notification.permission !== "granted") {
+    showToast("Ative as notificações primeiro.");
+    return;
+  }
+  const message = cycleReminderMessage(cycleMessageInput(getCycleSummary())) || { title: "Lembretes ativos", body: "Nada vence hoje. Quando houver revisões, o aviso chega neste horário." };
+  const ok = await cycleShowNotification(message);
+  showToast(ok ? "Aviso de teste enviado." : "Não foi possível exibir a notificação.");
+}
+
+async function cycleInstallApp() {
+  const prompt = cycleUI.installPrompt;
+  if (!prompt) return;
+  prompt.prompt();
+  try {
+    await prompt.userChoice;
+  } catch {
+    /* escolha ignorada */
+  }
+  cycleUI.installPrompt = null;
+  renderReminderPanel();
+}
+
+function cycleRegisterServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const secure = location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname);
+  if (!secure) return;
+  navigator.serviceWorker.register("sw.js").catch((error) => console.warn("Service worker não registrado:", error));
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "open-view" && typeof isProfileAuthenticated === "function" && isProfileAuthenticated()) {
+      setView(event.data.view || "revisao", { scrollTop: true });
+    }
+  });
+}
+
+function cycleRedistributeAction() {
+  const today = cycleToday();
+  const limit = state.cycleSettings.dailyLimit;
+  const changes = cycleRedistributeOverdue(state.revisions, today, limit);
+  if (!changes.length) {
+    showToast("Não há revisões atrasadas.");
+    return;
+  }
+  const lastDay = changes.reduce((max, change) => (change.dueDate > max ? change.dueDate : max), today);
+  const spanDays = daysBetween(today, lastDay) + 1;
+  if (!window.confirm(`Redistribuir ${cyclePlural(changes.length, "revisão atrasada", "revisões atrasadas")} em ${cyclePlural(spanDays, "dia", "dias")}, com no máximo ${limit} por dia? As mais antigas vêm primeiro.`)) return;
+  changes.forEach((change) => {
+    const revision = state.revisions.find((item) => item.id === change.id);
+    if (revision) {
+      revision.dueDate = change.dueDate;
+      revision.updatedAt = new Date().toISOString();
+    }
+  });
+  cycleRefresh();
+  showToast(`${cyclePlural(changes.length, "revisão redistribuída", "revisões redistribuídas")} até ${formatShortDate(lastDay)}.`);
+}
+
+function renderReviewBanner(summary) {
+  const banner = $("#reviewBanner");
+  if (!banner) return;
+  const total = summary.revDue + summary.errorsDue;
+  const authenticated = typeof isProfileAuthenticated === "function" && isProfileAuthenticated();
+  const show = authenticated && total > 0 && !["revisao", "hoje"].includes(state.ui.view) && !cycleUI.bannerHidden;
+  banner.classList.toggle("hidden", !show);
+  if (!show) return;
+  banner.classList.toggle("urgent", summary.revOverdue > 0);
+  const parts = [];
+  if (summary.revDue) {
+    parts.push(`${cyclePlural(summary.revDue, "revisão", "revisões")}${summary.revOverdue ? ` (${cyclePlural(summary.revOverdue, "atrasada", "atrasadas")})` : ""}`);
+  }
+  if (summary.errorsDue) parts.push(`${cyclePlural(summary.errorsDue, "erro", "erros")} para refazer`);
+  banner.innerHTML = `
+    <div><strong>Hora de revisar:</strong> ${escapeHTML(parts.join(" · "))}. É a revisão no tempo certo que fixa o conteúdo.</div>
+    <div class="inline-actions">
+      ${summary.revDue ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : ""}
+      ${summary.errorsDue ? `<button class="button secondary" data-view="erros" type="button">Refazer erros</button>` : ""}
+      ${summary.revOverdue > state.cycleSettings.dailyLimit ? `<button class="button ghost" data-cycle-action="redistributeOverdue" type="button">Redistribuir atrasadas</button>` : ""}
+      <button class="mini-button" data-cycle-action="dismissBanner" type="button">Depois</button>
+    </div>`;
+}
+
+function renderReminderPanel() {
+  const status = $("#reminderStatus");
+  if (!status) return;
+  const settings = state.cycleSettings;
+  cycleSetValueIfIdle("#reminderTime", settings.reminderTime);
+  cycleSetValueIfIdle("#eveningTime", settings.eveningTime);
+  cycleSetValueIfIdle("#dailyLimit", settings.dailyLimit);
+  cycleSetValueIfIdle("#backupDays", settings.backupDays);
+  const store = cycleNotifyRead();
+  const toggle = $("#notifyToggleBtn");
+  let text;
+  let tone = "warn";
+  if (!cycleNotifySupported()) {
+    text = "Este navegador não oferece notificações. O banner, o selo na aba e a agenda .ics continuam funcionando.";
+  } else if (Notification.permission === "denied") {
+    text = "As notificações estão bloqueadas neste navegador. Libere nas configurações do site para receber os avisos.";
+    tone = "bad";
+  } else if (store.enabled && Notification.permission === "granted") {
+    const times = [settings.reminderTime, settings.eveningTime].filter(Boolean).join(" e ");
+    text = `Notificações ativas neste dispositivo, com aviso às ${times}.`;
+    tone = "good";
+  } else {
+    text = "Notificações desativadas neste dispositivo.";
+  }
+  status.className = `reminder-status tone-${tone}`;
+  status.textContent = text;
+  if (toggle) toggle.textContent = store.enabled && cycleNotifySupported() && Notification.permission === "granted" ? "Desativar notificações" : "Ativar notificações neste dispositivo";
+  $("#installAppBtn")?.classList.toggle("hidden", !cycleUI.installPrompt);
+}
+
+/* ---------- trilha de fixação ---------- */
+
+function renderRevisionTrail(today) {
+  const container = $("#revisionTrail");
+  if (!container) return;
+  const intervals = revisionIntervals();
+  $("#revisionTrailLegend").textContent = `Aprendizado → ${intervals.map((days, index) => `R${index + 1} (${days}d)`).join(" → ")} → Fixado. O primeiro intervalo é a revisão; os demais são as revisões espaçadas.`;
+  const pending = state.revisions.filter((revision) => revision.status === "pending").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const fixed = state.revisions.filter((revision) => revision.status === "done").length;
+  const shown = pending.slice(0, 40);
+  const rows = shown
+    .map((revision) => {
+      const left = daysBetween(today, revision.dueDate);
+      let tone = "good";
+      let status = `em ${cyclePlural(left, "dia", "dias")}`;
+      if (revision.dueDate < today) {
+        tone = "bad";
+        status = `atrasada ${cyclePlural(daysBetween(revision.dueDate, today), "dia", "dias")}`;
+      } else if (revision.dueDate === today) {
+        tone = "warn";
+        status = "hoje";
+      }
+      const steps = intervals
+        .map((days, index) => {
+          const cls = index < revision.stage ? "done" : index === revision.stage ? "current" : "";
+          return `<li class="${cls}" title="R${index + 1} · ${cyclePlural(days, "dia", "dias")}">${index + 1}</li>`;
+        })
+        .join("");
+      return `
+        <div class="trail-row">
+          <div class="trail-info"><strong>${escapeHTML(revisionLabel(revision))}</strong><small>aprendido em ${formatDate(revision.baseDate)}</small></div>
+          <ol class="trail-steps" aria-label="Etapas da fixação">
+            <li class="done" title="Aprendizado">A</li>${steps}<li class="final" title="Fixado">✓</li>
+          </ol>
+          <span class="tag tone-${tone}">${escapeHTML(status)}</span>
+        </div>`;
+    })
+    .join("");
+  container.innerHTML =
+    (rows || `<div class="empty-state">Nenhum assunto em fixação ainda. Registre um estudo de 10 minutos ou mais e a trilha começa sozinha.</div>`) +
+    (pending.length > shown.length ? `<p class="muted-note">Mostrando os 40 mais próximos de ${pending.length} em andamento.</p>` : "") +
+    `<p class="muted-note">${cyclePlural(fixed, "assunto fixado", "assuntos fixados")} até agora.</p>`;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    cycleReviewStep,
+    buildLawSchedule,
+    lawWorkSegments,
+    lawWorkLabel,
+    lawUnitsFromPosition,
+    lawRegisterWork,
+    lawTotalWork,
+    normalizeLawPlan,
+    normalizeCycleIntervals,
+    normalizeCycleSettings,
+    normalizeRevision,
+    cycleAddDays,
+    normalizeWeights,
+    normalizeStudyWeekdays,
+    cycleRedistributeOverdue,
+    cycleReminderMessage,
+    cycleIcsEscape,
+    cycleIcsFold,
+    buildIcs,
+  };
+}

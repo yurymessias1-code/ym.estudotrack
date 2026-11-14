@@ -29,12 +29,17 @@ const REMOTE_SAVE_RETRY_MS = 8000;
 const REMOTE_SAVE_MAX_RETRIES = 4;
 
 const titles = {
-  dashboard: "Painel",
+  dashboard: "Visão geral",
   controle: "Controle",
   plano: "Matérias",
   concursos: "Concursos",
   edital: "Edital",
+  hoje: "Hoje",
+  semana: "Plano semanal",
   questoes: "Questões",
+  erros: "Caderno de erros",
+  revisao: "Revisão",
+  leiseca: "Lei seca",
   flashcards: "Flashcards",
   anotacoes: "Anotações",
   jurisprudencias: "Jurisprudências",
@@ -832,6 +837,9 @@ function stateHasMeaningfulData(candidate) {
     "sources",
     "cases",
     "legalMaterials",
+    "revisions",
+    "errorNotebook",
+    "lawPlans",
     "editalItems",
     "competitions",
   ].some((key) => Array.isArray(candidate[key]) && candidate[key].length > 0);
@@ -1275,6 +1283,10 @@ function normalizeState(candidate, fallbackProfileId = "") {
       STF: Array.isArray(candidate.cases?.STF) ? candidate.cases.STF.map(normalizeCaseItem) : [],
     },
     legalMaterials: Array.isArray(candidate.legalMaterials) ? candidate.legalMaterials.map(normalizeLegalMaterial) : empty.legalMaterials,
+    revisions: Array.isArray(candidate.revisions) ? candidate.revisions.map(normalizeRevision) : empty.revisions,
+    errorNotebook: Array.isArray(candidate.errorNotebook) ? candidate.errorNotebook.map(normalizeErrorEntry) : empty.errorNotebook,
+    lawPlans: Array.isArray(candidate.lawPlans) ? candidate.lawPlans.map(normalizeLawPlan) : empty.lawPlans,
+    cycleSettings: normalizeCycleSettings(candidate.cycleSettings),
     edital: normalizeEditalData(candidate.edital || empty.edital),
     media: {
       url: typeof candidate.media?.url === "string" ? candidate.media.url : "",
@@ -1364,6 +1376,10 @@ function createEmptyState(profile = {}) {
     competitions: [],
     cases: { STJ: [], STF: [] },
     legalMaterials: [],
+    revisions: [],
+    errorNotebook: [],
+    lawPlans: [],
+    cycleSettings: normalizeCycleSettings(),
     edital: normalizeEditalData(),
     media: { url: "" },
     account: { name: "", email: "" },
@@ -1373,7 +1389,7 @@ function createEmptyState(profile = {}) {
       intervals: { hard: 4, medium: 8, easy: 12 },
     },
       ui: {
-        view: "dashboard",
+        view: "hoje",
         theme: "light",
         caseCourt: "STJ",
         caseFormCourt: "STJ",
@@ -1521,7 +1537,7 @@ function createSeedState() {
     media: { url: "" },
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 30, longBreakEveryMinutes: 120, cycles: 4, tickLofiEnabled: true },
       ui: {
-        view: "dashboard",
+        view: "hoje",
         theme: state?.ui?.theme === "dark" ? "dark" : "light",
         caseCourt: "STJ",
         caseFormCourt: "STJ",
@@ -1857,6 +1873,30 @@ function buildGlobalSearchResults(query) {
     );
   });
 
+  (state.errorNotebook || []).forEach((entry) => {
+    add(
+      makeGlobalSearchResult(
+        "Caderno de erros",
+        getSearchExcerpt(entry.statement, query, 90) || "Erro registrado",
+        `${getEntryScopeLabel(entry)} ${entry.source || ""} ${entry.foundation || ""} ${hashtagsToInput(entry.tags)} ${getSearchExcerpt(entry.correctAnswer, query, 160)} ${getSearchExcerpt(entry.rule, query, 160)}`,
+        "erros",
+        { type: "errorEntry", id: entry.id, subjectId: getEntrySubjectId(entry), topicId: entry.topicId || "" }
+      )
+    );
+  });
+
+  (state.lawPlans || []).forEach((plan) => {
+    add(
+      makeGlobalSearchResult(
+        "Lei seca",
+        plan.title,
+        `${plan.unitLabel} ${plan.startUnit}-${plan.endUnit} ${getSubject(plan.subjectId)?.name || ""} ${plan.url || ""}`,
+        "leiseca",
+        { type: "lawPlan", id: plan.id, subjectId: plan.subjectId || "" }
+      )
+    );
+  });
+
   (state.edital?.items || []).forEach((item) => {
     add(
       makeGlobalSearchResult(
@@ -2182,6 +2222,7 @@ function render() {
   renderFlashcards();
   renderNotes();
   renderCases();
+  renderCycle();
   renderPomodoro();
   renderReports();
   renderAccountPanel();
@@ -3005,7 +3046,7 @@ function renderDailyReview() {
     })
     .sort((a, b) => b.days - a.days || a.subject.name.localeCompare(b.subject.name))[0];
 
-  const cards = [
+  const baseCards = [
     weakTopic && {
       label: weakTopic.accuracy < 60 ? "Prioridade alta" : "Reforco",
       title: `Revisar ${weakTopic.name}`,
@@ -3042,7 +3083,9 @@ function renderDailyReview() {
       meta: todayMinutes ? "Continue preservando o ritmo" : "Ainda sem tempo registrado hoje",
       view: "controle",
     },
-  ].filter(Boolean).slice(0, 4);
+  ].filter(Boolean);
+  const cycleCards = typeof getCycleDailyCards === "function" ? getCycleDailyCards() : [];
+  const cards = [...cycleCards, ...baseCards].slice(0, 6);
 
   list.innerHTML = cards
     .map(
@@ -4506,6 +4549,7 @@ function renderQuestions() {
               <td>${percent(accuracy)}</td>
               <td>
                 <div class="inline-actions table-actions">
+                  ${Number(log.wrong || 0) > 0 ? `<button class="mini-button" data-cycle-action="errorFromQuestion" data-id="${log.id}" type="button">Anotar erro</button>` : ""}
                   <button class="mini-button" data-action="editQuestion" data-id="${log.id}" type="button">Editar</button>
                   <button class="mini-button bad" data-action="deleteQuestion" data-id="${log.id}" type="button">Excluir</button>
                 </div>
@@ -6682,7 +6726,7 @@ function renderPomodoro() {
 
 function updatePomodoroPageTitle(modeLabel = "") {
   if (!timer.running && timer.mode === "focus" && timer.remaining === state.settings.focusMinutes * 60) {
-    document.title = APP_TITLE;
+    document.title = typeof cycleBaseTitle === "function" ? cycleBaseTitle() : APP_TITLE;
     return;
   }
 
@@ -9153,6 +9197,7 @@ function exportData() {
   anchor.download = `estudos-track-${todayISO()}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
+  if (typeof cycleMarkBackup === "function") cycleMarkBackup();
 }
 
 function createBackupPayload() {
@@ -9179,6 +9224,7 @@ function downloadBackupFile() {
   anchor.click();
   URL.revokeObjectURL(url);
   showToast("Arquivo de backup baixado.");
+  if (typeof cycleMarkBackup === "function") cycleMarkBackup();
 }
 
 function restoreBackupFromText(text) {
@@ -9222,6 +9268,7 @@ function importData(event) {
 }
 
 attachEvents();
+bindCycleEvents();
 resetTimer();
 render();
 initializeSupabaseAuth();

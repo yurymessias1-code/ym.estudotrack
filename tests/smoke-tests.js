@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20260812-pomodoro-clock"), "Cache do HTML nao foi atualizado para o relogio real do Pomodoro.");
-assert(html.includes("supabase-config.js?v=20260812-pomodoro-clock"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20261113-hoje"), "Cache do HTML nao foi atualizado para o ciclo de revisao.");
+assert(html.includes("supabase-config.js?v=20261113-hoje"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -57,6 +57,47 @@ assert(html.includes("data-action=\"scanLocalRecovery\""), "Botao de busca de ba
 assert(html.includes("data-action=\"createAuxiliaryBackup\""), "Botao manual de backup auxiliar ausente.");
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
+
+// Ciclo de estudos: revisao, caderno de erros e lei seca
+const ciclo = fs.readFileSync(path.join(root, "ciclo.js"), "utf8");
+execFileSync(process.execPath, ["--check", path.join(root, "ciclo.js")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(__dirname, "ciclo-tests.js")], { stdio: "inherit" });
+assert(html.includes('src="ciclo.js?v='), "ciclo.js nao foi carregado no HTML.");
+assert(html.indexOf('src="ciclo.js') < html.indexOf('src="app.js'), "ciclo.js deve carregar antes do app.js.");
+["erros", "revisao", "leiseca"].forEach((view) => {
+  assert(html.includes(`data-view="${view}"`), `Botao de navegacao ${view} ausente.`);
+  assert(html.includes(`id="${view}"`), `Aba ${view} ausente.`);
+  assert(app.includes(`${view}: "`), `Titulo da aba ${view} ausente no app.js.`);
+});
+["errorForm", "errorList", "errorReasonChart", "revisionQueue", "revisionSession", "revisionForm", "cycleSettingsForm", "lawForm", "lawPlans", "cycleStripDashboard"].forEach((id) => {
+  assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`);
+});
+["revisions", "errorNotebook", "lawPlans", "cycleSettings"].forEach((key) => {
+  assert(app.includes(`${key}: Array.isArray(candidate.${key})`) || app.includes(`${key}: normalizeCycleSettings(candidate.${key})`), `normalizeState nao preserva ${key}.`);
+});
+assert(app.includes("renderCycle();"), "render() nao chama renderCycle.");
+assert(app.includes("bindCycleEvents();"), "bindCycleEvents nao e chamado.");
+assert(app.includes("getCycleDailyCards"), "Cartoes do ciclo no painel diario ausentes.");
+assert(!/normalize(Revision|ErrorEntry|LawPlan|CycleSettings)[\s\S]{0,1500}?\bstate\b\??\./.test(ciclo.split("function ensureCycleState")[0].replace(/\/\/.*$/gm, "")), "Normalizadores do ciclo nao podem ler `state` (zona morta durante loadState).");
+assert(css.includes(".cycle-strip") && css.includes(".law-plan-card") && css.includes(".error-card"), "Estilos do ciclo ausentes.");
+// Lembretes automaticos, PWA e agenda
+const swPath = path.join(root, "sw.js");
+const manifestPath = path.join(root, "manifest.json");
+execFileSync(process.execPath, ["--check", swPath], { stdio: "inherit" });
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+assert(manifest.name && manifest.start_url && manifest.display === "standalone", "manifest.json incompleto.");
+assert(manifest.icons.some((icon) => fs.existsSync(path.join(root, icon.src))), "Icone do manifest nao existe.");
+assert(html.includes('rel="manifest" href="manifest.json"'), "Link do manifest ausente no HTML.");
+["reviewBanner", "reminderForm", "revisionTrail", "notifyToggleBtn", "installAppBtn"].forEach((id) => {
+  assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`);
+});
+["exportIcs", "notifyToggle", "notifyTest", "redistributeOverdue", "reviewNow"].forEach((action) => {
+  assert(ciclo.includes(`type === "${action}"`), `Acao ${action} ausente no ciclo.js.`);
+});
+assert(fs.readFileSync(swPath, "utf8").includes("notificationclick"), "sw.js sem tratamento de clique na notificacao.");
+assert(app.includes("cycleBaseTitle"), "Titulo do Pomodoro nao respeita o selo de pendencias.");
+assert(ciclo.includes("cycleReminderTick") && ciclo.includes("navigator.serviceWorker.register"), "Motor de lembretes ou registro do service worker ausente.");
+
 assert(!app.includes("searchable-select"), "Seletores customizados nao devem existir no JS.");
 assert(app.includes("function deleteCurrentProfileData"), "Exclusao de dados da conta ausente.");
 assert(app.includes("deleteEditalItem"), "Remocao individual de item do edital ausente.");
@@ -156,5 +197,30 @@ assert(aprovadoBookmarklet.includes("estudos-track-external-study-v1"), "Bookmar
 assert(/enable row level security/i.test(sql), "RLS nao esta habilitado no SQL.");
 assert(sql.includes("auth.uid() = user_id"), "Politicas por usuario ausentes no SQL.");
 assert(/create trigger set_study_profiles_updated_at/i.test(sql), "Trigger de updated_at ausente.");
+
+// Hoje, plano semanal, menu movel, reforco por desempenho e backup
+const hoje = fs.readFileSync(path.join(root, "hoje.js"), "utf8");
+execFileSync(process.execPath, ["--check", path.join(root, "hoje.js")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(__dirname, "hoje-tests.js")], { stdio: "inherit" });
+assert(html.indexOf('src="ciclo.js') < html.indexOf('src="hoje.js') && html.indexOf('src="hoje.js') < html.indexOf('src="app.js'), "Ordem de carga deve ser ciclo.js, hoje.js, app.js.");
+["hoje", "semana"].forEach((view) => {
+  assert(html.includes(`id="${view}"`), `Aba ${view} ausente.`);
+  assert(app.includes(`${view}: "`), `Titulo da aba ${view} ausente no app.js.`);
+});
+["todayTasks", "todayInsights", "todayBackup", "startDayBtn", "weekForm", "weekTable", "bottom-nav", "sidebarSheet", "menuToggleBtn", "backupDays", "cycleAutoWeak", "cycleWeakAccuracy"].forEach((id) => {
+  assert(html.includes(`id="${id}"`) || html.includes(`class="${id}"`), `Elemento ${id} ausente.`);
+});
+assert(/<section class="view active" id="hoje"/.test(html), "Hoje deve ser a aba inicial.");
+assert(!/<section class="view active" id="dashboard"/.test(html), "Apenas uma aba pode comecar ativa.");
+assert((html.match(/<section class="view active"/g) || []).length === 1, "Mais de uma aba marcada como ativa.");
+// toda aba precisa de um botao de navegacao no menu agrupado
+const viewIds = [...html.matchAll(/<section class="view(?: active)?" id="([a-z]+)"/g)].map((match) => match[1]);
+viewIds.forEach((id) => assert(html.includes(`class="nav-button${id === "hoje" ? " active" : ""}" data-view="${id}"`), `Aba ${id} sem botao no menu.`));
+assert(html.includes("nav-group-title"), "Menu agrupado ausente.");
+assert((app.match(/view: "hoje"/g) || []).length === 2, "Estado novo deve abrir em Hoje.");
+assert((app.match(/cycleMarkBackup/g) || []).length >= 2, "Backup e exportacao devem registrar a data do backup.");
+assert(ciclo.includes("handleTodayAction") && ciclo.includes("todayAfterAction") && ciclo.includes("syncWeakRevisions"), "Ganchos do hoje.js ausentes no ciclo.js.");
+assert(css.includes(".bottom-nav") && css.includes(".today-card") && css.includes(".week-table") && css.includes("body.profile-locked .bottom-nav"), "Estilos do menu movel/Hoje ausentes.");
+assert(!hoje.split("\n").some((line) => /^\s*(const|let)\s+state\b/.test(line)), "hoje.js nao deve redeclarar state.");
 
 console.log("Smoke tests OK: estrutura principal validada.");

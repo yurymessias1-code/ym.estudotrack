@@ -4423,3 +4423,77 @@ td {
     width: auto;
   }
 }
+
+/* Hoje: registro rápido, cartão largo e botões por linha */
+.today-hero-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.today-card.wide {
+  grid-column: 1 / -1;
+}
+
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+#quickStudyForm {
+  margin-bottom: 18px;
+}
+
+@media (max-width: 720px) {
+  .today-hero-actions .button {
+    width: 100%;
+  }
+}
+
+/* Push com o site fechado */
+.push-box {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* Janela "O que você estudou?" */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.modal-card {
+  display: grid;
+  gap: 14px;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  padding: 20px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+
+.modal-card h3 {
+  margin: 2px 0 6px;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+/* Avisos acima da janela, para validações aparecerem */
+.toast {
+  z-index: 100;
+}

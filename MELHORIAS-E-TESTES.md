@@ -47,3 +47,21 @@ Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, sele
 - Novos campos em `cycleSettings`: `autoWeak`, `weakAccuracy`, `weakMinQuestions`, `backupDays`, `studyWeekdays` e `weights`. Nova revisão do tipo `weak` (reforço).
 - `node tests/hoje-tests.js` cobre plano semanal, pesos do edital, reforço por desempenho (com intervalo de reavaliação), motivo recorrente de erro e regras do lembrete de backup.
 - Nos testes com Playwright, no celular o menu fica atrás do botão **Mais** (`#menuToggleBtn`).
+
+## Push real, registro rápido, flashcards em Hoje, agenda e CI (novembro/2026)
+
+- **Push com o site fechado:** função `supabase/functions/send-reminders` (agendada a cada 5 min), tabelas `push_subscriptions` e `reminder_digests` (`supabase-push.sql`, com RLS), cliente `push.js` e evento `push` no `sw.js`. Configuração em `PUSH-SETUP.md`. A lógica de horários/fusos fica em `supabase/functions/_shared/reminder-core.mjs`, testada em Node, e o texto do aviso é idêntico ao do app (há teste de paridade).
+- **Registro rápido de estudo** na tela Hoje (botão no topo e por matéria no "Estudo do dia").
+- **Flashcards em Hoje:** novo cartão, contador no menu, etapa do "Começar o dia", notificação e agenda.
+- **Agenda `.ics`:** 90 dias, com etapas futuras previstas de revisões e erros. Revisões atrasadas são projetadas a partir de hoje.
+- **CI:** `.github/workflows/tests.yml`, `package.json` e roteiros de navegador em `tests/e2e/` (rodam com `npm run test:e2e`).
+- Service worker: cache `estudos-track-v2`.
+- Limite conhecido: a função de push e a entrega real não foram exercitadas contra um projeto Supabase de verdade (só simuladas); use "Testar push" ao configurar.
+
+## Dizer o que estudou ao terminar o Pomodoro (novembro/2026)
+
+- Novo módulo `sessao.js` e janela "O que você estudou?" (`#sessionModal`): escolha ou criação de matéria e assunto na hora de salvar o tempo; sessões sem destino ficam em `localStorage` (por perfil, só neste aparelho) até serem salvas.
+- O Pomodoro inicia sem matéria; `logPomodoroFocus` passa por `sessionAskBeforeSave`. Opção `cycleSettings.askAtSave` (padrão ligada).
+- Registro manual (`#studyNewTopic`) e registro rápido (`#qsNewTopic`) aceitam assunto novo digitado; nome igual a um existente reaproveita o existente.
+- `.toast` passou a `z-index: 100` para aparecer acima da janela.
+- Testes: `tests/sessao-tests.js` (14) e `tests/e2e/sessao.e2e.js`, que também pegaram, antes da entrega, dois defeitos corrigidos: "novo assunto" em branco salvava sem aviso e o contador da fila não atualizava com a janela aberta.

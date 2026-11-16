@@ -259,13 +259,14 @@ O código fica em `ciclo.js` (carregado antes do `app.js`); os dados entram no m
 
 ### Lembretes automáticos (funciona no GitHub Pages)
 
-O Estudos Track é um site estático: não há servidor que envie push com o navegador fechado. Por isso o lembrete usa cinco camadas, que se complementam:
+O Estudos Track é um site estático, e um site estático não consegue avisar sozinho com o navegador fechado. Por isso o lembrete usa seis camadas, que se complementam (as cinco primeiras não dependem de servidor; a sexta usa o seu Supabase):
 
 1. **Banner "Hora de revisar"** no topo de qualquer aba sempre que houver revisões ou erros vencidos, com atalho **Revisar agora**.
 2. **Número de pendências no título da aba** (por exemplo, `(3) estudos track`) e, no app instalado, selo no ícone.
 3. **Notificação do navegador** nos horários da manhã e da noite (Revisão > Lembretes automáticos > Ativar notificações neste dispositivo). Sai uma vez por horário, por dia, assim que o site estiver aberto; se você abrir o site depois do horário, o aviso do dia sai na hora.
 4. **App instalável (PWA)**: o botão **Instalar como app** (ou "Adicionar à tela inicial" no celular) abre o site em janela própria e funciona sem internet. No iPhone, as notificações exigem o site instalado na Tela de Início.
-5. **Agenda `.ics`**: **Exportar agenda (.ics)** gera os próximos 60 dias (revisões, erros para refazer e metas de lei seca) com alarme no horário escolhido. Importe no Google Agenda ou no calendário do celular para ser avisado **mesmo com tudo fechado**. A agenda é uma foto do momento: exporte de novo de tempos em tempos, porque as próximas revisões de cada assunto só são marcadas depois que você conclui a anterior.
+5. **Agenda `.ics`**: **Exportar agenda (.ics)** gera os próximos **90 dias** (revisões, erros para refazer, metas de lei seca e flashcards do dia) com alarme no horário escolhido. Além do que já está agendado, ela traz as **etapas futuras previstas** de cada assunto (R2, R3, R4), supondo que você acerte as anteriores; elas aparecem marcadas como "previstas". Importe no Google Agenda ou no calendário do celular para ser avisado **mesmo com tudo fechado**. A agenda é uma foto do momento: se você errar uma revisão, a data seguinte muda; reexporte de vez em quando.
+6. **Push com o site fechado (Supabase)**: uma função agendada no seu projeto Supabase avisa no horário escolhido, mesmo com o navegador e o site fechados. Exige configuração única (tabelas, chaves, função e agendamento): siga o **[PUSH-SETUP.md](PUSH-SETUP.md)**. Depois, ative em **Revisão > Lembretes automáticos > Push com o site fechado** em cada aparelho e use **Testar push**.
 
 Cada dispositivo ativa suas próprias notificações (o navegador exige permissão por aparelho); horários e intervalos ficam na sua conta e sincronizam.
 
@@ -273,11 +274,15 @@ Cada dispositivo ativa suas próprias notificações (o navegador exige permiss�
 
 **Voltei de uma pausa e acumulou tudo**: use **Redistribuir atrasadas**. Ele espalha as revisões vencidas pelos próximos dias, respeitando o máximo por dia que você definiu (padrão: 12) e começando pelas mais antigas.
 
-Arquivos novos: `manifest.json` e `sw.js` (publique-os na raiz do repositório, junto do `index.html`).
+Arquivos do app instalável: `manifest.json` e `sw.js` (publique-os na raiz do repositório, junto do `index.html`).
 
 ### Hoje, plano semanal, reforço por desempenho e backup
 
-**Tela Hoje (início do app).** O site sempre abre em **Hoje**. Ela junta, num só lugar, as revisões vencidas, os erros para refazer, a meta de lei seca e o estudo sugerido pelo plano semanal, com o progresso do dia ("7 de 17 tarefas"), os dias que faltam para a prova (da aba Edital) e **pontos de atenção** do seu desempenho. O botão **Começar o dia** leva você pelas etapas em ordem (revisões, caderno de erros, lei seca e estudo) e, ao terminar cada uma, já abre a próxima.
+**Tela Hoje (início do app).** O site sempre abre em **Hoje**. Ela junta, num só lugar, as revisões vencidas, os erros para refazer, a meta de lei seca e o estudo sugerido pelo plano semanal, com o progresso do dia ("7 de 17 tarefas"), os dias que faltam para a prova (da aba Edital) e **pontos de atenção** do seu desempenho. O botão **Começar o dia** leva você pelas etapas em ordem (revisões, flashcards, caderno de erros, lei seca e estudo) e, ao terminar cada uma, já abre a próxima.
+
+**Registro rápido de estudo.** Todo o ciclo nasce do estudo registrado, então registrar não pode dar trabalho: em **Hoje**, o botão **Registrar estudo** abre um formulário curto (matéria, assunto opcional e minutos, com atalhos de 15 a 90). Na linha de cada matéria do **Estudo do dia**, o botão **Registrar** já abre o formulário com a matéria e os minutos que o plano sugere. Com 10 minutos ou mais num assunto, a trilha de revisões dele começa sozinha. O registro aparece normalmente na lista de estudos da aba Pomodoro, onde pode ser editado ou excluído.
+
+**Flashcards em Hoje.** Os flashcards vencidos (pela regra de rodadas que o app já usava) aparecem num cartão próprio, entram no progresso do dia, no contador do menu, no passo a passo do **Começar o dia**, na notificação e na agenda do dia.
 
 **Plano semanal por matéria** (aba **Plano semanal**, em Planejar). Defina as horas por semana (as mesmas da aba Edital) e os dias de estudo; o tempo é dividido entre as matérias pelo **peso** de cada uma. Sem pesos definidos, o app usa o número de assuntos de cada matéria no edital (ou peso igual, se não houver edital). **Usar pesos do edital** grava esses pesos para você ajustar; peso 0 tira a matéria do plano. A cada dia o plano recalcula o que faltou para fechar a semana e sugere quanto estudar hoje; o que você registra no Pomodoro ou no estudo manual entra na conta sozinho. A semana vai de segunda a domingo.
 
@@ -287,9 +292,36 @@ Arquivos novos: `manifest.json` e `sw.js` (publique-os na raiz do repositório, 
 
 **Menu.** No computador, o menu lateral é agrupado em **Planejar, Estudar, Fixar, Registrar e Acompanhar**, com contadores nas abas que têm pendências. No celular, uma barra inferior dá acesso a **Hoje, Revisar, Questões e Erros**, e o botão **Mais** abre o menu completo. A antiga tela de painel agora se chama **Visão geral**.
 
+### Dizer o que você estudou ao terminar o Pomodoro
+
+Não é preciso cadastrar matéria nem assunto antes de estudar. Ao terminar um foco (ou ao usar **Finalizar**), abre a janela **"O que você estudou?"**:
+
+- a **matéria** e o **assunto** escolhidos antes de iniciar já vêm preenchidos (se você escolheu), então basta confirmar;
+- em **Matéria** há **"+ Nova matéria…"** e em **Assunto** há **"+ Novo assunto…"**: você digita o nome e eles são criados na hora, já com o tempo registrado, sem passar pela aba Matérias. Se o nome já existir (sem diferenciar maiúsculas, acentos ou espaços), o app usa o que já existe em vez de duplicar;
+- dá para ajustar os **minutos** e a **observação** antes de salvar.
+
+O Pomodoro agora **inicia mesmo sem matéria escolhida**: você decide no fim. A janela traz **Decidir depois** (ou Esc), que mantém a sessão guardada neste aparelho com um aviso no topo ("Sessão para salvar") até você escolher, e **Descartar**. Se vários focos terminarem sem você salvar (por exemplo, com o site fechado), eles entram numa fila ("Sessão 1 de 3") e a escolha da primeira já vem preenchida nas seguintes.
+
+Quem prefere o jeito antigo desliga **"Perguntar o que estudei ao terminar cada foco"** (aba Pomodoro): com matéria escolhida no início, o tempo é salvo direto; sem matéria, a janela abre mesmo assim. O **Registro manual** (aba Pomodoro) e o **Registro rápido** (tela Hoje) ganharam o campo **"Ou escreva um assunto novo"**, que vale no lugar da seleção. A fila de sessões pendentes fica só no aparelho em que o foco terminou.
+
 ## Testes
 
 ```bash
-node tests/smoke-tests.js     # estrutura do app e dos novos módulos; também roda os testes abaixo
-node tests/ciclo-tests.js     # lógica de revisão espaçada e do cronograma de lei seca
+npm test                      # = node tests/smoke-tests.js: estrutura do app e, de quebra, todos os testes de lógica abaixo
+node tests/ciclo-tests.js     # revisão espaçada, lembretes, agenda .ics com etapas previstas e lei seca
+node tests/hoje-tests.js      # plano semanal, reforço por desempenho, insights e backup
+node tests/push-tests.js      # push: lógica de horários e fusos, resumo diário, cliente e a própria função send-reminders
+node tests/sessao-tests.js    # janela "O que você estudou?": criação de matéria/assunto na hora e fila de sessões
+npm install && npx playwright install chromium    # uma vez, para os testes no navegador
+npm run test:e2e              # roteiros no Chromium (ciclo, lembretes, Hoje, menu móvel, registro rápido...)
 ```
+
+Os testes de `push-tests.js` executam o `index.ts` da função de verdade (com Supabase e web-push simulados), e os de navegador sobem um servidor estático próprio. Não precisam de rede nem de conta.
+
+### Testes automáticos no GitHub
+
+O arquivo `.github/workflows/tests.yml` roda tudo a cada envio (push) e em pull requests: primeiro os testes de código, depois os do navegador (com as capturas de tela guardadas como artefato por 7 dias). O resultado aparece na aba **Actions** do repositório e como ✓ ou ✗ ao lado de cada commit.
+
+Para **impedir que uma versão quebrada seja publicada**, o GitHub só consegue bloquear se houver uma regra: em *Settings > Branches > Add branch protection rule* (na branch publicada), marque *Require status checks to pass before merging* e escolha **Testes de código** e **Testes no navegador**. Isso vale para mudanças que entram por pull request. Se você prefere enviar direto para a branch publicada, o CI avisa depois do envio, mas não desfaz a publicação.
+
+Se o site também for publicado pelo Netlify, o `package.json` (só com o Playwright de teste) faz o Netlify rodar `npm install` no deploy; isso não afeta o funcionamento do site.

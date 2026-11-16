@@ -37,6 +37,14 @@ const cycleUI = {
   bannerHidden: false,
   badgeCount: 0,
   installPrompt: null,
+  quickStudyOpen: false,
+  quickStudy: {},
+  pushDigestHash: "",
+  pushEnsured: false,
+  sessionModalOpen: false,
+  sessionItemId: "",
+  sessionAutoOpened: false,
+  sessionLast: {},
 };
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +140,7 @@ function normalizeCycleSettings(raw = {}) {
     reminderTime: cycleIsTime(source.reminderTime) ? source.reminderTime : "08:00",
     eveningTime: cycleIsTime(source.eveningTime) ? source.eveningTime : "",
     dailyLimit: cycleInt(source.dailyLimit, 1, 200, 12),
+    askAtSave: source.askAtSave !== false,
     autoWeak: source.autoWeak !== false,
     weakAccuracy: cycleInt(source.weakAccuracy, 30, 95, 70),
     weakMinQuestions: cycleInt(source.weakMinQuestions, 5, 100, 10),
@@ -724,6 +733,8 @@ function renderCycle() {
     cycleApplyBadge(summary.revDue + summary.errorsDue + summary.lawToday.length);
     cycleMaybeNotify(summary);
     if (typeof renderTodayModule === "function") renderTodayModule(summary);
+    if (typeof pushScheduleSync === "function") pushScheduleSync();
+    if (typeof renderSessionUI === "function") renderSessionUI();
     const view = state.ui.view;
     if (view === "revisao") renderRevisions();
     if (view === "erros") renderErrors();
@@ -1341,6 +1352,8 @@ function handleCycleAction(button) {
   const id = button.dataset.id || "";
 
   if (typeof handleTodayAction === "function" && handleTodayAction(type, button)) return undefined;
+  if (typeof handlePushAction === "function" && handlePushAction(type, button)) return undefined;
+  if (typeof handleSessionAction === "function" && handleSessionAction(type, button)) return undefined;
 
   /* lembretes */
   if (type === "reviewNow") {
@@ -1787,6 +1800,7 @@ function bindCycleEvents() {
   });
   window.setTimeout(cycleReminderTick, 1500);
   if (typeof bindTodayEvents === "function") bindTodayEvents();
+  if (typeof bindSessionEvents === "function") bindSessionEvents();
 }
 
 
@@ -1796,7 +1810,7 @@ function bindCycleEvents() {
 /* ------------------------------------------------------------------ */
 
 const CYCLE_NOTIFY_KEY_PREFIX = "ymEstudos.cycleNotify.";
-const CYCLE_ICS_DAYS = 60;
+const CYCLE_ICS_DAYS = 90;
 
 /**
  * Redistribui revisões atrasadas respeitando um máximo por dia.
@@ -1822,17 +1836,18 @@ function cycleRedistributeOverdue(revisions, today, limit) {
   return changes;
 }
 
-function cycleReminderMessage({ revDue = 0, revOverdue = 0, errorsDue = 0, lawLabel = "", backupDue = false } = {}) {
+function cycleReminderMessage({ revDue = 0, revOverdue = 0, errorsDue = 0, lawLabel = "", backupDue = false, flashDue = 0 } = {}) {
   const parts = [];
   if (revDue) {
     parts.push(`${cyclePlural(revDue, "revisão", "revisões")}${revOverdue ? ` (${cyclePlural(revOverdue, "atrasada", "atrasadas")})` : ""}`);
   }
+  if (flashDue) parts.push(cyclePlural(flashDue, "flashcard", "flashcards"));
   if (errorsDue) parts.push(`${cyclePlural(errorsDue, "erro", "erros")} para refazer`);
   if (lawLabel) parts.push(`Lei seca: ${lawLabel}`);
   if (backupDue) parts.push("backup semanal pendente");
   if (!parts.length) return null;
   return {
-    title: revOverdue ? "Revisões atrasadas: não deixe o conteúdo esfriar" : revDue || errorsDue || lawLabel ? "Hora de revisar" : "Lembrete do Estudos Track",
+    title: revOverdue ? "Revisões atrasadas: não deixe o conteúdo esfriar" : revDue || errorsDue || flashDue || lawLabel ? "Hora de revisar" : "Lembrete do Estudos Track",
     body: parts.join(" · "),
   };
 }
@@ -1845,6 +1860,7 @@ function cycleMessageInput(summary) {
     errorsDue: summary.errorsDue,
     lawLabel: first ? `${first.info.todayLabel}${summary.lawToday.length > 1 ? ` (+${summary.lawToday.length - 1})` : ""}` : "",
     backupDue: typeof backupIsDue === "function" ? backupIsDue().due : false,
+    flashDue: typeof getFlashDueCount === "function" ? getFlashDueCount() : 0,
   };
 }
 
@@ -1916,53 +1932,102 @@ function buildIcs(events, { now = new Date(), calendarName = "Estudos Track: rev
   return `${lines.map(cycleIcsFold).join("\r\n")}\r\n`;
 }
 
+/**
+ * Etapas futuras de uma cadeia de revisão, supondo que cada revisão seja feita no dia
+ * previsto e avaliada como "Bom" (o intervalo é contado entre uma revisão e a seguinte).
+ */
+function cycleProjectStages(stage, dueDate, intervals) {
+  const out = [];
+  let date = dueDate;
+  for (let next = stage + 1; next < intervals.length; next += 1) {
+    date = cycleAddDays(date, intervals[next]);
+    out.push({ stage: next, date });
+  }
+  return out;
+}
+
+/**
+ * Agrupa por dia o que entra na agenda: o que já está agendado (atrasados vão para hoje) e as
+ * etapas futuras previstas. Entrada pura: itens já com texto pronto.
+ */
+function cycleCalendarGroups({ revisions = [], intervals = [], errors = [], errorIntervals = [], lawRows = [], flashDue = 0, today, horizon }) {
+  const byDate = new Map();
+  const bucket = (date) => {
+    const key = date < today ? today : date;
+    if (!byDate.has(key)) byDate.set(key, { date: key, rev: [], revNext: [], err: [], errNext: [], law: [], fc: 0 });
+    return byDate.get(key);
+  };
+  revisions.forEach((revision) => {
+    bucket(revision.dueDate).rev.push(`${revision.label} (R${Math.min(revision.stage + 1, intervals.length)}/${intervals.length})`);
+    // Revisão atrasada será feita hoje: as etapas seguintes contam a partir daí.
+    cycleProjectStages(revision.stage, revision.dueDate < today ? today : revision.dueDate, intervals).forEach((step) => {
+      if (step.date <= horizon) bucket(step.date).revNext.push(`${revision.label} (R${step.stage + 1}/${intervals.length})`);
+    });
+  });
+  errors.forEach((entry) => {
+    bucket(entry.dueDate).err.push(entry.text);
+    cycleProjectStages(entry.stage, entry.dueDate < today ? today : entry.dueDate, errorIntervals).forEach((step) => {
+      if (step.date <= horizon) bucket(step.date).errNext.push(entry.text);
+    });
+  });
+  lawRows.forEach((row) => bucket(row.date).law.push(row.text));
+  if (flashDue > 0) bucket(today).fc = flashDue;
+  return [...byDate.values()].filter((group) => group.date <= horizon).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function cycleCalendarEvent(group, time) {
+  const parts = [];
+  if (group.rev.length) parts.push(cyclePlural(group.rev.length, "revisão", "revisões"));
+  if (group.revNext.length) parts.push(cyclePlural(group.revNext.length, "revisão prevista", "revisões previstas"));
+  if (group.err.length) parts.push(cyclePlural(group.err.length, "erro", "erros"));
+  if (group.errNext.length) parts.push(cyclePlural(group.errNext.length, "refação prevista", "refações previstas"));
+  if (group.fc) parts.push(cyclePlural(group.fc, "flashcard", "flashcards"));
+  if (group.law.length) parts.push("lei seca");
+  const lines = [];
+  const section = (title, items) => {
+    if (!items.length) return;
+    lines.push(`${title}:`);
+    items.slice(0, 15).forEach((item) => lines.push(`- ${item}`));
+    if (items.length > 15) lines.push(`+ ${items.length - 15} outros`);
+  };
+  section("Revisões", group.rev);
+  section("Revisões previstas (se você acertar as anteriores)", group.revNext);
+  section("Erros para refazer", group.err);
+  section("Refações previstas", group.errNext);
+  if (group.fc) lines.push(`Flashcards para revisar: ${group.fc}`);
+  section("Lei seca", group.law);
+  return {
+    uid: `${group.date}-ciclo@estudostrack`,
+    date: group.date,
+    time,
+    minutes: 30,
+    summary: `Estudos Track: ${parts.join(", ")}`,
+    description: lines.join("\n"),
+  };
+}
+
 function getCycleCalendarEvents(days = CYCLE_ICS_DAYS) {
   ensureCycleState();
   const today = cycleToday();
   const horizon = cycleAddDays(today, days);
-  const time = state.cycleSettings.reminderTime;
-  const byDate = new Map();
-  const bucket = (date) => {
-    const key = date < today ? today : date;
-    if (!byDate.has(key)) byDate.set(key, { rev: [], err: [], law: [] });
-    return byDate.get(key);
-  };
-  state.revisions
-    .filter((revision) => revision.status === "pending")
-    .forEach((revision) => bucket(revision.dueDate).rev.push(`${revisionLabel(revision)} (${revisionStageLabel(revision)})`));
-  state.errorNotebook
-    .filter((entry) => !entry.mastered && entry.dueDate)
-    .forEach((entry) => bucket(entry.dueDate).err.push(cycleExcerpt(entry.statement, 70)));
+  const lawRows = [];
   state.lawPlans.forEach((plan) => {
-    buildLawSchedule(plan, today).rows.forEach((row) => bucket(row.date).law.push(`${plan.title}: ${row.label}`));
+    buildLawSchedule(plan, today).rows.forEach((row) => lawRows.push({ date: row.date, text: `${plan.title}: ${row.label}` }));
   });
-  return [...byDate.entries()]
-    .filter(([date]) => date <= horizon)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, group]) => {
-      const summaryParts = [];
-      if (group.rev.length) summaryParts.push(cyclePlural(group.rev.length, "revisão", "revisões"));
-      if (group.err.length) summaryParts.push(cyclePlural(group.err.length, "erro", "erros"));
-      if (group.law.length) summaryParts.push("lei seca");
-      const lines = [];
-      const section = (title, items) => {
-        if (!items.length) return;
-        lines.push(`${title}:`);
-        items.slice(0, 15).forEach((item) => lines.push(`- ${item}`));
-        if (items.length > 15) lines.push(`+ ${items.length - 15} outros`);
-      };
-      section("Revisões", group.rev);
-      section("Erros para refazer", group.err);
-      section("Lei seca", group.law);
-      return {
-        uid: `${date}-ciclo@estudostrack`,
-        date,
-        time,
-        minutes: 30,
-        summary: `Estudos Track: ${summaryParts.join(", ")}`,
-        description: lines.join("\n"),
-      };
-    });
+  return cycleCalendarGroups({
+    revisions: state.revisions
+      .filter((revision) => revision.status === "pending")
+      .map((revision) => ({ label: revisionLabel(revision), stage: revision.stage, dueDate: revision.dueDate })),
+    intervals: state.cycleSettings.intervals,
+    errors: state.errorNotebook
+      .filter((entry) => !entry.mastered && entry.dueDate)
+      .map((entry) => ({ text: cycleExcerpt(entry.statement, 70), stage: entry.stage, dueDate: entry.dueDate })),
+    errorIntervals: state.cycleSettings.errorIntervals,
+    lawRows,
+    flashDue: typeof getFlashDueCount === "function" ? getFlashDueCount() : 0,
+    today,
+    horizon,
+  }).map((group) => cycleCalendarEvent(group, state.cycleSettings.reminderTime));
 }
 
 function cycleExportCalendar() {
@@ -1979,7 +2044,7 @@ function cycleExportCalendar() {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(link.href), 4000);
-  showToast(`Agenda com ${cyclePlural(events.length, "dia", "dias")} exportada. Importe no seu calendário.`);
+  showToast(`Agenda com ${cyclePlural(events.length, "dia", "dias")} exportada, incluindo as etapas futuras previstas. Importe no seu calendário.`);
 }
 
 /* ---------- notificações, selo e instalação ---------- */
@@ -2227,6 +2292,7 @@ function renderReminderPanel() {
   status.textContent = text;
   if (toggle) toggle.textContent = store.enabled && cycleNotifySupported() && Notification.permission === "granted" ? "Desativar notificações" : "Ativar notificações neste dispositivo";
   $("#installAppBtn")?.classList.toggle("hidden", !cycleUI.installPrompt);
+  if (typeof renderPushPanel === "function") renderPushPanel();
 }
 
 /* ---------- trilha de fixação ---------- */
@@ -2291,6 +2357,9 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeStudyWeekdays,
     cycleRedistributeOverdue,
     cycleReminderMessage,
+    cycleProjectStages,
+    cycleCalendarGroups,
+    cycleCalendarEvent,
     cycleIcsEscape,
     cycleIcsFold,
     buildIcs,

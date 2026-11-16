@@ -1,0 +1,17 @@
+{
+  "name": "estudos-track",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Estudos Track: controle de estudos para concursos com revisão espaçada, caderno de erros e lei seca.",
+  "scripts": {
+    "test": "node tests/smoke-tests.js",
+    "test:e2e": "node tests/e2e/run-all.js",
+    "test:all": "npm test && npm run test:e2e"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

@@ -5,8 +5,8 @@
  * estado global (`state`) apenas em tempo de execução.
  */
 
-const CYCLE_DAY_STAGES = ["rev", "err", "law", "study"];
-const CYCLE_STAGE_LABELS = { rev: "revisões", err: "caderno de erros", law: "lei seca", study: "estudo do dia" };
+const CYCLE_DAY_STAGES = ["rev", "flash", "err", "law", "study"];
+const CYCLE_STAGE_LABELS = { rev: "revisões", flash: "flashcards", err: "caderno de erros", law: "lei seca", study: "estudo do dia" };
 const CYCLE_WEAK_WINDOW_DAYS = 45;
 const CYCLE_BACKUP_KEY_PREFIX = "ymEstudos.cycleBackup.";
 const CYCLE_REASON_TIPS = {
@@ -262,6 +262,19 @@ function backupIsDue() {
 /* Dados do dia                                                        */
 /* ------------------------------------------------------------------ */
 
+function getFlashDueList() {
+  if (typeof flashcardIsDue !== "function") return [];
+  return state.flashcards.filter((card) => flashcardIsDue(card));
+}
+
+function getFlashDueCount() {
+  try {
+    return getFlashDueList().length;
+  } catch {
+    return 0;
+  }
+}
+
 function effectiveWeights() {
   const explicit = state.cycleSettings.weights || {};
   const fromEdital = weightsFromEdital(state.edital?.items || [], state.subjects);
@@ -311,13 +324,17 @@ function getTodayData(summary = getCycleSummary()) {
   const studyItems = week.rows.filter((row) => row.todayTarget > 0);
   const studyDone = studyItems.filter((row) => row.todayPending === 0).length;
   const lawDone = lawItems.filter((item) => item.done).length;
+  const flashItems = getFlashDueList();
+  const today_ = today;
+  const flashDone = state.flashcards.filter((card) => card.lastReviewed === today_).length;
+  const flash = { done: flashDone, pending: flashItems.length, items: flashItems };
   const rev = { done: revDone, pending: dueRevisions.length, items: dueRevisions };
   const err = { done: errDone, pending: dueErrors.length, items: dueErrors };
   const law = { done: lawDone, pending: lawItems.length - lawDone, items: lawItems };
   const study = { done: studyDone, pending: studyItems.length - studyDone, items: studyItems };
-  const total = rev.done + rev.pending + err.done + err.pending + lawItems.length + studyItems.length;
-  const done = rev.done + err.done + lawDone + studyDone;
-  return { today, summary, week, rev, err, law, study, progress: cycleDayProgress(done, total), pending: rev.pending + err.pending + law.pending + study.pending };
+  const total = rev.done + rev.pending + flash.done + flash.pending + err.done + err.pending + lawItems.length + studyItems.length;
+  const done = rev.done + flash.done + err.done + lawDone + studyDone;
+  return { today, summary, week, rev, flash, err, law, study, progress: cycleDayProgress(done, total), pending: rev.pending + flash.pending + err.pending + law.pending + study.pending };
 }
 
 function getTodayInsights(data) {
@@ -418,7 +435,7 @@ function renderTodayModule(summary) {
 }
 
 function renderTodayNav(data) {
-  const counts = { hoje: data.pending, revisao: data.summary.revDue, erros: data.summary.errorsDue, leiseca: data.law.pending };
+  const counts = { hoje: data.pending, revisao: data.summary.revDue, erros: data.summary.errorsDue, leiseca: data.law.pending, flashcards: data.flash.pending };
   $$("[data-nav-count]").forEach((element) => {
     const count = counts[element.dataset.navCount] || 0;
     element.textContent = count > 99 ? "99+" : String(count);
@@ -429,11 +446,11 @@ function renderTodayNav(data) {
   $("#menuToggleBtn")?.classList.toggle("active", !primary.includes(state.ui.view) || $("#sidebarSheet")?.classList.contains("open"));
 }
 
-function todayCard({ title, done, total, body, actions = "", muted = false }) {
+function todayCard({ title, done, total, body, actions = "", muted = false, wide = false }) {
   const status = total ? `${done} de ${total}` : "";
   const finished = total > 0 && done >= total;
   return `
-    <article class="today-card ${muted ? "muted" : ""} ${finished ? "finished" : ""}">
+    <article class="today-card ${muted ? "muted" : ""} ${finished ? "finished" : ""} ${wide ? "wide" : ""}">
       <header>
         <h3>${escapeHTML(title)}</h3>
         ${status ? `<span class="tag ${finished ? "tone-good" : ""}">${finished ? "Feito" : escapeHTML(status)}</span>` : ""}
@@ -464,6 +481,7 @@ function renderToday(data) {
   start.disabled = !data.pending;
 
   renderTodayBackup();
+  renderQuickStudy(data);
 
   const cards = [];
 
@@ -484,6 +502,21 @@ function renderToday(data) {
             .join("")}${data.rev.items.length > 4 ? `<li class="more">+ ${data.rev.items.length - 4} outras</li>` : ""}</ul>`
         : `<p class="muted-note">${data.rev.done ? "Revisões de hoje concluídas." : "Nenhuma revisão para hoje. Estude um assunto por 10 minutos ou mais e a trilha começa sozinha."}</p>`,
       actions: data.rev.pending ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : `<button class="mini-button" data-view="revisao" type="button">Abrir Revisão</button>`,
+    })
+  );
+
+  // flashcards
+  const flashItems = data.flash.items.slice(0, 3);
+  cards.push(
+    todayCard({
+      title: "Flashcards",
+      done: data.flash.done,
+      total: data.flash.done + data.flash.pending,
+      muted: !data.flash.done && !data.flash.pending,
+      body: flashItems.length
+        ? `<ul class="today-list">${flashItems.map((card) => `<li>${escapeHTML(cycleExcerpt(richTextToPlain(card.front), 90))}</li>`).join("")}${data.flash.items.length > 3 ? `<li class="more">+ ${data.flash.items.length - 3} outros</li>` : ""}</ul>`
+        : `<p class="muted-note">${data.flash.done ? "Flashcards de hoje revisados." : state.flashcards.length ? "Nenhum flashcard para revisar agora." : "Crie flashcards (ou gere a partir dos seus erros) para revisar aqui."}</p>`,
+      actions: data.flash.pending ? `<button class="button primary" data-cycle-action="goFlashcards" type="button">Revisar flashcards</button>` : `<button class="mini-button" data-view="flashcards" type="button">Abrir flashcards</button>`,
     })
   );
 
@@ -528,6 +561,7 @@ function renderToday(data) {
   cards.push(
     todayCard({
       title: "Estudo do dia",
+      wide: true,
       done: data.study.done,
       total: studyItems.length,
       muted: !studyItems.length,
@@ -538,7 +572,7 @@ function renderToday(data) {
               return `<li class="study-row">
                 <span>${escapeHTML(row.name)}<br /><small>${formatMinutes(Math.min(row.todayDone, row.todayTarget))} de ${formatMinutes(row.todayTarget)}</small>
                 <span class="progress-track mini"><span class="progress-fill" style="--progress:${pct}%"></span></span></span>
-                ${row.todayPending ? `<button class="mini-button success" data-cycle-action="studySubject" data-id="${row.subjectId}" type="button">Estudar</button>` : ""}
+                ${row.todayPending ? `<span class="row-actions"><button class="mini-button success" data-cycle-action="studySubject" data-id="${row.subjectId}" type="button">Estudar</button><button class="mini-button" data-cycle-action="quickStudy" data-id="${row.subjectId}" data-min="${row.todayPending}" type="button">Registrar</button></span>` : ""}
               </li>`;
             })
             .join("")}</ul>`
@@ -659,6 +693,8 @@ function todayGoToStage(stage, data) {
     cycleUI.sessionId = "";
     setView("revisao", { scrollTop: true });
     cycleStartSession();
+  } else if (stage === "flash") {
+    todayOpenFlashcards();
   } else if (stage === "err") {
     cycleUI.errorFilters = { search: "", subject: "", reason: "", status: "due" };
     const first = data.err.items[0];
@@ -673,7 +709,36 @@ function todayGoToStage(stage, data) {
 }
 
 function todayPendingByStage(data) {
-  return { rev: data.rev.pending, err: data.err.pending, law: data.law.pending, study: data.study.pending };
+  return { rev: data.rev.pending, flash: data.flash.pending, err: data.err.pending, law: data.law.pending, study: data.study.pending };
+}
+
+function todayOpenFlashcards() {
+  state.ui.flashcardReviewQueue = "today";
+  state.ui.flashcardReviewScope = "all";
+  state.ui.activeFlashcardId = "";
+  state.ui.flashcardAnswerOpen = false;
+  setView("flashcards", { scrollTop: true });
+}
+
+/* ---------- registro rápido de estudo ---------- */
+
+function renderQuickStudy(data) {
+  const form = $("#quickStudyForm");
+  if (!form) return;
+  const open = Boolean(cycleUI.quickStudyOpen);
+  form.classList.toggle("hidden", !open);
+  if (!open) return;
+  const prefill = cycleUI.quickStudy || {};
+  const subjectSelect = $("#qsSubject");
+  const keepSubject = subjectSelect.value;
+  populateSubjectSelect(subjectSelect);
+  const firstPending = data.study.items.find((row) => row.todayPending > 0);
+  const wanted = prefill.subjectId || (state.subjects.some((subject) => subject.id === keepSubject) ? keepSubject : "") || (firstPending ? firstPending.subjectId : "");
+  if (wanted && state.subjects.some((subject) => subject.id === wanted)) subjectSelect.value = wanted;
+  populateTopicSelect($("#qsTopic"), { includeEmpty: true, subjectId: subjectSelect.value, emptyLabel: "Sem assunto específico" });
+  $("#qsTopic").disabled = !state.topics.some((topic) => topic.subjectId === subjectSelect.value);
+  if (prefill.minutes) $("#qsMinutes").value = Math.min(600, Math.max(1, Math.round(prefill.minutes)));
+  cycleUI.quickStudy = { ...prefill, subjectId: "", minutes: 0 };
 }
 
 /** Chamado depois de concluir uma tarefa; no "Começar o dia", leva à próxima etapa. */
@@ -716,6 +781,34 @@ function todayToggleMenu(force) {
 
 function handleTodayAction(type, button) {
   const id = button.dataset.id || "";
+  if (type === "goFlashcards") {
+    todayOpenFlashcards();
+    return true;
+  }
+  if (type === "quickStudy") {
+    if (!state.subjects.length) {
+      showToast("Cadastre uma matéria primeiro (aba Matérias).");
+      return true;
+    }
+    cycleUI.quickStudyOpen = true;
+    cycleUI.quickStudy = { subjectId: id, minutes: Number(button.dataset.min) || 0 };
+    if (state.ui.view !== "hoje") setView("hoje", { scrollTop: true });
+    else renderCycle();
+    window.setTimeout(() => {
+      $("#quickStudyForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      $("#qsMinutes")?.focus();
+    }, 60);
+    return true;
+  }
+  if (type === "quickStudyClose") {
+    cycleUI.quickStudyOpen = false;
+    renderCycle();
+    return true;
+  }
+  if (type === "qsMinutes") {
+    $("#qsMinutes").value = button.dataset.min;
+    return true;
+  }
   if (type === "toggleMenu") {
     todayToggleMenu();
     return true;
@@ -789,6 +882,51 @@ function bindTodayEvents() {
   });
   window.matchMedia("(min-width: 1121px)").addEventListener("change", (event) => {
     if (event.matches) todayToggleMenu(false);
+  });
+
+  $("#qsSubject").addEventListener("change", () => {
+    populateTopicSelect($("#qsTopic"), { includeEmpty: true, subjectId: $("#qsSubject").value, emptyLabel: "Sem assunto específico" });
+    $("#qsTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#qsSubject").value);
+  });
+
+  $("#quickStudyForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const subjectId = $("#qsSubject").value;
+    const minutes = Math.round(Number($("#qsMinutes").value));
+    if (!subjectId || !state.subjects.some((subject) => subject.id === subjectId)) {
+      showToast("Escolha a matéria estudada.");
+      return;
+    }
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 600) {
+      showToast("Informe de 1 a 600 minutos.");
+      return;
+    }
+    let topicId = $("#qsTopic").value;
+    const typedTopic = $("#qsNewTopic")?.value || "";
+    if (typedTopic.trim() && typeof sessionApplyTypedTopic === "function") {
+      const applied = sessionApplyTypedTopic(subjectId, typedTopic);
+      if (!applied.ok) {
+        showToast(applied.error);
+        return;
+      }
+      topicId = applied.topicId;
+      $("#qsNewTopic").value = "";
+    }
+    state.studyLogs.push({
+      id: uid(),
+      subjectId: getTopic(topicId)?.subjectId || subjectId,
+      topicId,
+      competitionId: "",
+      minutes,
+      date: cycleToday(),
+      source: "Manual",
+      note: "Registro rápido (Hoje)",
+      createdAt: new Date().toISOString(),
+    });
+    cycleUI.quickStudyOpen = false;
+    saveState();
+    render();
+    showToast(minutes >= CYCLE_MIN_AUTO_MINUTES ? `${minutes} min registrados. A trilha de revisão deste assunto começa sozinha.` : `${minutes} min registrados. Revisões automáticas começam a partir de ${CYCLE_MIN_AUTO_MINUTES} min por assunto no dia.`);
   });
 
   $("#weekTable").addEventListener("change", (event) => {

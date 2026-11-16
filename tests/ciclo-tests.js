@@ -22,6 +22,9 @@ const {
   cycleAddDays,
   cycleRedistributeOverdue,
   cycleReminderMessage,
+  cycleProjectStages,
+  cycleCalendarGroups,
+  cycleCalendarEvent,
   cycleIcsEscape,
   cycleIcsFold,
   buildIcs,
@@ -358,6 +361,69 @@ test(".ics: evento que cruza a meia-noite avança a data no DTEND", () => {
   const ics = buildIcs([{ uid: "x", date: "2026-12-31", time: "23:45", minutes: 30, summary: "s", description: "" }]);
   assert.ok(ics.includes("DTSTART:20261231T234500"));
   assert.ok(ics.includes("DTEND:20270101T001500"));
+});
+
+
+/* ---------- agenda com etapas futuras ---------- */
+
+test("etapas futuras: contam o intervalo entre uma revisão e a seguinte", () => {
+  const steps = cycleProjectStages(0, "2026-11-12", [1, 7, 30, 60]);
+  assert.strictEqual(JSON.stringify(steps), JSON.stringify([{ stage: 1, date: "2026-11-19" }, { stage: 2, date: "2026-12-19" }, { stage: 3, date: "2027-02-17" }]));
+  assert.strictEqual(JSON.stringify(cycleProjectStages(2, "2026-11-12", [1, 7, 30, 60])), JSON.stringify([{ stage: 3, date: "2027-01-11" }]));
+  assert.strictEqual(cycleProjectStages(3, "2026-11-12", [1, 7, 30, 60]).length, 0, "última etapa não projeta nada");
+  assert.strictEqual(cycleProjectStages(9, "2026-11-12", [1, 7]).length, 0);
+});
+
+test("agenda: agrupa por dia, leva atrasados para hoje e projeta as etapas seguintes", () => {
+  const groups = cycleCalendarGroups({
+    revisions: [
+      { label: "Penal", stage: 0, dueDate: "2026-11-10" }, // atrasada: será feita hoje
+      { label: "Civil", stage: 1, dueDate: "2026-11-15" },
+    ],
+    intervals: [1, 7, 30, 60],
+    errors: [{ text: "Habeas data", stage: 0, dueDate: "2026-11-13" }],
+    errorIntervals: [1, 3, 7, 15, 30],
+    lawRows: [{ date: "2026-11-12", text: "CF: artigos 1–10" }, { date: "2026-11-12", text: "CP: artigos 1–5" }, { date: "2027-06-01", text: "fora do horizonte" }],
+    flashDue: 2,
+    today: "2026-11-12",
+    horizon: "2027-02-10",
+  });
+  const byDate = Object.fromEntries(groups.map((g) => [g.date, g]));
+  assert.strictEqual(JSON.stringify(groups.map((g) => g.date)), JSON.stringify([...groups.map((g) => g.date)].sort()), "ordenado por data");
+  assert.strictEqual(JSON.stringify(byDate["2026-11-12"].rev), JSON.stringify(["Penal (R1/4)"]));
+  assert.strictEqual(byDate["2026-11-12"].fc, 2, "flashcards só aparecem hoje");
+  assert.strictEqual(byDate["2026-11-12"].law.length, 2);
+  assert.strictEqual(JSON.stringify(byDate["2026-11-15"].rev), JSON.stringify(["Civil (R2/4)"]));
+  // a atrasada é projetada a partir de hoje (e não de 10/11): R2 em 19/11 e R3 em 19/12; R4 passa do horizonte
+  assert.strictEqual(JSON.stringify(byDate["2026-11-19"].revNext), JSON.stringify(["Penal (R2/4)"]));
+  assert.strictEqual(JSON.stringify(byDate["2026-12-19"].revNext), JSON.stringify(["Penal (R3/4)"]));
+  assert.ok(!groups.some((g) => g.revNext.some((x) => x.includes("R4/4") && x.startsWith("Penal"))), "R4 está fora do horizonte");
+  // Civil estava em R2 para 15/11: R3 em 15/12 e R4 em 13/02/2027 (fora)
+  assert.strictEqual(JSON.stringify(byDate["2026-12-15"].revNext), JSON.stringify(["Civil (R3/4)"]));
+  // erros: 13/11 (refazer), depois 16/11, 23/11, 08/12 e 07/01
+  assert.strictEqual(byDate["2026-11-13"].err.length, 1);
+  assert.deepStrictEqual([...["2026-11-16", "2026-11-23", "2026-12-08", "2027-01-07"].map((d) => byDate[d].errNext.length)], [1, 1, 1, 1]);
+  assert.ok(!byDate["2027-06-01"], "lei seca fora do horizonte não entra");
+});
+
+test("agenda: evento com resumo e descrição por seção", () => {
+  const event = cycleCalendarEvent({ date: "2026-11-12", rev: ["A (R1/4)"], revNext: ["B (R2/4)"], err: ["E1"], errNext: ["E2"], law: ["CF: artigos 1–10"], fc: 2 }, "08:00");
+  assert.strictEqual(event.summary, "Estudos Track: 1 revisão, 1 revisão prevista, 1 erro, 1 refação prevista, 2 flashcards, lei seca");
+  assert.strictEqual(event.uid, "2026-11-12-ciclo@estudostrack");
+  assert.strictEqual(event.time, "08:00");
+  assert.ok(event.description.includes("Revisões previstas (se você acertar as anteriores):\n- B (R2/4)"));
+  assert.ok(event.description.includes("Flashcards para revisar: 2"));
+  const onlyNext = cycleCalendarEvent({ date: "2026-12-01", rev: [], revNext: ["X (R2/4)"], err: [], errNext: [], law: [], fc: 0 }, "07:30");
+  assert.strictEqual(onlyNext.summary, "Estudos Track: 1 revisão prevista");
+  const many = cycleCalendarEvent({ date: "2026-12-01", rev: Array.from({ length: 20 }, (_, i) => `R${i}`), revNext: [], err: [], errNext: [], law: [], fc: 0 }, "08:00");
+  assert.ok(many.description.includes("+ 5 outros"), "listas longas são resumidas");
+});
+
+test("lembrete: flashcards entram na mensagem entre revisões e erros", () => {
+  const message = cycleReminderMessage({ revDue: 2, flashDue: 3, errorsDue: 1 });
+  assert.strictEqual(message.body, "2 revisões · 3 flashcards · 1 erro para refazer");
+  assert.strictEqual(cycleReminderMessage({ flashDue: 1 }).body, "1 flashcard");
+  assert.strictEqual(cycleReminderMessage({ flashDue: 1 }).title, "Hora de revisar");
 });
 
 console.log(`ciclo-tests: ${passed} testes passaram.`);

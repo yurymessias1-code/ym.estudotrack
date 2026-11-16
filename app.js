@@ -5001,6 +5001,8 @@ function reviewFlashcard(cardId, isCorrect) {
   state.ui.activeFlashcardId = getFlashcardReviewQueue(getDueFlashcards(), card.id)[0]?.id || "";
   saveState();
   renderFlashcards();
+  if (typeof renderCycle === "function") renderCycle();
+  if (typeof todayAfterAction === "function") todayAfterAction("flash");
 }
 
 function resetAllStats() {
@@ -7550,8 +7552,7 @@ function startTimer() {
   const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
   const competitionId = $("#timerCompetition")?.value || "";
   if (!subjectId) {
-    showToast("Cadastre e selecione uma matéria para usar o Pomodoro.");
-    return;
+    showToast("Sem matéria escolhida: ao terminar o foco você diz o que estudou.");
   }
   unlockPomodoroAlarm();
   if (!timer.subjectId) timer.subjectId = subjectId;
@@ -7635,10 +7636,6 @@ function skipTimerStep() {
   syncTimerWithClock({ renderUpdates: false, writeCheckpoint: false });
   if (!timer.subjectId && timer.mode === "focus") {
     const { subjectId, topicId } = resolveSubjectTopic("#timerSubject", "#timerTopic");
-    if (!subjectId) {
-      showToast("Selecione uma matéria antes de pular a etapa.");
-      return;
-    }
     timer.subjectId = subjectId;
     timer.topicId = topicId;
     timer.competitionId = $("#timerCompetition")?.value || "";
@@ -7656,8 +7653,8 @@ function logPomodoroFocus() {
   const topicId = timer.topicId || selected.topicId;
   const competitionId = timer.competitionId || $("#timerCompetition")?.value || "";
   const minutes = Math.max(1, Math.round(timer.elapsedFocusSeconds / 60));
-  if (!subjectId || !minutes) return;
-  state.studyLogs.push({
+  if (!minutes) return;
+  const entry = {
     id: uid(),
     subjectId,
     topicId,
@@ -7666,8 +7663,18 @@ function logPomodoroFocus() {
     date: todayISO(),
     source: "Pomodoro",
     note: `Ciclo ${timer.cycle}`,
+    cycle: timer.cycle,
     createdAt: new Date().toISOString(),
-  });
+  };
+  // Pergunta o que foi estudado (e permite criar matéria/assunto na hora) antes de gravar o tempo.
+  if (typeof sessionAskBeforeSave === "function" && sessionAskBeforeSave(entry)) {
+    timer.elapsedFocusSeconds = 0;
+    writePomodoroCheckpoint();
+    return;
+  }
+  if (!subjectId) return;
+  delete entry.cycle;
+  state.studyLogs.push(entry);
   timer.elapsedFocusSeconds = 0;
   saveState();
   writePomodoroCheckpoint();
@@ -7682,7 +7689,7 @@ function finishTimerManually() {
   logPomodoroFocus();
   resetTimer();
   render();
-  showToast("Sessão registrada.");
+  showToast(typeof sessionPendingRead === "function" && sessionPendingRead().length ? "Diga o que você estudou para salvar a sessão." : "Sessão registrada.");
 }
 
 function attachEvents() {
@@ -8362,11 +8369,22 @@ function attachEvents() {
 
   $("#studyLogForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const { subjectId, topicId } = resolveSubjectTopic("#studySubject", "#studyTopic");
+    let { subjectId, topicId } = resolveSubjectTopic("#studySubject", "#studyTopic");
     const minutes = Number($("#studyMinutes").value);
     if (!subjectId) {
       showToast("Cadastre e selecione uma matéria para registrar tempo.");
       return;
+    }
+    const typedTopic = $("#studyNewTopic")?.value || "";
+    if (typedTopic.trim() && typeof sessionApplyTypedTopic === "function") {
+      const applied = sessionApplyTypedTopic(subjectId, typedTopic);
+      if (!applied.ok) {
+        showToast(applied.error);
+        return;
+      }
+      subjectId = applied.subjectId;
+      topicId = applied.topicId;
+      $("#studyNewTopic").value = "";
     }
     if (!Number.isFinite(minutes) || minutes <= 0) {
       showToast("Informe uma quantidade de minutos maior que zero.");

@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20261113-hoje"), "Cache do HTML nao foi atualizado para o ciclo de revisao.");
-assert(html.includes("supabase-config.js?v=20261113-hoje"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20261116-sessao"), "Cache do HTML nao foi atualizado para o ciclo de revisao.");
+assert(html.includes("supabase-config.js?v=20261116-sessao"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -222,5 +222,48 @@ assert((app.match(/cycleMarkBackup/g) || []).length >= 2, "Backup e exportacao d
 assert(ciclo.includes("handleTodayAction") && ciclo.includes("todayAfterAction") && ciclo.includes("syncWeakRevisions"), "Ganchos do hoje.js ausentes no ciclo.js.");
 assert(css.includes(".bottom-nav") && css.includes(".today-card") && css.includes(".week-table") && css.includes("body.profile-locked .bottom-nav"), "Estilos do menu movel/Hoje ausentes.");
 assert(!hoje.split("\n").some((line) => /^\s*(const|let)\s+state\b/.test(line)), "hoje.js nao deve redeclarar state.");
+
+// Push real, registro rapido, flashcards no Hoje, agenda com etapas futuras e CI
+const pushJs = fs.readFileSync(path.join(root, "push.js"), "utf8");
+execFileSync(process.execPath, ["--check", path.join(root, "push.js")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(__dirname, "push-tests.js")], { stdio: "inherit" });
+assert(html.indexOf('src="hoje.js') < html.indexOf('src="push.js') && html.indexOf('src="push.js') < html.indexOf('src="app.js'), "Ordem de carga deve ser ciclo.js, hoje.js, push.js, app.js.");
+["pushStatus", "pushToggleBtn", "pushTestBtn", "quickStudyForm", "quickStudyBtn", "qsSubject", "qsMinutes"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
+assert(html.includes('data-nav-count="flashcards"'), "Contador de flashcards ausente no menu.");
+assert(fs.readFileSync(path.join(root, "sw.js"), "utf8").includes('addEventListener("push"'), "sw.js sem tratamento do evento push.");
+assert(/vapidPublicKey\s*:/.test(fs.readFileSync(path.join(root, "supabase-config.js"), "utf8")), "supabase-config.js sem o campo vapidPublicKey.");
+const pushSql = fs.readFileSync(path.join(root, "supabase-push.sql"), "utf8");
+["push_subscriptions", "reminder_digests"].forEach((table) => {
+  assert(new RegExp(`alter table public\\.${table} enable row level security`, "i").test(pushSql), `RLS nao habilitado em ${table}.`);
+  assert(pushSql.includes(`${table}_select_own`) && pushSql.includes(`${table}_delete_own`), `Politicas por usuario ausentes em ${table}.`);
+});
+assert(pushSql.includes("unique (user_id, endpoint)"), "Inscricao deve ser unica por usuario e endpoint.");
+const fnSource = fs.readFileSync(path.join(root, "supabase", "functions", "send-reminders", "index.ts"), "utf8");
+assert(fnSource.includes("x-cron-secret") && fnSource.includes("auth.getUser"), "Funcao deve validar o segredo do agendador ou o token do usuario.");
+assert(!/service[_-]?role[^\n]*["'][A-Za-z0-9_-]{30,}["']/i.test(fnSource) && !/SERVICE_ROLE/.test(css + html + app + ciclo + hoje + pushJs), "A chave de servico nunca pode aparecer no navegador.");
+assert(!/VAPID_PRIVATE|BEGIN PRIVATE KEY/.test(css + html + app + ciclo + hoje + pushJs + fs.readFileSync(path.join(root, "supabase-config.js"), "utf8")), "Chave privada VAPID no codigo do navegador.");
+assert(ciclo.includes("cycleProjectStages") && ciclo.includes("cycleCalendarGroups"), "Agenda com etapas futuras ausente.");
+assert(hoje.includes("quickStudyForm") && hoje.includes("getFlashDueCount") && hoje.includes('"flash"'), "Registro rapido ou flashcards no Hoje ausentes.");
+assert(app.includes('todayAfterAction("flash")'), "Fluxo guiado nao e acionado pelos flashcards.");
+assert(fs.existsSync(path.join(root, "PUSH-SETUP.md")), "PUSH-SETUP.md ausente.");
+const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+assert(pkg.scripts.test && pkg.scripts["test:e2e"], "Scripts de teste ausentes no package.json.");
+const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "tests.yml"), "utf8");
+assert(workflow.includes("npm test") && workflow.includes("npm run test:e2e") && workflow.includes("playwright install"), "Workflow de testes incompleto.");
+["server.js", "helpers.js", "run-all.js", "ciclo.e2e.js", "lembretes.e2e.js", "hoje.e2e.js"].forEach((file) => assert(fs.existsSync(path.join(__dirname, "e2e", file)), `tests/e2e/${file} ausente.`));
+
+// Salvar o que foi estudado ao terminar o foco (matéria e assunto criados na hora)
+const sessao = fs.readFileSync(path.join(root, "sessao.js"), "utf8");
+execFileSync(process.execPath, ["--check", path.join(root, "sessao.js")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(__dirname, "sessao-tests.js")], { stdio: "inherit" });
+assert(html.indexOf('src="push.js') < html.indexOf('src="sessao.js') && html.indexOf('src="sessao.js') < html.indexOf('src="app.js'), "Ordem de carga deve terminar em push.js, sessao.js, app.js.");
+["sessionModal", "sessionForm", "ssSubject", "ssTopic", "ssNewSubject", "ssNewTopic", "ssMinutes", "sessionBar", "askAtSave", "studyNewTopic", "qsNewTopic"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
+assert(app.includes("sessionAskBeforeSave") && app.includes("sessionApplyTypedTopic"), "app.js nao pergunta o que foi estudado ao terminar o foco.");
+assert(!app.includes("Cadastre e selecione uma matéria para usar o Pomodoro."), "O Pomodoro nao pode mais exigir a materia antes de iniciar.");
+assert(ciclo.includes("handleSessionAction") && ciclo.includes("bindSessionEvents") && ciclo.includes("renderSessionUI"), "Ganchos do sessao.js ausentes no ciclo.js.");
+assert(css.includes(".modal-backdrop") && css.includes("body.modal-open"), "Estilos da janela de sessao ausentes.");
+assert(/\.toast\s*\{\s*z-index:\s*100/.test(css), "O aviso (toast) precisa ficar acima da janela.");
+assert(fs.existsSync(path.join(__dirname, "e2e", "sessao.e2e.js")), "tests/e2e/sessao.e2e.js ausente.");
+assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("sessao.e2e.js"), "run-all.js nao inclui o roteiro da sessao.");
 
 console.log("Smoke tests OK: estrutura principal validada.");

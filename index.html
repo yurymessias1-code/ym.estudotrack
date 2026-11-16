@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261113-hoje" />
+    <link rel="stylesheet" href="styles.css?v=20261116-sessao" />
   </head>
   <body>
     <div class="app-shell">
@@ -32,7 +32,7 @@
           <p class="nav-group-title">Fixar</p>
           <button class="nav-button" data-view="revisao"><span>Revisão</span><b class="nav-count hidden" data-nav-count="revisao"></b></button>
           <button class="nav-button" data-view="erros"><span>Caderno de erros</span><b class="nav-count hidden" data-nav-count="erros"></b></button>
-          <button class="nav-button" data-view="flashcards"><span>Flashcards</span></button>
+          <button class="nav-button" data-view="flashcards"><span>Flashcards</span><b class="nav-count hidden" data-nav-count="flashcards"></b></button>
           <p class="nav-group-title">Registrar</p>
           <button class="nav-button" data-view="anotacoes"><span>Anotações</span></button>
           <button class="nav-button" data-view="jurisprudencias"><span>Jurisprudências</span></button>
@@ -103,6 +103,7 @@
         </header>
 
         <div class="review-banner hidden" id="reviewBanner" role="status" aria-live="polite"></div>
+        <div class="review-banner hidden" id="sessionBar" role="status" aria-live="polite"></div>
 
         <section class="view" id="dashboard" aria-labelledby="dashboardTitle">
           <div class="dashboard-visual">
@@ -514,8 +515,50 @@
               <small id="todayCount"></small>
               <div class="progress-track"><div class="progress-fill" id="todayBar" style="--progress: 0%"></div></div>
             </div>
-            <button class="button primary" id="startDayBtn" data-cycle-action="startDay" type="button">Começar o dia</button>
+            <div class="today-hero-actions">
+              <button class="button primary" id="startDayBtn" data-cycle-action="startDay" type="button">Começar o dia</button>
+              <button class="button secondary" id="quickStudyBtn" data-cycle-action="quickStudy" type="button">Registrar estudo</button>
+            </div>
           </div>
+
+          <form class="panel form-panel hidden" id="quickStudyForm">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Registro rápido</p>
+                <h3>O que você estudou?</h3>
+              </div>
+            </div>
+            <div class="split-inputs">
+              <label>
+                Matéria
+                <select id="qsSubject" required></select>
+              </label>
+              <label>
+                Assunto (opcional)
+                <select id="qsTopic"></select>
+              </label>
+            </div>
+            <label>
+              Ou escreva um assunto novo (vale no lugar da seleção acima)
+              <input id="qsNewTopic" type="text" maxlength="120" placeholder="Ex.: Habeas corpus" />
+            </label>
+            <label>
+              Minutos
+              <input id="qsMinutes" type="number" min="1" max="600" value="25" required />
+            </label>
+            <div class="chip-row">
+              <button class="mini-button" data-cycle-action="qsMinutes" data-min="15" type="button">15</button>
+              <button class="mini-button" data-cycle-action="qsMinutes" data-min="25" type="button">25</button>
+              <button class="mini-button" data-cycle-action="qsMinutes" data-min="45" type="button">45</button>
+              <button class="mini-button" data-cycle-action="qsMinutes" data-min="60" type="button">60</button>
+              <button class="mini-button" data-cycle-action="qsMinutes" data-min="90" type="button">90</button>
+            </div>
+            <p class="muted-note">Estudar 10 minutos ou mais num assunto inicia a trilha de revisões dele automaticamente.</p>
+            <div class="inline-actions">
+              <button class="button primary" type="submit">Registrar estudo</button>
+              <button class="button ghost" data-cycle-action="quickStudyClose" type="button">Cancelar</button>
+            </div>
+          </form>
 
           <div class="review-banner hidden" id="todayBackup"></div>
 
@@ -825,9 +868,17 @@
               <button class="button secondary" data-cycle-action="exportIcs" type="button">Exportar agenda (.ics)</button>
               <button class="button ghost hidden" id="installAppBtn" data-cycle-action="installApp" type="button">Instalar como app</button>
             </div>
+            <div class="push-box">
+              <span class="field-title">Push com o site fechado</span>
+              <p class="reminder-status" id="pushStatus">Verificando...</p>
+              <div class="inline-actions">
+                <button class="button secondary" id="pushToggleBtn" data-cycle-action="pushToggle" type="button">Ativar push neste aparelho</button>
+                <button class="button ghost" id="pushTestBtn" data-cycle-action="pushTest" type="button">Testar push</button>
+              </div>
+            </div>
             <p class="muted-note">
-              O site é estático, então ele avisa quando está aberto (aba ou app instalado): notificação no horário, número de pendências no título da aba e banner no topo.
-              Para ser avisado com o navegador fechado, exporte a agenda (.ics) e importe no Google Agenda ou no calendário do celular; exporte de novo de tempos em tempos para incluir as revisões novas.
+              Sem o push, o site avisa quando está aberto (aba ou app instalado): notificação no horário, número de pendências no título da aba e banner no topo.
+              Com o push configurado (PUSH-SETUP.md), o aviso chega mesmo com tudo fechado. Alternativa que não depende de servidor: exporte a agenda (.ics), que já traz as etapas futuras previstas, e importe no Google Agenda ou no calendário do celular.
               No iPhone, instale o site na Tela de Início para receber notificações.
             </p>
           </form>
@@ -1253,6 +1304,11 @@
                   <select id="timerTopic"></select>
                 </label>
               </div>
+              <p class="muted-note">Não precisa escolher agora: ao terminar o foco você diz o que estudou e pode criar a matéria e o assunto na hora.</p>
+              <label class="checkbox-line">
+                <input id="askAtSave" type="checkbox" checked />
+                Perguntar o que estudei ao terminar cada foco
+              </label>
               <label>
                 Concurso
                 <select id="timerCompetition"></select>
@@ -1301,6 +1357,10 @@
                   <select id="studyTopic"></select>
                 </label>
               </div>
+              <label>
+                Ou escreva um assunto novo (vale no lugar da seleção acima)
+                <input id="studyNewTopic" type="text" maxlength="120" placeholder="Ex.: Habeas corpus" />
+              </label>
               <label>
                 Concurso
                 <select id="studyCompetition"></select>
@@ -2084,7 +2144,50 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-        <nav class="bottom-nav" aria-label="Atalhos">
+            <div class="modal-backdrop hidden" id="sessionModal" role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle">
+      <form class="modal-card" id="sessionForm">
+        <div>
+          <p class="eyebrow" id="sessionModalEyebrow">Foco concluído</p>
+          <h3 id="sessionModalTitle">O que você estudou?</h3>
+          <p class="muted-note" id="sessionSummary"></p>
+        </div>
+        <div class="split-inputs">
+          <label>
+            Matéria
+            <select id="ssSubject"></select>
+          </label>
+          <label>
+            Assunto
+            <select id="ssTopic"></select>
+          </label>
+        </div>
+        <label class="hidden" id="ssNewSubjectLabel">
+          Nome da nova matéria
+          <input id="ssNewSubject" type="text" maxlength="120" placeholder="Ex.: Direito Penal" autocomplete="off" />
+        </label>
+        <label class="hidden" id="ssNewTopicLabel">
+          Nome do novo assunto
+          <input id="ssNewTopic" type="text" maxlength="120" placeholder="Ex.: Habeas corpus" autocomplete="off" />
+        </label>
+        <div class="split-inputs">
+          <label>
+            Minutos
+            <input id="ssMinutes" type="number" min="1" max="600" required />
+          </label>
+          <label>
+            Observação (opcional)
+            <input id="ssNote" type="text" maxlength="200" />
+          </label>
+        </div>
+        <div class="inline-actions">
+          <button class="button primary" type="submit">Salvar estudo</button>
+          <button class="button ghost" data-cycle-action="sessionLater" type="button">Decidir depois</button>
+          <button class="mini-button bad" data-cycle-action="sessionDiscard" type="button">Descartar</button>
+        </div>
+      </form>
+    </div>
+
+    <nav class="bottom-nav" aria-label="Atalhos">
       <button class="bottom-nav-item active" data-view="hoje" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h14V10" /></svg>
         <span>Hoje</span><b class="nav-count hidden" data-nav-count="hoje"></b>
@@ -2107,9 +2210,11 @@
       </button>
     </nav>
 
-    <script src="supabase-config.js?v=20261113-hoje"></script>
-    <script src="ciclo.js?v=20261113-hoje"></script>
-    <script src="hoje.js?v=20261113-hoje"></script>
-    <script src="app.js?v=20261113-hoje"></script>
+    <script src="supabase-config.js?v=20261116-sessao"></script>
+    <script src="ciclo.js?v=20261116-sessao"></script>
+    <script src="hoje.js?v=20261116-sessao"></script>
+    <script src="push.js?v=20261116-sessao"></script>
+    <script src="sessao.js?v=20261116-sessao"></script>
+    <script src="app.js?v=20261116-sessao"></script>
   </body>
 </html>

@@ -4,7 +4,7 @@
  * - Exibe notificações e foca o app quando o usuário clica nelas.
  * Não faz cache de outros domínios (ex.: Supabase), então login e sincronização não são afetados.
  */
-const CACHE_NAME = "estudos-track-v1";
+const CACHE_NAME = "estudos-track-v2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -32,6 +32,25 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(() => caches.match(request).then((cached) => cached || caches.match("./")))
+  );
+});
+
+// Push enviado pelo servidor (função send-reminders), com o site fechado.
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title || "Estudos Track", {
+      body: payload.body || "",
+      icon: "assets/favicon-estudos-track.png",
+      badge: "assets/favicon-estudos-track.png",
+      tag: payload.tag || "estudos-track-revisao",
+      data: { view: payload.view || "revisao" },
+    })
   );
 });
 

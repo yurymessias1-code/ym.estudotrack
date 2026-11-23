@@ -21,8 +21,8 @@ execFileSync(process.execPath, ["--check", appPath], { stdio: "inherit" });
 assert(html.includes("dailyReviewList"), "Painel diario nao encontrado no HTML.");
 assert(html.includes("editalManualForm"), "Formulario manual do edital nao encontrado.");
 assert(html.includes("accountStatusList"), "Status da conta nao encontrado.");
-assert(html.includes("20261116-sessao"), "Cache do HTML nao foi atualizado para o ciclo de revisao.");
-assert(html.includes("supabase-config.js?v=20261116-sessao"), "Cache-buster do supabase-config.js ausente.");
+assert(html.includes("20261117-sync"), "Cache do HTML nao foi atualizado para o ciclo de revisao.");
+assert(html.includes("supabase-config.js?v=20261117-sync"), "Cache-buster do supabase-config.js ausente.");
 assert(html.includes('id="studyCanvas" width="620" height="330"'), "Canvas do painel deve ter altura suficiente para nao cortar o resumo visual.");
 assert(html.includes('id="questionCancelEditBtn"'), "Cancelamento de edicao de questoes ausente.");
 assert(html.includes('id="questionSubject"'), "Seletor de materia em questoes ausente.");
@@ -265,5 +265,30 @@ assert(css.includes(".modal-backdrop") && css.includes("body.modal-open"), "Esti
 assert(/\.toast\s*\{\s*z-index:\s*100/.test(css), "O aviso (toast) precisa ficar acima da janela.");
 assert(fs.existsSync(path.join(__dirname, "e2e", "sessao.e2e.js")), "tests/e2e/sessao.e2e.js ausente.");
 assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("sessao.e2e.js"), "run-all.js nao inclui o roteiro da sessao.");
+
+// Sincronizacao segura entre aparelhos, mesclagem, relatorios e janela acessivel
+["merge-tests.js", "mesclar-tests.js", "retencao-tests.js"].forEach((file) => execFileSync(process.execPath, [path.join(__dirname, file)], { stdio: "inherit" }));
+["modal.js", "merge.js", "mesclar.js", "retencao.js"].forEach((file) => execFileSync(process.execPath, ["--check", path.join(root, file)], { stdio: "inherit" }));
+const order = ["modal.js", "merge.js", "ciclo.js", "hoje.js", "push.js", "sessao.js", "mesclar.js", "retencao.js", "app.js"].map((file) => html.indexOf(`src="${file}`));
+assert(order.every((position, index) => position > 0 && (index === 0 || position > order[index - 1])), "Ordem de carga dos scripts incorreta: " + order.join(","));
+const modalJs = fs.readFileSync(path.join(root, "modal.js"), "utf8");
+assert(modalJs.includes('"inert"') && modalJs.includes("focusin") && modalJs.includes('"Tab"'), "modal.js deve prender o foco e tornar o fundo inerte.");
+assert(sessao.includes("modalOpen(") && sessao.includes("modalClose("), "A janela de sessao deve usar modal.js.");
+assert(fs.readFileSync(path.join(root, "mesclar.js"), "utf8").includes("modalOpen("), "A janela de mesclagem deve usar modal.js.");
+["mergeModal", "mergeForm", "mergeTarget", "mergePreview", "mergeConfirmBtn", "mergeUndoBar", "reportCycle"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
+assert(html.includes('aria-describedby="sessionSummary"') && html.includes('aria-describedby="mergeSummary"'), "Janelas sem aria-describedby.");
+assert(app.includes('data-cycle-action="mergeSubject"') && app.includes('data-cycle-action="mergeTopic"'), "Botoes Mesclar ausentes nas listas de materias e assuntos.");
+// sincronizacao: gravacao condicional, juncao em conflito, atualizacao ao voltar e rastreio de exclusoes
+assert(app.includes('.eq("updated_at", remoteStore.baseUpdatedAt)') && app.includes("reconcileWithRemote") && app.includes("refreshFromRemote"), "Sincronizacao segura ausente no app.js.");
+assert(app.includes("mergeStatesDetailed(") && app.includes("trackStateDeletions") && (app.match(/mergeAttachIds\(normalized\)/g) || []).length === 2, "Lapides de exclusao ausentes no estado.");
+assert(app.includes("tombstones: normalizeTombstones") && app.includes("revivals: normalizeTombstones"), "meta do estado nao preserva as lapides.");
+assert(app.includes("async runUpdate()") && app.includes('method: "PATCH"'), "Cliente REST alternativo sem update condicional.");
+assert((app.match(/remoteStore\.saveTimer = null;/g) || []).length >= 5, "saveTimer precisa ser zerado ao limpar/disparar (a atualizacao depende disso).");
+assert(app.includes("refreshFromRemote();") && app.includes('addEventListener("online"'), "Atualizacao ao voltar para a aba/ficar online ausente.");
+assert(!/state\.__ids\s*=\s*mergeRecordDeletions/.test(app) || app.includes("trackStateDeletions"), "Rastreio de exclusoes deve passar por trackStateDeletions.");
+assert(css.includes(".heatmap") && css.includes(".load-chart") && css.includes(".merge-preview"), "Estilos dos relatorios/mesclagem ausentes.");
+["sync.e2e.js", "mesclar.e2e.js", "relatorios.e2e.js", "fake-supabase.js"].forEach((file) => assert(fs.existsSync(path.join(__dirname, "e2e", file)), `tests/e2e/${file} ausente.`));
+const runAll = fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8");
+["sync.e2e.js", "mesclar.e2e.js", "relatorios.e2e.js"].forEach((file) => assert(runAll.includes(file), `run-all.js nao inclui ${file}.`));
 
 console.log("Smoke tests OK: estrutura principal validada.");

@@ -90,6 +90,9 @@ let remoteStore = {
   retryCount: 0,
   syncing: false,
   pendingSave: false,
+  baseUpdatedAt: "",
+  lastRefreshAt: 0,
+  refreshing: false,
   recoveryMode: false,
   syncStatus: "local",
   lastSyncAt: "",
@@ -247,6 +250,7 @@ async function supabaseFallbackFetch(path, options = {}) {
 function createSupabaseFallbackQuery(table) {
   let selectedColumns = "*";
   const filters = [];
+  let updatePayload = null;
   const sessionToken = () => getStoredSupabaseFallbackSession()?.access_token || "";
   const filterQuery = () => {
     const query = new URLSearchParams();
@@ -257,7 +261,24 @@ function createSupabaseFallbackQuery(table) {
   return {
     select(columns = "*") {
       selectedColumns = columns;
+      if (updatePayload) return this.runUpdate();
       return this;
+    },
+    update(payload) {
+      updatePayload = payload;
+      return this;
+    },
+    async runUpdate() {
+      const query = filterQuery();
+      query.set("select", selectedColumns);
+      const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}?${query}`, {
+        method: "PATCH",
+        token: sessionToken(),
+        headers: { Prefer: "return=representation" },
+        body: updatePayload,
+      });
+      if (error) return { data: null, error };
+      return { data: Array.isArray(data) ? data : data ? [data] : [], error: null };
     },
     eq(column, value) {
       filters.push([column, value]);
@@ -562,6 +583,7 @@ async function forceSaveCurrentProfile() {
   }
   if (isRemoteSessionActive()) {
     clearTimeout(remoteStore.saveTimer);
+    remoteStore.saveTimer = null;
     if (remoteStore.syncing) {
       remoteStore.pendingSave = true;
       setSyncStatus("saving");
@@ -591,11 +613,13 @@ async function deleteCurrentProfileData() {
     const user = remoteStore.user;
     try {
       clearTimeout(remoteStore.saveTimer);
+      remoteStore.saveTimer = null;
       const { error } = await client.from(settings.table).delete().eq("user_id", user.id);
       if (error) throw error;
       await client.auth.signOut();
       localStorage.removeItem(profileStorageKey(remoteProfileId(user.id)));
       remoteStore.user = null;
+    remoteStore.baseUpdatedAt = "";
       remoteStore.pendingSave = false;
       setSyncStatus("offline");
     } catch (error) {
@@ -634,7 +658,9 @@ function queueRemoteSave() {
   clearTimeout(remoteStore.retryTimer);
   remoteStore.retryTimer = null;
   clearTimeout(remoteStore.saveTimer);
+  remoteStore.saveTimer = null;
   remoteStore.saveTimer = setTimeout(() => {
+    remoteStore.saveTimer = null;
     saveRemoteStateNow();
   }, REMOTE_SAVE_DEBOUNCE_MS);
 }
@@ -670,17 +696,45 @@ async function saveRemoteStateNow(options = {}) {
       return false;
     }
     const displayName = state.profile?.name || state.account?.name || getRemoteDisplayName(user);
-    const { error } = await client.from(settings.table).upsert(
-      {
-        user_id: user.id,
-        email: user.email || "",
-        display_name: displayName,
-        state: payload,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
-    if (error) throw error;
+    // Só grava por cima se a conta continua como este aparelho a viu; se outro aparelho salvou
+    // antes, junta os dois (registros novos de cada lado) e tenta de novo.
+    let saved = false;
+    let combined = null;
+    for (let attempt = 0; attempt < 4 && !saved; attempt += 1) {
+      if (!remoteStore.baseUpdatedAt) {
+        const found = await reconcileWithRemote();
+        if (found.missing) {
+          const { error: insertError } = await client.from(settings.table).upsert(
+            { user_id: user.id, email: user.email || "", display_name: displayName, state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() },
+            { onConflict: "user_id" }
+          );
+          if (insertError) throw insertError;
+          remoteStore.baseUpdatedAt = await fetchRemoteUpdatedAt(client, settings, user);
+          saved = true;
+          continue;
+        }
+        combined = found.stats;
+      }
+      const row = { email: user.email || "", display_name: displayName, state: JSON.parse(JSON.stringify(state)), updated_at: new Date().toISOString() };
+      const { data: written, error: updateError } = await client
+        .from(settings.table)
+        .update(row)
+        .eq("user_id", user.id)
+        .eq("updated_at", remoteStore.baseUpdatedAt)
+        .select("updated_at");
+      if (updateError) throw updateError;
+      if (Array.isArray(written) && written.length) {
+        remoteStore.baseUpdatedAt = written[0].updated_at || row.updated_at;
+        saved = true;
+      } else {
+        const found = await reconcileWithRemote();
+        if (found.stats) combined = found.stats;
+      }
+    }
+    if (!saved) throw new Error("Não foi possível conciliar com a conta online. Tentaremos de novo.");
+    if (combined && (combined.added || combined.removed || combined.updated)) {
+      showToast("Combinei suas mudanças com as feitas em outro aparelho. Nada foi perdido.");
+    }
     clearTimeout(remoteStore.retryTimer);
     remoteStore.retryTimer = null;
     remoteStore.retryCount = 0;
@@ -701,6 +755,74 @@ async function saveRemoteStateNow(options = {}) {
   }
 }
 
+async function fetchRemoteUpdatedAt(client, settings, user) {
+  const { data } = await client.from(settings.table).select("updated_at").eq("user_id", user.id).maybeSingle();
+  return data?.updated_at || "";
+}
+
+/** Troca o estado local pelo resultado da junção, mantendo perfil, conta e tela deste aparelho. */
+function adoptMergedState(merged) {
+  const previous = state;
+  const next = normalizeState(merged, previous.profile?.id);
+  next.profile = previous.profile;
+  next.account = previous.account;
+  next.ui = previous.ui;
+  state = next;
+  saveState({ syncRemote: false });
+  render();
+}
+
+/**
+ * Busca o estado da conta e junta com o local. Devolve { missing } se a conta ainda não tem linha,
+ * ou { stats, differs } (differs: o resultado tem algo que a conta ainda não tem e precisa ser enviado).
+ */
+async function reconcileWithRemote(options = {}) {
+  const client = getSupabaseClient();
+  const user = remoteStore.user;
+  const settings = getSupabaseSettings();
+  const { data, error } = await client.from(settings.table).select("state,updated_at").eq("user_id", user.id).maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    remoteStore.baseUpdatedAt = "";
+    return { missing: true, stats: null, differs: false };
+  }
+  const remoteState = normalizeState(data.state, state.profile?.id);
+  const detailed = mergeStatesDetailed(state, remoteState, { preferRemoteScalars: Boolean(options.preferRemoteScalars) });
+  adoptMergedState(detailed.state);
+  remoteStore.baseUpdatedAt = data.updated_at || "";
+  return { missing: false, stats: detailed.stats, differs: stateFingerprint(state) !== stateFingerprint(remoteState) };
+}
+
+const REMOTE_REFRESH_MIN_MS = 15000;
+
+/** Ao voltar para o app (ou a cada minuto e meio com ele aberto), traz o que outro aparelho salvou. */
+async function refreshFromRemote(options = {}) {
+  if (!isRemoteSessionActive() || !remoteStore.user) return false;
+  if (remoteStore.syncing || remoteStore.saveTimer || remoteStore.pendingSave || remoteStore.refreshing) return false;
+  const now = Date.now();
+  if (!options.force && now - remoteStore.lastRefreshAt < REMOTE_REFRESH_MIN_MS) return false;
+  remoteStore.lastRefreshAt = now;
+  remoteStore.refreshing = true;
+  try {
+    const client = getSupabaseClient();
+    const settings = getSupabaseSettings();
+    const latest = await fetchRemoteUpdatedAt(client, settings, remoteStore.user);
+    if (!latest || latest === remoteStore.baseUpdatedAt) return false;
+    if (remoteStore.syncing || remoteStore.saveTimer || remoteStore.pendingSave) return false; // começou a editar enquanto buscava
+    const found = await reconcileWithRemote({ preferRemoteScalars: true });
+    if (found.missing) return false;
+    if (found.differs) queueRemoteSave();
+    const changed = found.stats.added + found.stats.removed + found.stats.updated;
+    if (changed) showToast("Dados atualizados com as mudanças feitas em outro aparelho.");
+    return true;
+  } catch (error) {
+    console.warn("Falha ao atualizar a partir da conta online:", error);
+    return false;
+  } finally {
+    remoteStore.refreshing = false;
+  }
+}
+
 async function loadSupabaseProfile(user, options = {}) {
   const client = getSupabaseClient();
   if (!client || !user) return false;
@@ -711,16 +833,28 @@ async function loadSupabaseProfile(user, options = {}) {
   try {
     const { data, error } = await client.from(settings.table).select("email,display_name,state,updated_at").eq("user_id", user.id).maybeSingle();
     if (error) throw error;
+    remoteStore.baseUpdatedAt = data?.updated_at || "";
+    remoteStore.lastRefreshAt = Date.now();
 
     const profileId = remoteProfileId(user.id);
     const localSnapshot = getLocalProfileSnapshot(profileId);
     const preferLocal = shouldPreferLocalSnapshot(localSnapshot, data?.updated_at, data?.state);
     const displayName = data?.display_name || getRemoteDisplayName(user);
-    const loadedState = preferLocal
-      ? normalizeState(localSnapshot.state, profileId)
-      : data?.state
-        ? normalizeState(data.state, profileId)
-        : createEmptyState();
+    const mergeBoth = Boolean(data?.state && localSnapshot?.state && stateHasMeaningfulData(data.state) && stateHasMeaningfulData(localSnapshot.state));
+    let differsFromRemote = false;
+    let loadedState;
+    if (mergeBoth) {
+      const remoteNormalized = normalizeState(data.state, profileId);
+      const detailed = mergeStatesDetailed(normalizeState(localSnapshot.state, profileId), remoteNormalized, { preferRemoteScalars: !preferLocal });
+      loadedState = normalizeState(detailed.state, profileId);
+      differsFromRemote = stateFingerprint(loadedState) !== stateFingerprint(remoteNormalized);
+    } else {
+      loadedState = preferLocal
+        ? normalizeState(localSnapshot.state, profileId)
+        : data?.state
+          ? normalizeState(data.state, profileId)
+          : createEmptyState();
+    }
     loadedState.profile = makeProfile({
       ...loadedState.profile,
       id: profileId,
@@ -736,8 +870,8 @@ async function loadSupabaseProfile(user, options = {}) {
     state = loadedState;
     saveState({ syncRemote: false });
     let resynced = true;
-    if (!data || preferLocal) {
-      resynced = await saveRemoteStateNow({ silent: preferLocal });
+    if (!data || preferLocal || differsFromRemote) {
+      resynced = await saveRemoteStateNow({ silent: preferLocal || differsFromRemote });
     } else {
       setSyncStatus("saved");
     }
@@ -745,7 +879,11 @@ async function loadSupabaseProfile(user, options = {}) {
     render();
     if (!options.recovery) {
       showToast(
-        preferLocal
+        mergeBoth && differsFromRemote
+          ? resynced
+            ? "Dados deste aparelho e da conta online foram combinados."
+            : "Dados deste aparelho e da conta online foram combinados. O envio será tentado novamente."
+          : preferLocal
           ? resynced
             ? "Dados locais mais recentes recuperados e reenviados para a conta online."
             : "Dados locais mais recentes recuperados. O envio online será tentado novamente."
@@ -1262,10 +1400,12 @@ function normalizeCompetition(item = {}) {
 
 function normalizeState(candidate, fallbackProfileId = "") {
   const empty = createEmptyState({ id: fallbackProfileId || candidate.profile?.id, name: candidate.profile?.name, createdAt: candidate.profile?.createdAt });
-  return {
+  const normalized = {
     version: 2,
     meta: {
       localSavedAt: typeof candidate.meta?.localSavedAt === "string" ? candidate.meta.localSavedAt : "",
+      tombstones: normalizeTombstones(candidate.meta?.tombstones),
+      revivals: normalizeTombstones(candidate.meta?.revivals),
     },
     profile: makeProfile(candidate.profile || empty.profile),
     subjects: Array.isArray(candidate.subjects) ? candidate.subjects : empty.subjects,
@@ -1357,12 +1497,14 @@ function normalizeState(candidate, fallbackProfileId = "") {
       activeTopicEditId: candidate.ui?.activeTopicEditId || "",
     },
   };
+  mergeAttachIds(normalized);
+  return normalized;
 }
 
 function createEmptyState(profile = {}) {
-  return {
+  const normalized = {
     version: 2,
-    meta: { localSavedAt: "" },
+    meta: { localSavedAt: "", tombstones: {}, revivals: {} },
     profile: makeProfile(profile),
     subjects: [],
     topics: [],
@@ -1434,6 +1576,8 @@ function createEmptyState(profile = {}) {
       activeTopicEditId: "",
     },
   };
+  mergeAttachIds(normalized);
+  return normalized;
 }
 
 function createSeedState() {
@@ -1569,6 +1713,16 @@ function createSeedState() {
   };
 }
 
+/** Exclusões viram lápides (para outro aparelho não ressuscitar o item); o que voltou vira "revivido". */
+function trackStateDeletions() {
+  try {
+    if (state.__ids) state.__ids = mergeRecordDeletions(state, state.__ids, new Date().toISOString());
+    else mergeAttachIds(state);
+  } catch (error) {
+    console.warn("Falha ao registrar exclusões:", error);
+  }
+}
+
 function saveState(options = {}) {
   state.profile = makeProfile(state.profile);
   const root = getProfilesRoot();
@@ -1577,6 +1731,7 @@ function saveState(options = {}) {
   const remoteActive = isRemoteSessionActive();
   if (!login || (!state.profile.pinHash && !remoteActive)) return;
   const savedAt = new Date().toISOString();
+  trackStateDeletions();
   state.meta = { ...(state.meta || {}), localSavedAt: savedAt };
   const profileRecord = {
     id: state.profile.id,
@@ -2909,6 +3064,7 @@ function accessLocalProfileByNameAndPin(name, pin, options = {}) {
 async function logoutProfile() {
   if (isRemoteSessionActive()) {
     clearTimeout(remoteStore.saveTimer);
+    remoteStore.saveTimer = null;
     remoteStore.pendingSave = false;
     try {
       await saveRemoteStateNow();
@@ -2918,6 +3074,7 @@ async function logoutProfile() {
       console.warn("Falha ao sair do Supabase:", error);
     }
     remoteStore.user = null;
+    remoteStore.baseUpdatedAt = "";
   }
   sessionStorage.removeItem(ACTIVE_SESSION_PROFILE_KEY);
   pauseTimer();
@@ -3765,6 +3922,7 @@ function renderSubjectCard(subject) {
           <h3>${escapeHTML(subject.name)}</h3>
         </div>
         <div class="inline-actions subject-card-actions">
+          <button class="mini-button" data-cycle-action="mergeSubject" data-id="${subject.id}" type="button">Mesclar</button>
           <button class="mini-button" data-action="editSubject" data-id="${subject.id}" type="button">Editar</button>
           <button class="mini-button bad" data-action="deleteSubject" data-id="${subject.id}" type="button">Excluir</button>
         </div>
@@ -3814,6 +3972,7 @@ function renderTopicItem(topic, color) {
         <button class="mini-button good" data-action="quickQuestion" data-result="correct" data-id="${topic.id}" type="button">+ acerto</button>
         <button class="mini-button bad" data-action="quickQuestion" data-result="wrong" data-id="${topic.id}" type="button">+ erro</button>
         <button class="mini-button" data-action="quickStudy" data-id="${topic.id}" type="button">+ 25 min</button>
+        <button class="mini-button" data-cycle-action="mergeTopic" data-id="${topic.id}" type="button">Mesclar</button>
         <button class="mini-button" data-action="editTopic" data-id="${topic.id}" type="button">Editar</button>
         <button class="mini-button bad" data-action="deleteTopic" data-id="${topic.id}" type="button">Excluir</button>
       </div>
@@ -6387,6 +6546,7 @@ function persistBeforePageExit() {
   saveState({ syncRemote: false });
   if (isRemoteSessionActive()) {
     clearTimeout(remoteStore.saveTimer);
+    remoteStore.saveTimer = null;
     saveRemoteStateNow({ silent: true });
   }
 }
@@ -6407,7 +6567,12 @@ function bindUnsavedDraftTracking() {
       return;
     }
     syncTimerWithClock({ renderUpdates: true });
+    refreshFromRemote();
   });
+  window.addEventListener("online", () => refreshFromRemote({ force: true }));
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") refreshFromRemote();
+  }, 90000);
 }
 
 async function writeClipboardWithHTML(html, text) {

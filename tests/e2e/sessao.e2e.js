@@ -231,6 +231,52 @@ const BASE = process.env.BASE_URL;
   assert(k.same);
   assert.strictEqual(k.note, "Registro rápido (Hoje)");
 
+  // ---- M) acessibilidade: foco preso, fundo inerte e foco devolvido
+  await page.click('.nav-button[data-view="pomodoro"]');
+  await page.waitForTimeout(250);
+  await page.evaluate(() => sessionPendingWrite([])); // começa sem pendências
+  await page.focus("#studyMinutes");
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), "studyMinutes");
+  await page.evaluate(() => sessionAskBeforeSave({ id: "a11y1", minutes: 25, date: new Date().toLocaleDateString("sv"), cycle: 1, subjectId: "", topicId: "", competitionId: "", source: "Pomodoro", note: "Ciclo 1" }));
+  await page.waitForTimeout(300);
+  assert(await modalOpen());
+  const insideModal = () => page.evaluate(() => Boolean(document.activeElement && document.activeElement.closest("#sessionModal")));
+  assert(await insideModal(), "o foco vai para dentro da janela ao abrir");
+  const bg = await page.evaluate(() => [...document.querySelectorAll(".app-shell, .bottom-nav")].map((el) => ({ inert: el.hasAttribute("inert"), hidden: el.getAttribute("aria-hidden") })));
+  assert(bg.length >= 1 && bg.every((b) => b.inert && b.hidden === "true"), "fundo inerte e escondido do leitor de tela: " + JSON.stringify(bg));
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#sessionModal").getAttribute("aria-describedby")), "sessionSummary");
+  await page.evaluate(() => document.querySelector(".nav-button[data-view='hoje']").focus());
+  assert(await insideModal(), "tentar focar o fundo não tira o foco da janela");
+  const order = [];
+  for (let i = 0; i < 16; i++) {
+    await page.keyboard.press("Tab");
+    assert(await insideModal(), `Tab #${i + 1} escapou da janela`);
+    order.push(await page.evaluate(() => document.activeElement.id || document.activeElement.textContent.trim().slice(0, 12)));
+  }
+  const unique = new Set(order);
+  assert(unique.size >= 5 && order.indexOf(order[0], 1) > 0, "o Tab dá a volta pelos controles da janela: " + order.join(" > "));
+  // Shift+Tab a partir do primeiro controle vai para o último (Descartar)
+  await page.focus("#ssSubject");
+  await page.keyboard.press("Shift+Tab");
+  assert.strictEqual(await page.evaluate(() => document.activeElement.textContent.trim()), "Descartar", "Shift+Tab no primeiro vai ao último");
+  await page.keyboard.press("Tab");
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), "ssSubject", "Tab no último volta ao primeiro");
+  // fechar devolve o foco ao campo de onde veio e libera o fundo
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  assert(!(await modalOpen()));
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), "studyMinutes", "o foco volta ao campo anterior");
+  assert(await page.evaluate(() => [...document.querySelectorAll(".app-shell, .bottom-nav")].every((el) => !el.hasAttribute("inert") && !el.hasAttribute("aria-hidden"))), "fundo liberado");
+  // reabrir pela barra de pendência e descartar
+  await page.click('[data-cycle-action="sessionOpen"]');
+  await page.waitForTimeout(250);
+  assert(await modalOpen() && (await insideModal()));
+  await page.click('[data-cycle-action="sessionDiscard"]');
+  await page.waitForTimeout(250);
+  assert(!(await modalOpen()));
+  assert.strictEqual(await page.evaluate(() => document.querySelector(".app-shell").hasAttribute("inert")), false);
+  assert(await page.evaluate(() => Boolean(document.activeElement) && document.activeElement !== document.body), "o foco não se perde no corpo da página");
+
   // ---- L) celular: a janela cabe na tela
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => sessionAskBeforeSave({ id: "m1", minutes: 25, date: new Date().toLocaleDateString("sv"), cycle: 1, subjectId: "", topicId: "", competitionId: "", source: "Pomodoro", note: "Ciclo 1" }));

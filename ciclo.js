@@ -735,9 +735,11 @@ function renderCycle() {
     if (typeof renderTodayModule === "function") renderTodayModule(summary);
     if (typeof pushScheduleSync === "function") pushScheduleSync();
     if (typeof renderSessionUI === "function") renderSessionUI();
+    if (typeof renderMesclarBar === "function") renderMesclarBar();
     const view = state.ui.view;
     if (view === "revisao") renderRevisions();
     if (view === "erros") renderErrors();
+    if (view === "relatorios" && typeof renderCycleReports === "function") renderCycleReports();
     if (view === "leiseca") renderLaw();
   } catch (error) {
     console.error("Ciclo de estudos:", error);
@@ -1354,6 +1356,7 @@ function handleCycleAction(button) {
   if (typeof handleTodayAction === "function" && handleTodayAction(type, button)) return undefined;
   if (typeof handlePushAction === "function" && handlePushAction(type, button)) return undefined;
   if (typeof handleSessionAction === "function" && handleSessionAction(type, button)) return undefined;
+  if (typeof handleMesclarAction === "function" && handleMesclarAction(type, button)) return undefined;
 
   /* lembretes */
   if (type === "reviewNow") {
@@ -1801,6 +1804,7 @@ function bindCycleEvents() {
   window.setTimeout(cycleReminderTick, 1500);
   if (typeof bindTodayEvents === "function") bindTodayEvents();
   if (typeof bindSessionEvents === "function") bindSessionEvents();
+  if (typeof bindMesclarEvents === "function") bindMesclarEvents();
 }
 
 

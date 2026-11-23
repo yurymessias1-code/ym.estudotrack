@@ -228,12 +228,16 @@ function renderSessionModal() {
     cycleUI.sessionModalOpen = true;
   }
   const open = authenticated && list.length > 0 && cycleUI.sessionModalOpen;
+  const wasOpen = !modal.classList.contains("hidden");
+  const returnFocus = document.activeElement;
   modal.classList.toggle("hidden", !open);
   document.body.classList.toggle("modal-open", open);
   if (!open) {
     cycleUI.sessionItemId = "";
+    if (wasOpen) modalClose(modal);
     return;
   }
+  if (!wasOpen) modalOpen(modal, { returnFocus });
   const item = list[0];
   // O contador acompanha a fila (um novo foco pode terminar com a janela aberta) sem refazer o formulário.
   $("#sessionModalEyebrow").textContent = list.length > 1 ? `Sessão 1 de ${list.length}` : "Foco concluído";

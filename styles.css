@@ -4497,3 +4497,180 @@ body.modal-open {
 .toast {
   z-index: 100;
 }
+
+/* Mesclar assuntos e matérias */
+.merge-preview {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.merge-preview p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.merge-preview ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* Relatórios de retenção e constância */
+.report-cycle {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.report-subtitle {
+  margin: 10px 0 0;
+  font-size: 1rem;
+}
+
+.report-subtitle small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.heatmap-wrap {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.heatmap {
+  display: grid;
+  grid-template-columns: 34px repeat(12, 20px);
+  grid-auto-rows: 20px;
+  gap: 4px;
+  justify-content: start;
+}
+
+.heat-label {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.heat {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+
+.heat-1 { background: rgba(15, 118, 110, 0.28); border-color: transparent; }
+.heat-2 { background: rgba(15, 118, 110, 0.5); border-color: transparent; }
+.heat-3 { background: rgba(15, 118, 110, 0.75); border-color: transparent; }
+.heat-4 { background: rgba(15, 118, 110, 1); border-color: transparent; }
+
+.heat.future {
+  opacity: 0.35;
+  border-style: dashed;
+  background: transparent;
+}
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.heat-legend .heat {
+  width: 14px;
+  height: 14px;
+}
+
+.mini-bars,
+.load-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.mini-bars {
+  height: 90px;
+}
+
+.mini-bar,
+.load-bar {
+  position: relative;
+  display: grid;
+  flex: 1;
+  align-items: end;
+  justify-items: center;
+  min-width: 0;
+  height: 100%;
+  gap: 2px;
+}
+
+.mini-bar-fill,
+.load-fill {
+  align-self: end;
+  width: 100%;
+  height: var(--h, 0%);
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: var(--teal);
+}
+
+.mini-bar-fill.coral {
+  background: var(--coral);
+}
+
+.mini-bar small,
+.load-bar small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.load-chart {
+  height: 150px;
+  padding-top: 6px;
+}
+
+.load-bar {
+  grid-template-rows: 1fr auto auto;
+}
+
+.load-bar b {
+  font-size: 0.78rem;
+}
+
+.load-fill {
+  background: var(--amber);
+}
+
+.report-cycle tr.weak-row td {
+  color: var(--red);
+  font-weight: 800;
+}
+
+/* Com o botão Mesclar, as ações da matéria quebram de linha em vez de espremer o nome */
+.subject-card-header {
+  flex-wrap: wrap;
+}
+
+.subject-card-header > div:first-child {
+  flex: 1 1 150px;
+  min-width: 120px;
+}
+
+.subject-card-actions {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}

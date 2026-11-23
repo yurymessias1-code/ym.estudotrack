@@ -466,6 +466,8 @@ function renderToday(data) {
   $("#todayDate").textContent = dateText.charAt(0).toUpperCase() + dateText.slice(1);
 
   const subtitle = [];
+  const streak = typeof reportStreak === "function" ? reportStreak(state.studyLogs, data.today) : null;
+  if (streak && streak.current > 0) subtitle.push(`Sequência de ${cyclePlural(streak.current, "dia", "dias")}${streak.studiedToday ? "" : " (estude hoje para mantê-la)"}`);
   const exam = state.edital?.examDate;
   if (cycleIsISO(exam)) {
     const left = cycleDiffDays(data.today, exam);

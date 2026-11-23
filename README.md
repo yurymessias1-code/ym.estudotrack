@@ -304,6 +304,42 @@ O Pomodoro agora **inicia mesmo sem matéria escolhida**: você decide no fim. A
 
 Quem prefere o jeito antigo desliga **"Perguntar o que estudei ao terminar cada foco"** (aba Pomodoro): com matéria escolhida no início, o tempo é salvo direto; sem matéria, a janela abre mesmo assim. O **Registro manual** (aba Pomodoro) e o **Registro rápido** (tela Hoje) ganharam o campo **"Ou escreva um assunto novo"**, que vale no lugar da seleção. A fila de sessões pendentes fica só no aparelho em que o foco terminou.
 
+### Usar em mais de um aparelho sem perder dados
+
+Com a conta online, o celular e o computador podem ser usados ao mesmo tempo. O app **não** sobrescreve mais a conta no escuro:
+
+- **Gravação com verificação.** Antes de gravar, o app confere se a conta continua como ele a viu. Se outro aparelho gravou no meio tempo, ele busca o que há na conta, **junta os dois lados** e grava o resultado (você vê o aviso "Combinei suas mudanças com as feitas em outro aparelho").
+- **Como a junção decide:** registros novos de qualquer lado se somam; o mesmo registro editado dos dois lados fica com a versão mais avançada (uma revisão com mais histórico, um erro com mais refações, um flashcard com mais revisões, uma leitura de lei seca com mais avanço); nos ajustes (horas semanais, intervalos, pesos etc.), vale o aparelho que está gravando, e um aparelho parado adota o que o outro mudou.
+- **Exclusões são lembradas** (por até 90 dias): o que você apagou em um aparelho não volta por causa de outro que ainda o tinha. Algo recriado ou restaurado depois (por exemplo, ao desfazer uma mesclagem) volta normalmente.
+- **Atualização automática.** Ao voltar para a aba, ao ficar online de novo e a cada minuto e meio com o app aberto, ele traz o que outro aparelho salvou (se você não estiver no meio de uma edição).
+- **Ao entrar** numa conta que já tem dados neste aparelho, os dois conjuntos são combinados em vez de escolher um.
+- **Se a conta estiver fora do ar**, o que você faz fica salvo no aparelho e é combinado e enviado quando ela voltar.
+
+Limites: dois aparelhos que editam o **mesmo** registro ao mesmo tempo ficam com uma só versão (a mais avançada ou, no empate, a de quem grava); um aparelho que passe mais de 90 dias offline pode trazer de volta algo que foi apagado nesse intervalo; a sessão de foco aguardando destino e o lembrete de backup ficam só no aparelho. O app usa o `updated_at` da tabela `study_profiles` (já existe no `supabase-schema.sql`, com o gatilho que o atualiza); não é preciso alterar o banco.
+
+### Mesclar assuntos e matérias duplicados
+
+Criar assuntos na hora facilita erros de digitação ("Habeas-corpus" e "Habeas corpus"). Na aba **Matérias**, cada matéria e cada assunto tem o botão **Mesclar**:
+
+- escolha o destino (o app sugere o mais parecido) e veja a **prévia** do que será movido: registros de estudo, lançamentos de questões, flashcards, anotações, erros do caderno, revisões, leis, julgados e planos de lei seca;
+- tudo passa a apontar para o destino e o item de origem deixa de existir. Ao mesclar **matérias**, assuntos de mesmo nome são unidos e os demais passam para a matéria de destino; o peso do plano semanal não se perde;
+- revisões automáticas duplicadas (mesmo assunto e dia) ficam só com a que mais avançou;
+- uma barra no topo permite **Desfazer**: ela devolve só o que a mesclagem mudou, e o que você fez depois continua. Isso vale também entre aparelhos (o item restaurado não é apagado por outro aparelho).
+
+### Relatórios de retenção e constância
+
+Em **Relatórios**, o painel "O método está funcionando?" mostra:
+
+- **Constância:** sequência atual e melhor sequência (hoje sem estudo ainda não quebra a sequência), dias estudados nos últimos 30, média por dia estudado e um **mapa das últimas 12 semanas** (um quadrado por dia; mais escuro, mais tempo). A tela Hoje mostra a sequência.
+- **Aderência ao plano semanal:** estudado x meta (as horas semanais da aba Edital) nas últimas 8 semanas.
+- **Retenção das revisões:** % de revisões avaliadas "Bom" ou "Fácil" nos últimos 60 dias, por semana e por matéria (a mais fraca vem primeiro, destacada abaixo de 70%).
+- **Carga dos próximos 14 dias:** revisões e erros que vencem por dia (o que já está atrasado entra em hoje), para saber quando frear conteúdo novo.
+- **Erros por motivo** (90 dias), quantos já foram dominados e quantos por semana.
+
+### Acessibilidade das janelas
+
+As janelas "O que você estudou?" e "Mesclar" prendem o foco: o Tab e o Shift+Tab circulam só pelos controles da janela, o resto da página fica inerte (não recebe foco nem é lido pelo leitor de tela), **Esc** fecha sem alterar nada e, ao fechar, o foco volta para onde estava.
+
 ## Testes
 
 ```bash
@@ -312,8 +348,12 @@ node tests/ciclo-tests.js     # revisão espaçada, lembretes, agenda .ics com e
 node tests/hoje-tests.js      # plano semanal, reforço por desempenho, insights e backup
 node tests/push-tests.js      # push: lógica de horários e fusos, resumo diário, cliente e a própria função send-reminders
 node tests/sessao-tests.js    # janela "O que você estudou?": criação de matéria/assunto na hora e fila de sessões
+node tests/merge-tests.js     # junção de estados entre aparelhos: coleções, exclusões (lápides), convergência
+node tests/mesclar-tests.js   # mesclar assuntos e matérias, com desfazer
+node tests/retencao-tests.js  # sequência, mapa de dias, aderência, retenção, carga e erros
 npm install && npx playwright install chromium    # uma vez, para os testes no navegador
-npm run test:e2e              # roteiros no Chromium (ciclo, lembretes, Hoje, menu móvel, registro rápido...)
+npm run test:e2e              # roteiros no Chromium: ciclo, lembretes, Hoje, janela de sessão (e foco preso), sincronização
+                              # entre dois aparelhos contra um Supabase falso, mesclagem e relatórios
 ```
 
 Os testes de `push-tests.js` executam o `index.ts` da função de verdade (com Supabase e web-push simulados), e os de navegador sobem um servidor estático próprio. Não precisam de rede nem de conta.

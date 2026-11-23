@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261116-sessao" />
+    <link rel="stylesheet" href="styles.css?v=20261117-sync" />
   </head>
   <body>
     <div class="app-shell">
@@ -104,6 +104,7 @@
 
         <div class="review-banner hidden" id="reviewBanner" role="status" aria-live="polite"></div>
         <div class="review-banner hidden" id="sessionBar" role="status" aria-live="polite"></div>
+        <div class="review-banner hidden" id="mergeUndoBar" role="status" aria-live="polite"></div>
 
         <section class="view" id="dashboard" aria-labelledby="dashboardTitle">
           <div class="dashboard-visual">
@@ -2036,6 +2037,8 @@
             </div>
           </div>
 
+          <section class="panel report-cycle" id="reportCycle" aria-label="Constância, retenção e carga de revisão"></section>
+
           <section class="panel report-workbench">
             <div class="report-view-tabs" aria-label="Tipo de relatório">
               <button class="report-view-tab active" data-report-mode="timeline" type="button">Linha do tempo</button>
@@ -2144,8 +2147,8 @@
         document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');
       }
     </script>
-            <div class="modal-backdrop hidden" id="sessionModal" role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle">
-      <form class="modal-card" id="sessionForm">
+            <div class="modal-backdrop hidden" id="sessionModal" role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle" aria-describedby="sessionSummary">
+      <form class="modal-card" id="sessionForm" tabindex="-1">
         <div>
           <p class="eyebrow" id="sessionModalEyebrow">Foco concluído</p>
           <h3 id="sessionModalTitle">O que você estudou?</h3>
@@ -2187,6 +2190,25 @@
       </form>
     </div>
 
+        <div class="modal-backdrop hidden" id="mergeModal" role="dialog" aria-modal="true" aria-labelledby="mergeModalTitle" aria-describedby="mergeSummary">
+      <form class="modal-card" id="mergeForm" tabindex="-1">
+        <div>
+          <p class="eyebrow" id="mergeEyebrow">Mesclar assunto</p>
+          <h3 id="mergeModalTitle">Mesclar em…</h3>
+          <p class="muted-note" id="mergeSummary"></p>
+        </div>
+        <label>
+          Mesclar em
+          <select id="mergeTarget"></select>
+        </label>
+        <div class="merge-preview" id="mergePreview"></div>
+        <div class="inline-actions">
+          <button class="button primary" id="mergeConfirmBtn" type="submit" disabled>Mesclar</button>
+          <button class="button ghost" data-cycle-action="mergeCancel" type="button">Cancelar</button>
+        </div>
+      </form>
+    </div>
+
     <nav class="bottom-nav" aria-label="Atalhos">
       <button class="bottom-nav-item active" data-view="hoje" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h14V10" /></svg>
@@ -2210,11 +2232,15 @@
       </button>
     </nav>
 
-    <script src="supabase-config.js?v=20261116-sessao"></script>
-    <script src="ciclo.js?v=20261116-sessao"></script>
-    <script src="hoje.js?v=20261116-sessao"></script>
-    <script src="push.js?v=20261116-sessao"></script>
-    <script src="sessao.js?v=20261116-sessao"></script>
-    <script src="app.js?v=20261116-sessao"></script>
+    <script src="supabase-config.js?v=20261117-sync"></script>
+    <script src="modal.js?v=20261117-sync"></script>
+    <script src="merge.js?v=20261117-sync"></script>
+    <script src="ciclo.js?v=20261117-sync"></script>
+    <script src="hoje.js?v=20261117-sync"></script>
+    <script src="push.js?v=20261117-sync"></script>
+    <script src="sessao.js?v=20261117-sync"></script>
+    <script src="mesclar.js?v=20261117-sync"></script>
+    <script src="retencao.js?v=20261117-sync"></script>
+    <script src="app.js?v=20261117-sync"></script>
   </body>
 </html>

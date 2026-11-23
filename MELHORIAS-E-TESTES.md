@@ -65,3 +65,14 @@ Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, sele
 - Registro manual (`#studyNewTopic`) e registro rápido (`#qsNewTopic`) aceitam assunto novo digitado; nome igual a um existente reaproveita o existente.
 - `.toast` passou a `z-index: 100` para aparecer acima da janela.
 - Testes: `tests/sessao-tests.js` (14) e `tests/e2e/sessao.e2e.js`, que também pegaram, antes da entrega, dois defeitos corrigidos: "novo assunto" em branco salvava sem aviso e o contador da fila não atualizava com a janela aberta.
+
+## Sincronização segura, mesclagem, relatórios e janela acessível (novembro/2026)
+
+- **Sincronização:** `merge.js` (junção pura por id, lápides de exclusão por 90 dias e "revivido"), gravação condicional em `study_profiles` (`update ... eq(updated_at)` com o valor devolvido pelo servidor), junção ao detectar conflito, ao entrar e ao voltar à aba/ficar online. O cliente REST alternativo ganhou `update(...).eq(...).select(...)`. Estado: `meta.tombstones` e `meta.revivals`; ids guardados em `state.__ids` (fora do JSON).
+- **Defeito encontrado e corrigido pelos testes:** `remoteStore.saveTimer` nunca era zerado depois de disparar; qualquer guarda do tipo "há salvamento pendente?" ficava sempre verdadeira.
+- A "impressão digital" do estado ignora a ordem das listas e das chaves (sem isso, dois aparelhos com o mesmo conteúdo reenviariam um ao outro sem parar).
+- **Mesclagem:** `mesclar.js`, desfazer que reverte só o que mudou; assuntos "gêmeos" só contam contra o que o destino já tinha.
+- **Relatórios:** `retencao.js` (sequência, mapa de 12 semanas, aderência, retenção, carga de 14 dias e erros).
+- **Janelas:** `modal.js` (foco preso, fundo inerte, foco devolvido), usado pela janela de sessão e pela de mesclagem.
+- **Testes novos:** `merge-tests` (20), `mesclar-tests` (14), `retencao-tests` (12) e os roteiros `sync`, `mesclar` e `relatorios` em `tests/e2e/`; `tests/e2e/fake-supabase.js` é um Supabase falso em memória (autenticação, `study_profiles` com o carimbo de `updated_at` feito pelo servidor).
+- Limite conhecido: a sincronização foi testada contra o Supabase falso (que reproduz o comportamento do PostgREST usado), não contra um projeto real. Antes de contar com ela, teste com dois aparelhos.

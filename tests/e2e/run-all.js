@@ -3,7 +3,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { startServer } = require("./server");
 
-const SUITES = ["ciclo.e2e.js", "lembretes.e2e.js", "hoje.e2e.js", "sessao.e2e.js", "sync.e2e.js", "mesclar.e2e.js", "relatorios.e2e.js"];
+const SUITES = ["ciclo.e2e.js", "caderno.e2e.js", "lembretes.e2e.js", "hoje.e2e.js", "sessao.e2e.js", "sync.e2e.js", "mesclar.e2e.js", "relatorios.e2e.js"];
 
 function run(file, baseUrl) {
   // spawn assíncrono: o servidor roda neste processo e precisa continuar respondendo.

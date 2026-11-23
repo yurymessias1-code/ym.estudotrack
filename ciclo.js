@@ -31,7 +31,7 @@ const cycleUI = {
   errorEditId: "",
   errorPrefill: null,
   errorRetest: { id: "", open: false },
-  errorFilters: { search: "", subject: "", topic: "", reason: "", status: "pending" },
+  errorFilters: { search: "", subject: "", topic: "", reason: "", status: "all" },
   errorFormOpen: false,
   errorNavOpen: {},
   lawEditId: "",
@@ -205,6 +205,7 @@ function normalizeErrorEntry(item = {}) {
     correctAnswer: cycleText(item.correctAnswer),
     images: cycleErrorImages(item.images),
     answerImages: cycleErrorImages(item.answerImages),
+    notes: typeof erroNotesSanitize === "function" ? erroNotesSanitize(item.notes) : "",
     reason,
     foundation: cycleText(item.foundation),
     rule: cycleText(item.rule),
@@ -1001,7 +1002,7 @@ function errorMatchesBase(entry, filters, today, search) {
   if (filters.status === "due" && !(status !== "mastered" && entry.dueDate && entry.dueDate <= today)) return false;
   if (filters.status === "mastered" && status !== "mastered") return false;
   if (search) {
-    const haystack = [entry.statement, entry.myAnswer, entry.correctAnswer, entry.foundation, entry.rule, entry.source, entry.tags.join(" "), getEntryScopeLabel(entry), ERROR_REASONS[entry.reason]].join(" ");
+    const haystack = [entry.statement, typeof erroNotesText === "function" ? erroNotesText(entry.notes) : "", entry.myAnswer, entry.correctAnswer, entry.foundation, entry.rule, entry.source, entry.tags.join(" "), getEntryScopeLabel(entry), ERROR_REASONS[entry.reason]].join(" ");
     const normalized = typeof normalizeSearchText === "function" ? normalizeSearchText(haystack) : haystack.toLowerCase();
     if (!normalized.includes(search)) return false;
   }
@@ -1219,6 +1220,7 @@ function errorCardHTML(entry, today) {
       <div class="error-block"><span class="field-title">Questão ou dúvida</span>${entry.statement ? `<p class="pre-wrap">${escapeHTML(entry.statement)}</p>` : ""}${questionShots}</div>
       ${entry.myAnswer && !answerHidden ? `<div class="error-block wrong"><span class="field-title">O que eu respondi</span><p class="pre-wrap">${escapeHTML(entry.myAnswer)}</p></div>` : ""}
       ${showAnswer ? `<div class="error-block right"><span class="field-title">Resposta correta</span>${entry.correctAnswer ? `<p class="pre-wrap">${escapeHTML(entry.correctAnswer)}</p>` : ""}${answerShots}</div>` : ""}
+      ${entry.notes && !answerHidden ? `<div class="error-block notes"><span class="field-title">Meu caderno</span><div class="error-notes">${entry.notes}</div></div>` : ""}
       ${entry.foundation && !answerHidden ? `<div class="error-block"><span class="field-title">Fundamento</span><p class="pre-wrap">${escapeHTML(entry.foundation)}</p></div>` : ""}
       ${entry.rule && !answerHidden ? `<div class="error-block rule"><span class="field-title">Como não errar de novo</span><p class="pre-wrap">${escapeHTML(entry.rule)}</p></div>` : ""}
       ${tags}
@@ -1257,7 +1259,17 @@ function resetErrorForm({ keepContext = false } = {}) {
   $("#errorDate").value = kept ? kept.date : cycleToday();
   if (kept) $("#errorSource").value = kept.source;
   erroDraftReset();
+  if (typeof erroNotesSet === "function") erroNotesSet("");
+  errorFormMessage("");
   updateErrorFormMode();
+}
+
+function errorFormMessage(text) {
+  const box = $("#errorFormMsg");
+  if (!box) return;
+  box.textContent = text || "";
+  box.classList.toggle("hidden", !text);
+  if (text) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function fillErrorForm(entry) {
@@ -1277,6 +1289,8 @@ function fillErrorForm(entry) {
   $("#errorRule").value = entry.rule;
   $("#errorTags").value = typeof hashtagsToInput === "function" ? hashtagsToInput(entry.tags) : entry.tags.join(" ");
   erroDraftReset(entry);
+  if (typeof erroNotesSet === "function") erroNotesSet(entry.notes);
+  errorFormMessage("");
   updateErrorFormMode();
   $("#errorForm").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1663,7 +1677,7 @@ function handleCycleAction(button) {
     return undefined;
   }
   if (type === "clearErrorFilters") {
-    cycleUI.errorFilters = { search: "", subject: "", topic: "", reason: "", status: "pending" };
+    cycleUI.errorFilters = { search: "", subject: "", topic: "", reason: "", status: "all" };
     $("#errorSearch").value = "";
     renderCycle();
     return undefined;
@@ -1828,18 +1842,17 @@ function bindCycleEvents() {
     const subjectId = $("#errorSubject").value;
     const statement = $("#errorStatement").value.trim();
     const correctAnswer = $("#errorCorrect").value.trim();
+    const notes = erroNotesGet();
+    const hasContent = statement || correctAnswer || erroNotesText(notes) || erroNotesImageIds(notes).length || erroDraft.question.length || erroDraft.answer.length;
     if (!subjectId) {
-      showToast("Escolha a matéria do erro.");
+      errorFormMessage("Escolha a matéria do erro. Se ainda não tem matéria, crie uma em “Nova matéria”.");
       return;
     }
-    if (!statement && !erroDraft.question.length) {
-      showToast("Escreva a questão/dúvida ou cole o print dela.");
+    if (!hasContent) {
+      errorFormMessage("Escreva alguma coisa (questão, explicação ou anotação) ou cole um print antes de salvar.");
       return;
     }
-    if (!correctAnswer && !erroDraft.answer.length) {
-      showToast("Informe a resposta correta (texto ou print do gabarito).");
-      return;
-    }
+    errorFormMessage("");
     const submitButton = $("#errorSubmitBtn");
     submitButton.disabled = true; // evita salvar duas vezes enquanto os prints são gravados
     try {
@@ -1856,12 +1869,15 @@ function bindCycleEvents() {
         correctAnswer,
         images: shots.images,
         answerImages: shots.answerImages,
+        notes,
         reason: $("#errorReason").value,
         foundation: $("#errorFoundation").value,
         rule: $("#errorRule").value,
         tags: $("#errorTags").value,
       };
       if (existing) {
+        const kept = new Set(erroNotesImageIds(notes));
+        erroNotesImageIds(existing.notes).filter((id) => !kept.has(id)).forEach((id) => erroImgDelete(id));
         const updated = normalizeErrorEntry({ ...existing, ...data, updatedAt: new Date().toISOString() });
         Object.assign(existing, updated);
       } else {

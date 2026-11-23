@@ -75,6 +75,7 @@ const shots = "";
 
   // caderno de erros
   await page.click('.nav-button[data-view="erros"]');
+  await page.click("#errorNewBtn");
   await page.fill("#errorStatement", "O prazo do habeas data é de 10 dias.");
   await page.fill("#errorMyAnswer", "Marquei CERTO");
   await page.fill("#errorCorrect", "Errado: não há prazo; é gratuito.");

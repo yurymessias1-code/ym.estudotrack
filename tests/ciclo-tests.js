@@ -19,6 +19,7 @@ const {
   normalizeCycleIntervals,
   normalizeCycleSettings,
   normalizeRevision,
+  normalizeErrorEntry,
   cycleAddDays,
   cycleRedistributeOverdue,
   cycleReminderMessage,
@@ -424,6 +425,17 @@ test("lembrete: flashcards entram na mensagem entre revisões e erros", () => {
   assert.strictEqual(message.body, "2 revisões · 3 flashcards · 1 erro para refazer");
   assert.strictEqual(cycleReminderMessage({ flashDue: 1 }).body, "1 flashcard");
   assert.strictEqual(cycleReminderMessage({ flashDue: 1 }).title, "Hora de revisar");
+});
+
+test("caderno de erros: prints normalizados (só metadados, ids seguros, no máx. 12)", () => {
+  const old = normalizeErrorEntry({ statement: "q", correctAnswer: "r" });
+  assert.strictEqual(JSON.stringify(old.images), "[]");
+  assert.strictEqual(JSON.stringify(old.answerImages), "[]");
+  const many = Array.from({ length: 20 }, (_, i) => ({ id: `img_${i}`, w: 100, h: 50 }));
+  const e = normalizeErrorEntry({ statement: "", correctAnswer: "", images: [{ id: "a/b<c>", w: "800", h: 400, blob: "x", dataUrl: "data:..." }, { id: "" }, null, ...many], answerImages: "lixo" });
+  assert.strictEqual(e.images.length, 12);
+  assert.strictEqual(JSON.stringify(e.images[0]), JSON.stringify({ id: "abc", w: 800, h: 400 }));
+  assert.strictEqual(JSON.stringify(e.answerImages), "[]");
 });
 
 console.log(`ciclo-tests: ${passed} testes passaram.`);

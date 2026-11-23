@@ -58,6 +58,18 @@ assert(html.includes("data-action=\"createAuxiliaryBackup\""), "Botao manual de 
 
 assert(app.includes("function renderDailyReview"), "renderDailyReview ausente.");
 
+// Caderno de erros: prints e menu por materia/assunto (caderno.js)
+const caderno = fs.readFileSync(path.join(root, "caderno.js"), "utf8");
+execFileSync(process.execPath, ["--check", path.join(root, "caderno.js")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(__dirname, "caderno-tests.js")], { stdio: "inherit" });
+assert(html.includes('src="caderno.js?v='), "caderno.js nao foi carregado no HTML.");
+assert(html.indexOf('src="caderno.js') < html.indexOf('src="ciclo.js'), "caderno.js deve carregar antes do ciclo.js.");
+["errorNewBtn", "errorNav", "errorCrumb", "errorShotsQuestion", "errorShotsAnswer"].forEach((id) => assert(html.includes(`id="${id}"`), `#${id} ausente no HTML.`));
+assert(!/data:image|dataUrl/.test(caderno.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/image\/webp|image\/jpeg/g, "")), "caderno.js nao pode guardar prints em base64 no estado.");
+assert(css.includes(".error-nav") && css.includes(".shot-viewer") && css.includes(".shot-grid"), "Estilos do menu/prints do caderno ausentes.");
+assert(fs.existsSync(path.join(__dirname, "e2e", "caderno.e2e.js")), "tests/e2e/caderno.e2e.js ausente.");
+assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("caderno.e2e.js"), "run-all.js nao inclui o roteiro do caderno.");
+
 // Ciclo de estudos: revisao, caderno de erros e lei seca
 const ciclo = fs.readFileSync(path.join(root, "ciclo.js"), "utf8");
 execFileSync(process.execPath, ["--check", path.join(root, "ciclo.js")], { stdio: "inherit" });

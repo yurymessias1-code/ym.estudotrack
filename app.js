@@ -2033,7 +2033,7 @@ function buildGlobalSearchResults(query) {
       makeGlobalSearchResult(
         "Caderno de erros",
         getSearchExcerpt(entry.statement, query, 90) || "Erro registrado",
-        `${getEntryScopeLabel(entry)} ${entry.source || ""} ${entry.foundation || ""} ${hashtagsToInput(entry.tags)} ${getSearchExcerpt(entry.correctAnswer, query, 160)} ${getSearchExcerpt(entry.rule, query, 160)}`,
+        `${getEntryScopeLabel(entry)} ${entry.source || ""} ${entry.foundation || ""} ${hashtagsToInput(entry.tags)} ${getSearchExcerpt(entry.correctAnswer, query, 160)} ${getSearchExcerpt(entry.rule, query, 160)} ${getSearchExcerpt(typeof erroNotesText === "function" ? erroNotesText(entry.notes) : "", query, 160)}`,
         "erros",
         { type: "errorEntry", id: entry.id, subjectId: getEntrySubjectId(entry), topicId: entry.topicId || "" }
       )

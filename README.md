@@ -248,7 +248,11 @@ O código fica em `ciclo.js` (carregado antes do `app.js`); os dados entram no m
 - Registre matéria, assunto, banca/fonte, enunciado, o que você respondeu, a resposta correta, **o motivo do erro** (não sabia, literalidade, interpretação, atenção, confusão de institutos, jurisprudência, chute, tempo), o fundamento e **como não errar de novo**.
 - Na aba **Questões**, lançamentos com erros ganham o botão **Anotar erro**, que abre o caderno já com matéria, assunto e data.
 - **Refazer agora** esconde o gabarito até você tentar responder. Acertar leva o erro adiante (padrão: 1, 3, 7, 15 e 30 dias; ao fim ele vira **dominado**); errar de novo volta para o início e conta como recorrência.
-- Filtros por texto, matéria, motivo e situação, gráficos de **por que erro** e **onde mais erro**, e o botão **Gerar flashcard**.
+- Filtros por texto, motivo e situação, gráficos de **por que erro** e **onde mais erro**, e o botão **Gerar flashcard**.
+- **Menu por matéria e assunto** (à esquerda): árvore Matéria > Assunto com o total de erros e, em laranja, quantos vencem hoje. Os números respeitam os filtros de situação, motivo e busca, então batem com a lista ao clicar. Com "Todas as matérias" a lista vem agrupada por matéria; ao escolher uma matéria, agrupada por assunto. Uma trilha (Todas > Matéria > Assunto) mostra onde você está.
+- **Prints**: cole a imagem com **Ctrl+V** (ou Cmd+V) dentro do formulário, ou arraste o arquivo, ou use o botão para escolher da galeria/câmera. Há um campo de prints para a **questão** e outro para o **gabarito/comentário** (até 6 em cada). Com o formulário fechado, colar um print na aba abre o formulário já na matéria/assunto selecionado no menu. O texto da questão deixa de ser obrigatório quando há print. Ao refazer, o print do gabarito fica escondido junto com o texto. Clique no print para ampliar (setas para navegar, Esc para fechar).
+- Depois de salvar um erro novo, o formulário continua aberto com matéria, assunto, data e fonte mantidos, para lançar vários erros de um simulado em sequência.
+- **Onde ficam os prints:** são reduzidos (no máximo 1600 px) e gravados em **IndexedDB, neste aparelho**. No restante dos dados ficam só os metadados. Por isso eles **não** entram no backup JSON nem na sincronização entre aparelhos: em outro aparelho o erro aparece com o aviso "Print salvo em outro aparelho". Limpar os dados do navegador apaga os prints.
 
 ### Lei seca
 
@@ -351,8 +355,9 @@ node tests/sessao-tests.js    # janela "O que você estudou?": criação de mat�
 node tests/merge-tests.js     # junção de estados entre aparelhos: coleções, exclusões (lápides), convergência
 node tests/mesclar-tests.js   # mesclar assuntos e matérias, com desfazer
 node tests/retencao-tests.js  # sequência, mapa de dias, aderência, retenção, carga e erros
+node tests/caderno-tests.js    # menu por matéria/assunto, filtros, agrupamento e redução de prints
 npm install && npx playwright install chromium    # uma vez, para os testes no navegador
-npm run test:e2e              # roteiros no Chromium: ciclo, lembretes, Hoje, janela de sessão (e foco preso), sincronização
+npm run test:e2e              # roteiros no Chromium: ciclo, caderno de erros (colar print, menu, persistência), lembretes, Hoje, janela de sessão (e foco preso), sincronização
                               # entre dois aparelhos contra um Supabase falso, mesclagem e relatórios
 ```
 

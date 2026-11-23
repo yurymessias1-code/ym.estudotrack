@@ -31,7 +31,9 @@ const cycleUI = {
   errorEditId: "",
   errorPrefill: null,
   errorRetest: { id: "", open: false },
-  errorFilters: { search: "", subject: "", reason: "", status: "pending" },
+  errorFilters: { search: "", subject: "", topic: "", reason: "", status: "pending" },
+  errorFormOpen: false,
+  errorNavOpen: {},
   lawEditId: "",
   lawSchedule: {},
   bannerHidden: false,
@@ -178,6 +180,14 @@ function normalizeRevision(item = {}) {
   };
 }
 
+function cycleErrorImages(list) {
+  // Só metadados dos prints; os arquivos ficam no IndexedDB (ver caderno.js).
+  return (Array.isArray(list) ? list : [])
+    .map((image) => ({ id: cycleText(image?.id).replace(/[^\w-]/g, ""), w: cycleInt(image?.w, 0, 20000, 0), h: cycleInt(image?.h, 0, 20000, 0) }))
+    .filter((image) => image.id)
+    .slice(0, 12);
+}
+
 function normalizeErrorEntry(item = {}) {
   const date = cycleIsISO(item.date) ? item.date : cycleToday();
   // Não ler `state` aqui: este normalizador roda durante `let state = loadState()` (zona morta).
@@ -193,6 +203,8 @@ function normalizeErrorEntry(item = {}) {
     statement: cycleText(item.statement),
     myAnswer: cycleText(item.myAnswer),
     correctAnswer: cycleText(item.correctAnswer),
+    images: cycleErrorImages(item.images),
+    answerImages: cycleErrorImages(item.answerImages),
     reason,
     foundation: cycleText(item.foundation),
     rule: cycleText(item.rule),
@@ -982,9 +994,86 @@ function cycleReasonOptions(selected, { withAll = false } = {}) {
   return all + Object.entries(ERROR_REASONS).map(([key, label]) => `<option value="${key}" ${key === selected ? "selected" : ""}>${escapeHTML(label)}</option>`).join("");
 }
 
+function errorMatchesBase(entry, filters, today, search) {
+  const status = errorStatus(entry);
+  if (filters.reason && entry.reason !== filters.reason) return false;
+  if (filters.status === "pending" && status === "mastered") return false;
+  if (filters.status === "due" && !(status !== "mastered" && entry.dueDate && entry.dueDate <= today)) return false;
+  if (filters.status === "mastered" && status !== "mastered") return false;
+  if (search) {
+    const haystack = [entry.statement, entry.myAnswer, entry.correctAnswer, entry.foundation, entry.rule, entry.source, entry.tags.join(" "), getEntryScopeLabel(entry), ERROR_REASONS[entry.reason]].join(" ");
+    const normalized = typeof normalizeSearchText === "function" ? normalizeSearchText(haystack) : haystack.toLowerCase();
+    if (!normalized.includes(search)) return false;
+  }
+  return true;
+}
+
+function errorExcerpt(entry, max = 80) {
+  return cycleExcerpt(entry.statement, max) || ((entry.images || []).length ? "Questão em print" : "Erro sem enunciado");
+}
+
+function errorFormSet(open) {
+  cycleUI.errorFormOpen = open;
+  $("#errorForm")?.classList.toggle("hidden", !open);
+  $("#errorNewBtn")?.classList.toggle("hidden", open);
+}
+
+/** Abre o formulário já na matéria/assunto que está selecionado no menu. Também usado ao colar um print fora do formulário. */
+function errorFormOpen() {
+  const filters = cycleUI.errorFilters;
+  if (!cycleUI.errorEditId && !cycleUI.errorPrefill) {
+    cycleUI.errorPrefill = {
+      subjectId: filters.subject && filters.subject !== "none" ? filters.subject : "",
+      topicId: filters.topic && filters.topic !== "none" ? filters.topic : "",
+      date: "",
+    };
+  }
+  cycleUI.errorFormOpen = true;
+  renderCycle();
+}
+
+function errorNavBadges(item) {
+  return `${item.due ? `<span class="nav-due" title="para refazer hoje">${item.due}</span>` : ""}<span class="nav-num">${item.total}</span>`;
+}
+
+function errorNavHTML(nav, filters) {
+  const open = cycleUI.errorNavOpen;
+  const item = (cls, active, subject, topic, label, counts, color) =>
+    `<button type="button" class="error-nav-item ${cls} ${active ? "is-active" : ""}" data-cycle-action="errorNav" data-subject="${subject}" data-topic="${topic}" ${active ? 'aria-current="true"' : ""}${color ? ` style="--dot:${escapeHTML(color)}"` : ""}>${color !== undefined ? '<i class="nav-dot" aria-hidden="true"></i>' : ""}<span class="nav-name">${escapeHTML(label)}</span>${errorNavBadges(counts)}</button>`;
+
+  const groups = nav.subjects.map((subject) => {
+    const isOpen = open[subject.id] ?? filters.subject === subject.id;
+    const hasTopics = subject.topics.length > 0;
+    const topics = [
+      ...subject.topics.map((topic) => item("is-topic", filters.subject === subject.id && filters.topic === topic.id, subject.id, topic.id, topic.name, topic)),
+      hasTopics && subject.noTopic.total ? item("is-topic is-muted", filters.subject === subject.id && filters.topic === "none", subject.id, "none", "Sem assunto específico", subject.noTopic) : "",
+    ].join("");
+    return `
+      <div class="error-nav-group ${isOpen ? "is-open" : ""}">
+        <div class="error-nav-row">
+          <button type="button" class="error-nav-toggle" data-cycle-action="errorNavToggle" data-subject="${subject.id}" aria-expanded="${isOpen && hasTopics}" aria-label="${isOpen ? "Recolher" : "Expandir"} assuntos de ${escapeHTML(subject.name)}" ${hasTopics ? "" : "disabled"}><span aria-hidden="true">›</span></button>
+          ${item("is-subject", filters.subject === subject.id && !filters.topic, subject.id, "", subject.name, subject, subject.color || "#0f766e")}
+        </div>
+        ${isOpen && hasTopics ? `<div class="error-nav-topics">${topics}</div>` : ""}
+      </div>`;
+  });
+  const orphan = nav.orphan ? `<div class="error-nav-row">${item("is-subject is-muted", filters.subject === "none", "none", "", "Sem matéria", nav.orphan, "#94a3b8")}</div>` : "";
+  const all = item("is-all", !filters.subject, "", "", "Todas as matérias", nav);
+  return nav.total || filters.subject ? `${all}${groups.join("")}${orphan}` : `<div class="empty-state">O menu aparece quando houver erros.</div>`;
+}
+
+function errorCrumbHTML(filters, maps) {
+  if (!filters.subject) return "";
+  const subject = filters.subject === "none" ? "Sem matéria" : maps.subjectById.get(filters.subject)?.name || "";
+  const topic = filters.topic ? (filters.topic === "none" ? "Sem assunto específico" : maps.topicById.get(filters.topic)?.name || "") : "";
+  const link = (subjectId, label) => `<button class="crumb-link" type="button" data-cycle-action="errorNav" data-subject="${subjectId}" data-topic="">${escapeHTML(label)}</button>`;
+  return `<nav class="error-crumb" aria-label="Local no caderno">${link("", "Todas")}<span aria-hidden="true">›</span>${topic ? `${link(filters.subject, subject)}<span aria-hidden="true">›</span><strong>${escapeHTML(topic)}</strong>` : `<strong>${escapeHTML(subject)}</strong>`}</nav>`;
+}
+
 function renderErrors() {
   const today = cycleToday();
   const filters = cycleUI.errorFilters;
+  if (cycleUI.errorPrefill) cycleUI.errorFormOpen = true;
 
   populateSubjectSelect($("#errorSubject"));
   populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject")?.value || "", emptyLabel: "Sem assunto específico" });
@@ -994,9 +1083,13 @@ function renderErrors() {
   if (!reasonSelect.options.length) reasonSelect.innerHTML = cycleReasonOptions("conhecimento");
   if (!$("#errorDate").value) $("#errorDate").value = today;
 
-  populateSubjectSelect($("#errorFilterSubject"), { includeEmpty: true, emptyLabel: "Todas as matérias" });
-  $("#errorFilterSubject").value = state.subjects.some((subject) => subject.id === filters.subject) ? filters.subject : "";
-  filters.subject = $("#errorFilterSubject").value;
+  // Filtro de matéria/assunto: descarta o que não existe mais.
+  const maps = erroMaps(state.subjects, state.topics);
+  if (filters.subject && filters.subject !== "none" && !maps.subjectById.has(filters.subject)) filters.subject = "";
+  if (!filters.subject) filters.topic = "";
+  if (filters.topic && filters.topic !== "none" && maps.topicById.get(filters.topic)?.subjectId !== filters.subject) filters.topic = "";
+  filters.topic = filters.topic || "";
+
   $("#errorFilterReason").innerHTML = cycleReasonOptions(filters.reason, { withAll: true });
   $("#errorFilterStatus").value = filters.status;
   cycleSetValueIfIdle("#errorSearch", filters.search);
@@ -1011,6 +1104,7 @@ function renderErrors() {
     if (prefill.date) $("#errorDate").value = prefill.date;
     window.setTimeout(() => $("#errorStatement")?.focus(), 80);
   }
+  errorFormSet(cycleUI.errorFormOpen || Boolean(cycleUI.errorEditId));
 
   const all = state.errorNotebook;
   const open = all.filter((entry) => !entry.mastered);
@@ -1027,30 +1121,37 @@ function renderErrors() {
   renderErrorCharts(reasonCounts);
   updateErrorFormMode();
 
+  // Situação, motivo e busca valem para o menu e para a lista; matéria/assunto só para a lista.
   const search = typeof normalizeSearchText === "function" ? normalizeSearchText(filters.search) : filters.search.toLowerCase();
-  const matches = all
-    .filter((entry) => {
-      const status = errorStatus(entry);
-      if (filters.subject && entry.subjectId !== filters.subject) return false;
-      if (filters.reason && entry.reason !== filters.reason) return false;
-      if (filters.status === "pending" && status === "mastered") return false;
-      if (filters.status === "due" && !(status !== "mastered" && entry.dueDate && entry.dueDate <= today)) return false;
-      if (filters.status === "mastered" && status !== "mastered") return false;
-      if (search) {
-        const haystack = [entry.statement, entry.myAnswer, entry.correctAnswer, entry.foundation, entry.rule, entry.source, entry.tags.join(" "), getEntryScopeLabel(entry), ERROR_REASONS[entry.reason]].join(" ");
-        const normalized = typeof normalizeSearchText === "function" ? normalizeSearchText(haystack) : haystack.toLowerCase();
-        if (!normalized.includes(search)) return false;
-      }
-      return true;
-    })
+  const base = all.filter((entry) => errorMatchesBase(entry, filters, today, search));
+  const nav = buildErrorNav(base, state.subjects, state.topics, today, { subject: filters.subject, topic: filters.topic });
+  $("#errorNav").innerHTML = errorNavHTML(nav, filters);
+  $("#errorCrumb").innerHTML = errorCrumbHTML(filters, maps);
+
+  const matches = base
+    .filter((entry) => erroScopeMatches(erroEntryScope(entry, maps), filters))
     .sort((a, b) => Number(a.mastered) - Number(b.mastered) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || b.date.localeCompare(a.date));
 
   $("#errorListSummary").textContent = all.length
     ? `${matches.length} de ${all.length} ${all.length === 1 ? "erro" : "erros"} no filtro atual.`
-    : "Seu caderno está vazio. Registre o primeiro erro ao lado.";
-  $("#errorList").innerHTML = matches.length
-    ? matches.map((entry) => errorCardHTML(entry, today)).join("")
-    : `<div class="empty-state">${all.length ? "Nenhum erro com esses filtros." : "Quando você errar uma questão, registre aqui o porquê e como não errar de novo."}</div>`;
+    : "Seu caderno está vazio.";
+
+  if (!matches.length) {
+    $("#errorList").innerHTML = all.length
+      ? `<div class="empty-state">Nenhum erro com esses filtros.</div>`
+      : `<div class="empty-state"><p>Quando você errar uma questão, registre aqui o porquê e como não errar de novo. Dá para colar o print da questão com Ctrl+V.</p><button class="button primary" data-cycle-action="openErrorForm" type="button">Registrar o primeiro erro</button></div>`;
+    return;
+  }
+  $("#errorList").innerHTML = groupErrorsByScope(matches, state.subjects, state.topics, filters)
+    .map(
+      (group) => `
+        <section class="error-group">
+          ${group.title ? `<h4 class="error-group-title">${group.color ? `<i class="nav-dot" style="--dot:${escapeHTML(group.color)}" aria-hidden="true"></i>` : ""}${escapeHTML(group.title)}<small>${cyclePlural(group.items.length, "erro", "erros")}</small></h4>` : ""}
+          ${group.items.map((entry) => errorCardHTML(entry, today)).join("")}
+        </section>`
+    )
+    .join("");
+  erroImgHydrate($("#errorList"));
 }
 
 function renderErrorCharts(reasonCounts) {
@@ -1095,6 +1196,8 @@ function errorCardHTML(entry, today) {
   const due = !entry.mastered && entry.dueDate && entry.dueDate <= today;
   const nextText = entry.mastered ? "dominado" : entry.dueDate ? (due ? "refazer hoje" : `próxima em ${formatDate(entry.dueDate)}`) : "";
   const tags = entry.tags.length ? `<div class="chip-row">${entry.tags.map((tag) => `<span class="tag">#${escapeHTML(tag)}</span>`).join("")}</div>` : "";
+  const questionShots = erroShotsHTML(entry.images, "Print da questão");
+  const answerShots = erroShotsHTML(entry.answerImages, "Print do gabarito");
   const retestArea = retesting
     ? answerHidden
       ? `<div class="retest-box"><p>Responda sem olhar o gabarito. Quando estiver pronto, confira.</p><button class="button primary" data-cycle-action="showErrorAnswer" data-id="${entry.id}" type="button">Mostrar gabarito</button></div>`
@@ -1103,6 +1206,7 @@ function errorCardHTML(entry, today) {
            <button class="button ghost danger" data-cycle-action="errorResult" data-result="wrong" data-id="${entry.id}" type="button">Errei de novo</button>
          </div></div>`
     : "";
+  const showAnswer = !answerHidden && (entry.correctAnswer || answerShots);
   return `
     <article class="error-card status-${status} ${due ? "is-due" : ""}">
       <div class="performance-top">
@@ -1112,9 +1216,9 @@ function errorCardHTML(entry, today) {
         </div>
         <div class="chip-row"><span class="tag reason-tag">${escapeHTML(ERROR_REASONS[entry.reason])}</span><span class="tag status-tag status-${status}">${errorStatusLabel(entry)}</span></div>
       </div>
-      <div class="error-block"><span class="field-title">Questão ou dúvida</span><p class="pre-wrap">${escapeHTML(entry.statement)}</p></div>
+      <div class="error-block"><span class="field-title">Questão ou dúvida</span>${entry.statement ? `<p class="pre-wrap">${escapeHTML(entry.statement)}</p>` : ""}${questionShots}</div>
       ${entry.myAnswer && !answerHidden ? `<div class="error-block wrong"><span class="field-title">O que eu respondi</span><p class="pre-wrap">${escapeHTML(entry.myAnswer)}</p></div>` : ""}
-      ${answerHidden ? "" : `<div class="error-block right"><span class="field-title">Resposta correta</span><p class="pre-wrap">${escapeHTML(entry.correctAnswer)}</p></div>`}
+      ${showAnswer ? `<div class="error-block right"><span class="field-title">Resposta correta</span>${entry.correctAnswer ? `<p class="pre-wrap">${escapeHTML(entry.correctAnswer)}</p>` : ""}${answerShots}</div>` : ""}
       ${entry.foundation && !answerHidden ? `<div class="error-block"><span class="field-title">Fundamento</span><p class="pre-wrap">${escapeHTML(entry.foundation)}</p></div>` : ""}
       ${entry.rule && !answerHidden ? `<div class="error-block rule"><span class="field-title">Como não errar de novo</span><p class="pre-wrap">${escapeHTML(entry.rule)}</p></div>` : ""}
       ${tags}
@@ -1138,20 +1242,27 @@ function updateErrorFormMode() {
   const editing = Boolean(cycleUI.errorEditId);
   $("#errorFormTitle").textContent = editing ? "Editar erro" : "Registrar erro";
   $("#errorSubmitBtn").textContent = editing ? "Salvar edição" : "Salvar no caderno";
-  $("#errorCancelBtn").classList.toggle("hidden", !editing);
+  $("#errorCancelBtn").textContent = editing ? "Cancelar edição" : "Fechar";
 }
 
-function resetErrorForm() {
+/** Limpa o formulário. Com `keepContext`, mantém matéria, assunto, data e fonte para registrar vários erros seguidos. */
+function resetErrorForm({ keepContext = false } = {}) {
+  const kept = keepContext ? { subject: $("#errorSubject").value, topic: $("#errorTopic").value, date: $("#errorDate").value, source: $("#errorSource").value } : null;
   cycleUI.errorEditId = "";
   $("#errorForm").reset();
+  if (kept) $("#errorSubject").value = kept.subject;
   populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
   $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
-  $("#errorDate").value = cycleToday();
+  if (kept) $("#errorTopic").value = kept.topic;
+  $("#errorDate").value = kept ? kept.date : cycleToday();
+  if (kept) $("#errorSource").value = kept.source;
+  erroDraftReset();
   updateErrorFormMode();
 }
 
 function fillErrorForm(entry) {
   cycleUI.errorEditId = entry.id;
+  errorFormSet(true);
   $("#errorSubject").value = getEntrySubjectId(entry);
   populateTopicSelect($("#errorTopic"), { includeEmpty: true, subjectId: $("#errorSubject").value, emptyLabel: "Sem assunto específico" });
   $("#errorTopic").disabled = !state.topics.some((topic) => topic.subjectId === $("#errorSubject").value);
@@ -1165,6 +1276,7 @@ function fillErrorForm(entry) {
   $("#errorFoundation").value = entry.foundation;
   $("#errorRule").value = entry.rule;
   $("#errorTags").value = typeof hashtagsToInput === "function" ? hashtagsToInput(entry.tags) : entry.tags.join(" ");
+  erroDraftReset(entry);
   updateErrorFormMode();
   $("#errorForm").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1457,7 +1569,28 @@ function handleCycleAction(button) {
     const log = state.questionLogs.find((item) => item.id === id);
     cycleUI.errorEditId = "";
     cycleUI.errorPrefill = log ? { subjectId: getEntrySubjectId(log), topicId: log.topicId || "", date: log.date } : null;
+    cycleUI.errorFormOpen = true;
     setView("erros", { scrollTop: true });
+    return undefined;
+  }
+  if (type === "openErrorForm") {
+    if (cycleUI.errorEditId) resetErrorForm();
+    errorFormOpen();
+    return undefined;
+  }
+  if (type === "errorNav") {
+    const filters = cycleUI.errorFilters;
+    filters.subject = button.dataset.subject || "";
+    filters.topic = filters.subject ? button.dataset.topic || "" : "";
+    if (filters.subject) cycleUI.errorNavOpen[filters.subject] = true;
+    renderCycle();
+    return undefined;
+  }
+  if (type === "errorNavToggle") {
+    const subjectId = button.dataset.subject;
+    const wasOpen = cycleUI.errorNavOpen[subjectId] ?? cycleUI.errorFilters.subject === subjectId;
+    cycleUI.errorNavOpen[subjectId] = !wasOpen;
+    renderCycle();
     return undefined;
   }
   if (type === "editError") {
@@ -1467,10 +1600,13 @@ function handleCycleAction(button) {
   }
   if (type === "cancelErrorEdit") {
     resetErrorForm();
+    errorFormSet(false);
     return undefined;
   }
   if (type === "deleteError") {
     if (!window.confirm("Excluir este erro do caderno?")) return undefined;
+    const removed = state.errorNotebook.find((entry) => entry.id === id);
+    if (removed) erroEntryImagesDelete(removed);
     state.errorNotebook = state.errorNotebook.filter((entry) => entry.id !== id);
     if (cycleUI.errorEditId === id) resetErrorForm();
     cycleRefresh();
@@ -1519,14 +1655,15 @@ function handleCycleAction(button) {
       showToast("Vincule uma matéria ao erro para gerar o flashcard.");
       return undefined;
     }
-    const back = [entry.correctAnswer, entry.foundation ? `Fundamento: ${entry.foundation}` : "", entry.rule ? `Regra: ${entry.rule}` : ""].filter(Boolean).join("\n\n");
-    state.flashcards.push(normalizeFlashcard({ subjectId, topicId: entry.topicId, front: entry.statement, back, difficulty: "hard", priority: "Alta" }));
+    const hasShots = (entry.images || []).length || (entry.answerImages || []).length;
+    const back = [entry.correctAnswer || (hasShots ? "Veja o print no caderno de erros." : ""), entry.foundation ? `Fundamento: ${entry.foundation}` : "", entry.rule ? `Regra: ${entry.rule}` : ""].filter(Boolean).join("\n\n");
+    state.flashcards.push(normalizeFlashcard({ subjectId, topicId: entry.topicId, front: entry.statement || "Questão registrada em print (abra o caderno de erros).", back, difficulty: "hard", priority: "Alta" }));
     cycleRefresh();
     showToast("Flashcard criado (dificuldade: difícil).");
     return undefined;
   }
   if (type === "clearErrorFilters") {
-    cycleUI.errorFilters = { search: "", subject: "", reason: "", status: "pending" };
+    cycleUI.errorFilters = { search: "", subject: "", topic: "", reason: "", status: "pending" };
     $("#errorSearch").value = "";
     renderCycle();
     return undefined;
@@ -1615,6 +1752,7 @@ function handleCycleAction(button) {
 /* ------------------------------------------------------------------ */
 
 function bindCycleEvents() {
+  if (typeof bindCadernoEvents === "function") bindCadernoEvents();
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-cycle-action]");
     if (button) handleCycleAction(button);
@@ -1638,7 +1776,6 @@ function bindCycleEvents() {
   });
 
   [
-    ["#errorFilterSubject", "subject"],
     ["#errorFilterReason", "reason"],
     ["#errorFilterStatus", "status"],
   ].forEach(([selector, key]) => {
@@ -1686,40 +1823,65 @@ function bindCycleEvents() {
     showToast("Configurações do ciclo salvas.");
   });
 
-  $("#errorForm").addEventListener("submit", (event) => {
+  $("#errorForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const subjectId = $("#errorSubject").value;
     const statement = $("#errorStatement").value.trim();
     const correctAnswer = $("#errorCorrect").value.trim();
-    if (!subjectId || !statement || !correctAnswer) {
-      showToast("Informe matéria, a questão/dúvida e a resposta correta.");
+    if (!subjectId) {
+      showToast("Escolha a matéria do erro.");
       return;
     }
-    const topicId = $("#errorTopic").value;
-    const existing = state.errorNotebook.find((entry) => entry.id === cycleUI.errorEditId);
-    const data = {
-      subjectId: getTopic(topicId)?.subjectId || subjectId,
-      topicId,
-      date: $("#errorDate").value || cycleToday(),
-      source: $("#errorSource").value,
-      statement,
-      myAnswer: $("#errorMyAnswer").value,
-      correctAnswer,
-      reason: $("#errorReason").value,
-      foundation: $("#errorFoundation").value,
-      rule: $("#errorRule").value,
-      tags: $("#errorTags").value,
-    };
-    if (existing) {
-      const updated = normalizeErrorEntry({ ...existing, ...data, updatedAt: new Date().toISOString() });
-      Object.assign(existing, updated);
-    } else {
-      const firstGap = state.cycleSettings.errorIntervals[0];
-      state.errorNotebook.push(normalizeErrorEntry({ ...data, dueDate: cycleAddDays(data.date, firstGap), createdAt: new Date().toISOString() }));
+    if (!statement && !erroDraft.question.length) {
+      showToast("Escreva a questão/dúvida ou cole o print dela.");
+      return;
     }
-    resetErrorForm();
-    cycleRefresh();
-    showToast(existing ? "Erro atualizado." : "Erro salvo. Ele volta para você refazer amanhã.");
+    if (!correctAnswer && !erroDraft.answer.length) {
+      showToast("Informe a resposta correta (texto ou print do gabarito).");
+      return;
+    }
+    const submitButton = $("#errorSubmitBtn");
+    submitButton.disabled = true; // evita salvar duas vezes enquanto os prints são gravados
+    try {
+      const shots = await erroDraftCommit();
+      const topicId = $("#errorTopic").value;
+      const existing = state.errorNotebook.find((entry) => entry.id === cycleUI.errorEditId);
+      const data = {
+        subjectId: getTopic(topicId)?.subjectId || subjectId,
+        topicId,
+        date: $("#errorDate").value || cycleToday(),
+        source: $("#errorSource").value,
+        statement,
+        myAnswer: $("#errorMyAnswer").value,
+        correctAnswer,
+        images: shots.images,
+        answerImages: shots.answerImages,
+        reason: $("#errorReason").value,
+        foundation: $("#errorFoundation").value,
+        rule: $("#errorRule").value,
+        tags: $("#errorTags").value,
+      };
+      if (existing) {
+        const updated = normalizeErrorEntry({ ...existing, ...data, updatedAt: new Date().toISOString() });
+        Object.assign(existing, updated);
+      } else {
+        const firstGap = state.cycleSettings.errorIntervals[0];
+        state.errorNotebook.push(normalizeErrorEntry({ ...data, dueDate: cycleAddDays(data.date, firstGap), createdAt: new Date().toISOString() }));
+      }
+      resetErrorForm({ keepContext: !existing }); // erro novo: segue aberto, na mesma matéria, para o próximo
+      if (existing) errorFormSet(false);
+      cycleRefresh();
+      showToast(
+        shots.failed
+          ? "Erro salvo, mas o navegador não guardou os prints de forma permanente. Eles somem ao fechar a aba."
+          : existing
+            ? "Erro atualizado."
+            : "Erro salvo. Ele volta para você refazer amanhã."
+      );
+      if (!existing) $("#errorStatement")?.focus();
+    } finally {
+      submitButton.disabled = false;
+    }
   });
 
   $("#lawForm").addEventListener("submit", (event) => {

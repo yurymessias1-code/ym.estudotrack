@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261117-sync" />
+    <link rel="stylesheet" href="styles.css?v=20261123-erros" />
   </head>
   <body>
     <div class="app-shell">
@@ -632,73 +632,101 @@
               <p class="eyebrow">Aprendizado</p>
               <h2 id="errosTitle">Caderno de erros: transforme cada erro em ponto</h2>
             </div>
+            <button class="button primary" id="errorNewBtn" data-cycle-action="openErrorForm" type="button">Novo erro</button>
           </div>
 
           <div class="stat-grid" id="errorStats"></div>
 
-          <div class="content-grid form-and-list">
-            <form class="panel form-panel" id="errorForm">
+          <form class="panel form-panel error-form-panel hidden" id="errorForm">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Novo erro</p>
+                <h3 id="errorFormTitle">Registrar erro</h3>
+                <p class="muted-note">Dica: tire o print da questão e aperte Ctrl+V (ou Cmd+V) aqui dentro. O print fica salvo neste aparelho.</p>
+              </div>
+            </div>
+            <div class="error-form-grid">
+              <div class="error-form-col">
+                <div class="split-inputs">
+                  <label>
+                    Matéria
+                    <select id="errorSubject" required></select>
+                  </label>
+                  <label>
+                    Assunto
+                    <select id="errorTopic"></select>
+                  </label>
+                </div>
+                <div class="split-inputs">
+                  <label>
+                    Data
+                    <input id="errorDate" type="date" />
+                  </label>
+                  <label>
+                    Banca / prova / fonte
+                    <input id="errorSource" type="text" placeholder="Ex.: Cebraspe 2024, simulado 3" />
+                  </label>
+                </div>
+                <div class="shot-field" data-shot-slot="question">
+                  <label>
+                    Questão ou dúvida
+                    <textarea id="errorStatement" rows="4" placeholder="Cole ou resuma o enunciado / a afirmação que você errou (ou só cole o print abaixo)"></textarea>
+                  </label>
+                  <div class="shot-grid shot-draft" id="errorShotsQuestion" role="list"></div>
+                  <button class="shot-drop" type="button" data-shot-pick="question">Colar (Ctrl+V), arrastar ou escolher o print da questão</button>
+                  <input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-label="Escolher prints da questão" data-shot-input="question" />
+                </div>
+                <label>
+                  O que eu respondi ou pensei
+                  <input id="errorMyAnswer" type="text" placeholder="Ex.: marquei CERTO por achar que o prazo era de 10 dias" />
+                </label>
+              </div>
+              <div class="error-form-col">
+                <div class="shot-field" data-shot-slot="answer">
+                  <label>
+                    Resposta correta
+                    <textarea id="errorCorrect" rows="3" placeholder="Gabarito e a explicação em uma ou duas frases (ou cole o print do comentário)"></textarea>
+                  </label>
+                  <div class="shot-grid shot-draft" id="errorShotsAnswer" role="list"></div>
+                  <button class="shot-drop" type="button" data-shot-pick="answer">Colar (Ctrl+V), arrastar ou escolher o print do gabarito / comentário</button>
+                  <input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-label="Escolher prints do gabarito" data-shot-input="answer" />
+                </div>
+                <label>
+                  Por que errei?
+                  <select id="errorReason"></select>
+                </label>
+                <label>
+                  Fundamento (lei, artigo, súmula)
+                  <input id="errorFoundation" type="text" placeholder="Ex.: art. 37, XXI, CF; Súmula 331 do TST" />
+                </label>
+                <label>
+                  Como não errar de novo
+                  <textarea id="errorRule" rows="3" placeholder="Regra, macete ou palavra-chave para reconhecer essa pegadinha"></textarea>
+                </label>
+                <label>
+                  Tags
+                  <input id="errorTags" type="text" placeholder="#prazos #licitacao" />
+                </label>
+              </div>
+            </div>
+            <div class="inline-actions">
+              <button class="button primary" id="errorSubmitBtn" type="submit">Salvar no caderno</button>
+              <button class="button ghost" id="errorCancelBtn" data-cycle-action="cancelErrorEdit" type="button">Fechar</button>
+            </div>
+          </form>
+
+          <div class="error-workspace">
+            <aside class="panel error-nav-panel" aria-label="Menu do caderno">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Novo erro</p>
-                  <h3 id="errorFormTitle">Registrar erro</h3>
+                  <p class="eyebrow">Navegar</p>
+                  <h3>Matérias e assuntos</h3>
                 </div>
               </div>
-              <div class="split-inputs">
-                <label>
-                  Matéria
-                  <select id="errorSubject" required></select>
-                </label>
-                <label>
-                  Assunto
-                  <select id="errorTopic"></select>
-                </label>
-              </div>
-              <div class="split-inputs">
-                <label>
-                  Data
-                  <input id="errorDate" type="date" />
-                </label>
-                <label>
-                  Banca / prova / fonte
-                  <input id="errorSource" type="text" placeholder="Ex.: Cebraspe 2024, simulado 3" />
-                </label>
-              </div>
-              <label>
-                Questão ou dúvida
-                <textarea id="errorStatement" rows="4" placeholder="Cole ou resuma o enunciado / a afirmação que você errou"></textarea>
-              </label>
-              <label>
-                O que eu respondi ou pensei
-                <input id="errorMyAnswer" type="text" placeholder="Ex.: marquei CERTO por achar que o prazo era de 10 dias" />
-              </label>
-              <label>
-                Resposta correta
-                <textarea id="errorCorrect" rows="3" placeholder="Gabarito e a explicação em uma ou duas frases"></textarea>
-              </label>
-              <label>
-                Por que errei?
-                <select id="errorReason"></select>
-              </label>
-              <label>
-                Fundamento (lei, artigo, súmula)
-                <input id="errorFoundation" type="text" placeholder="Ex.: art. 37, XXI, CF; Súmula 331 do TST" />
-              </label>
-              <label>
-                Como não errar de novo
-                <textarea id="errorRule" rows="3" placeholder="Regra, macete ou palavra-chave para reconhecer essa pegadinha"></textarea>
-              </label>
-              <label>
-                Tags
-                <input id="errorTags" type="text" placeholder="#prazos #licitacao" />
-              </label>
-              <div class="inline-actions">
-                <button class="button primary" id="errorSubmitBtn" type="submit">Salvar no caderno</button>
-                <button class="button ghost hidden" id="errorCancelBtn" data-cycle-action="cancelErrorEdit" type="button">Cancelar edição</button>
-              </div>
-            </form>
+              <div class="error-nav" id="errorNav"></div>
+            </aside>
 
-            <section class="panel">
+            <section class="panel error-main">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Caderno</p>
@@ -706,10 +734,10 @@
                   <p class="muted-note" id="errorListSummary"></p>
                 </div>
               </div>
+              <div id="errorCrumb"></div>
               <div class="error-filters">
                 <label class="sr-only" for="errorSearch">Buscar no caderno</label>
                 <input id="errorSearch" type="search" autocomplete="off" placeholder="Buscar no caderno..." />
-                <select id="errorFilterSubject" aria-label="Filtrar por matéria"></select>
                 <select id="errorFilterReason" aria-label="Filtrar por motivo"></select>
                 <select id="errorFilterStatus" aria-label="Filtrar por situação">
                   <option value="pending">Não dominados</option>
@@ -2235,8 +2263,9 @@
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
     <script src="merge.js?v=20261117-sync"></script>
-    <script src="ciclo.js?v=20261117-sync"></script>
-    <script src="hoje.js?v=20261117-sync"></script>
+    <script src="caderno.js?v=20261123-erros"></script>
+    <script src="ciclo.js?v=20261123-erros"></script>
+    <script src="hoje.js?v=20261123-erros"></script>
     <script src="push.js?v=20261117-sync"></script>
     <script src="sessao.js?v=20261117-sync"></script>
     <script src="mesclar.js?v=20261117-sync"></script>

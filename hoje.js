@@ -531,7 +531,7 @@ function renderToday(data) {
       total: data.err.done + data.err.pending,
       muted: !data.err.done && !data.err.pending,
       body: errItems.length
-        ? `<ul class="today-list">${errItems.map((entry) => `<li>${escapeHTML(cycleExcerpt(entry.statement, 80))} <small>${escapeHTML(ERROR_REASONS[entry.reason])}</small></li>`).join("")}${data.err.items.length > 3 ? `<li class="more">+ ${data.err.items.length - 3} outros</li>` : ""}</ul>`
+        ? `<ul class="today-list">${errItems.map((entry) => `<li>${escapeHTML(typeof errorExcerpt === "function" ? errorExcerpt(entry, 80) : cycleExcerpt(entry.statement, 80))} <small>${escapeHTML(ERROR_REASONS[entry.reason])}</small></li>`).join("")}${data.err.items.length > 3 ? `<li class="more">+ ${data.err.items.length - 3} outros</li>` : ""}</ul>`
         : `<p class="muted-note">${data.err.done ? "Erros de hoje refeitos." : "Nenhum erro para refazer hoje."}</p>`,
       actions: data.err.pending ? `<button class="button primary" data-cycle-action="goErrors" data-status="due" type="button">Refazer erros</button>` : `<button class="mini-button" data-view="erros" type="button">Abrir caderno</button>`,
     })
@@ -698,7 +698,7 @@ function todayGoToStage(stage, data) {
   } else if (stage === "flash") {
     todayOpenFlashcards();
   } else if (stage === "err") {
-    cycleUI.errorFilters = { search: "", subject: "", reason: "", status: "due" };
+    cycleUI.errorFilters = { search: "", subject: "", topic: "", reason: "", status: "due" };
     const first = data.err.items[0];
     cycleUI.errorRetest = { id: first ? first.id : "", open: false };
     setView("erros", { scrollTop: true });
@@ -827,7 +827,7 @@ function handleTodayAction(type, button) {
     return true;
   }
   if (type === "goErrors") {
-    cycleUI.errorFilters = { search: "", subject: button.dataset.subject || "", reason: button.dataset.reason || "", status: button.dataset.status || "pending" };
+    cycleUI.errorFilters = { search: "", subject: button.dataset.subject || "", topic: button.dataset.topic || "", reason: button.dataset.reason || "", status: button.dataset.status || "pending" };
     cycleUI.errorRetest = { id: "", open: false };
     setView("erros", { scrollTop: true });
     return true;

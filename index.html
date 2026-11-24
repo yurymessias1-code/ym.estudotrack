@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261123-erros" />
+    <link rel="stylesheet" href="styles.css?v=20261126-historico" />
   </head>
   <body>
     <div class="app-shell">
@@ -642,7 +642,7 @@
               <div>
                 <p class="eyebrow">Novo erro</p>
                 <h3 id="errorFormTitle">Registrar erro</h3>
-                <p class="muted-note">Só a matéria e algum conteúdo são obrigatórios. Use “Meu caderno” abaixo como página livre: escreva, cole explicações (a formatação é mantida) e prints com Ctrl+V. Os prints ficam salvos neste aparelho.</p>
+                <p class="muted-note">Só a matéria e algum conteúdo são obrigatórios. Use “Meu caderno” abaixo como página livre: escreva, cole explicações (a formatação é mantida) e prints com Ctrl+V. Com conta online, os prints também vão para a nuvem.</p>
               </div>
             </div>
             <div class="error-form-grid">
@@ -749,6 +749,7 @@
                   <p class="eyebrow">Caderno</p>
                   <h3>Seus erros</h3>
                   <p class="muted-note" id="errorListSummary"></p>
+                  <p class="muted-note hidden" id="errorCloudStatus" role="status"></p>
                 </div>
               </div>
               <div id="errorCrumb"></div>
@@ -2071,6 +2072,19 @@
               <div class="local-recovery-list" id="localRecoveryList"></div>
               <p class="music-note">Use se o Supabase abriu vazio. A busca procura copias antigas salvas neste navegador antes de reenviar para a conta online.</p>
             </section>
+            <section class="panel form-panel local-recovery-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Nuvem</p>
+                  <h3>Versões na nuvem</h3>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="button secondary" data-action="loadCloudVersions" type="button">Ver versões salvas</button>
+              </div>
+              <div class="local-recovery-list" id="cloudVersionsList"></div>
+              <p class="music-note">O Supabase guarda cópias da sua conta: no máximo uma a cada 2 horas nas últimas 24 horas, depois uma por dia até 14 dias. Voltar a uma versão troca os dados da conta e dos seus outros aparelhos por aquela cópia. Antes disso, o app guarda uma cópia do que está aberto agora. Precisa do arquivo supabase-history.sql rodado uma vez.</p>
+            </section>
           </div>
         </section>
 
@@ -2279,14 +2293,14 @@
 
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
-    <script src="merge.js?v=20261117-sync"></script>
-    <script src="caderno.js?v=20261124-notas"></script>
-    <script src="ciclo.js?v=20261124-notas"></script>
-    <script src="hoje.js?v=20261124-notas"></script>
+    <script src="merge.js?v=20261126-historico"></script>
+    <script src="caderno.js?v=20261125-nuvem"></script>
+    <script src="ciclo.js?v=20261126-historico"></script>
+    <script src="hoje.js?v=20261126-historico"></script>
     <script src="push.js?v=20261117-sync"></script>
-    <script src="sessao.js?v=20261117-sync"></script>
-    <script src="mesclar.js?v=20261117-sync"></script>
+    <script src="sessao.js?v=20261126-historico"></script>
+    <script src="mesclar.js?v=20261126-historico"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="app.js?v=20261124-notas"></script>
+    <script src="app.js?v=20261126-historico"></script>
   </body>
 </html>

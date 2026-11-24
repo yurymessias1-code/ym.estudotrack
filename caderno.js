@@ -171,10 +171,10 @@ function erroImgRequest(db, mode, run) {
   });
 }
 
-async function erroImgPut(id, blob) {
+async function erroImgPut(id, blob, { synced = false } = {}) {
   const db = await erroImgOpenDB();
   if (db) {
-    const { ok } = await erroImgRequest(db, "readwrite", (store) => store.put({ id, blob, savedAt: Date.now() }));
+    const { ok } = await erroImgRequest(db, "readwrite", (store) => store.put({ id, blob, savedAt: Date.now(), synced }));
     if (ok) {
       erroImgMemory.delete(id);
       return true;
@@ -187,9 +187,11 @@ async function erroImgPut(id, blob) {
 async function erroImgGet(id) {
   if (erroImgMemory.has(id)) return erroImgMemory.get(id);
   const db = await erroImgOpenDB();
-  if (!db) return null;
-  const { result } = await erroImgRequest(db, "readonly", (store) => store.get(id));
-  return result && result.blob ? result.blob : null;
+  if (db) {
+    const { result } = await erroImgRequest(db, "readonly", (store) => store.get(id));
+    if (result && result.blob) return result.blob;
+  }
+  return erroCloudPull(id); // não está neste aparelho: busca na conta online
 }
 
 async function erroImgDelete(id) {
@@ -201,6 +203,7 @@ async function erroImgDelete(id) {
   }
   const db = await erroImgOpenDB();
   if (db) await erroImgRequest(db, "readwrite", (store) => store.delete(id));
+  erroCloudQueueDelete(id);
 }
 
 async function erroImgUrl(id) {
@@ -215,6 +218,304 @@ async function erroImgUrl(id) {
 function erroEntryImagesDelete(entry) {
   const ids = [...(entry.images || []), ...(entry.answerImages || [])].map((image) => image.id).concat(erroNotesImageIds(entry.notes));
   return Promise.all(ids.map((id) => erroImgDelete(id)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Prints na conta online (Supabase Storage)                           */
+/* ------------------------------------------------------------------ */
+/*
+ * Bucket privado `erro-prints`, uma pasta por usuário: <user_id>/<id do print>.
+ * O IndexedDB continua sendo o cache rápido; a nuvem é a cópia que sobrevive a limpar o navegador
+ * e aparece em outro aparelho. Sem conta online, nada muda (tudo fica só neste aparelho).
+ * Envios e exclusões que falham (sem internet) ficam numa fila e são repetidos depois.
+ */
+const ERRO_CLOUD = { bucket: "erro-prints", deleteQueueKey: "estudosTrack.erroImgDeleteQueue", intervalMs: 45000 };
+const erroCloudMiss = new Set(); // prints que a conta confirmou não ter (evita repetir a busca)
+const erroCloudPulling = new Map();
+const erroCloud = { busy: false, again: false, timer: null, lastError: "", bound: false };
+
+/** Todos os ids de print referenciados pelos erros do estado. */
+function erroAllPrintIds(source) {
+  const ids = new Set();
+  ((source && source.errorNotebook) || []).forEach((entry) => {
+    [...(entry.images || []), ...(entry.answerImages || [])].forEach((image) => image && image.id && ids.add(image.id));
+    erroNotesImageIds(entry.notes).forEach((id) => ids.add(id));
+  });
+  return [...ids];
+}
+
+async function erroCloudAuth() {
+  try {
+    if (typeof getSupabaseSettings !== "function" || typeof getSupabaseClient !== "function") return null;
+    const settings = getSupabaseSettings();
+    if (!settings || !settings.configured) return null;
+    const client = getSupabaseClient();
+    if (!client) return null;
+    const { data } = await client.auth.getSession();
+    const session = data && data.session;
+    if (!session || !session.access_token || !session.user || !session.user.id) return null;
+    return { url: String(settings.url).replace(/\/+$/, ""), anonKey: settings.anonKey, token: session.access_token, uid: session.user.id };
+  } catch (error) {
+    return null;
+  }
+}
+
+function erroCloudHeaders(auth, extra = {}) {
+  return { Authorization: `Bearer ${auth.token}`, apikey: auth.anonKey, ...extra };
+}
+
+function erroCloudPath(auth, id) {
+  return `${auth.url}/storage/v1/object/${ERRO_CLOUD.bucket}/${auth.uid}/${erroSafeId(id)}`;
+}
+
+async function erroCloudUpload(auth, id, blob) {
+  try {
+    const response = await fetch(erroCloudPath(auth, id), {
+      method: "POST",
+      headers: erroCloudHeaders(auth, { "Content-Type": blob.type || "image/webp", "x-upsert": "true" }),
+      body: blob,
+    });
+    if (response.ok) {
+      erroCloud.lastError = "";
+      return true;
+    }
+    const text = await response.text().catch(() => "");
+    erroCloud.lastError = /bucket not found/i.test(text) ? "bucket" : `código ${response.status}`;
+    return false;
+  } catch (error) {
+    return false; // sem internet: tenta de novo depois
+  }
+}
+
+async function erroCloudRemove(auth, id) {
+  try {
+    const response = await fetch(erroCloudPath(auth, id), { method: "DELETE", headers: erroCloudHeaders(auth) });
+    if (response.ok || response.status === 404) return true;
+    return /not.?found/i.test(await response.text().catch(() => ""));
+  } catch (error) {
+    return false;
+  }
+}
+
+async function erroCloudPull(id) {
+  const safe = erroSafeId(id);
+  if (!safe || erroCloudMiss.has(safe)) return null;
+  if (erroCloudPulling.has(safe)) return erroCloudPulling.get(safe);
+  const job = (async () => {
+    const auth = await erroCloudAuth();
+    if (!auth) return null;
+    try {
+      const response = await fetch(`${auth.url}/storage/v1/object/authenticated/${ERRO_CLOUD.bucket}/${auth.uid}/${safe}`, { headers: erroCloudHeaders(auth) });
+      if (response.status === 404 || response.status === 400) {
+        erroCloudMiss.add(safe);
+        return null;
+      }
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      if (!blob || !blob.size) return null;
+      await erroImgPut(safe, blob, { synced: true }); // guarda no aparelho para as próximas vezes
+      return blob;
+    } catch (error) {
+      return null;
+    }
+  })();
+  erroCloudPulling.set(safe, job);
+  try {
+    return await job;
+  } finally {
+    erroCloudPulling.delete(safe);
+  }
+}
+
+function erroCloudQueueRead() {
+  try {
+    const list = JSON.parse(localStorage.getItem(ERRO_CLOUD.deleteQueueKey) || "[]");
+    return Array.isArray(list) ? list.filter((id) => typeof id === "string") : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function erroCloudQueueWrite(list) {
+  try {
+    if (list.length) localStorage.setItem(ERRO_CLOUD.deleteQueueKey, JSON.stringify(list.slice(-500)));
+    else localStorage.removeItem(ERRO_CLOUD.deleteQueueKey);
+  } catch (error) {
+    // sem localStorage: a exclusão na nuvem fica só como tentativa imediata
+  }
+}
+
+function erroCloudQueueDelete(id) {
+  if (typeof isSupabaseConfigured !== "function" || !isSupabaseConfigured()) return;
+  const safe = erroSafeId(id);
+  if (!safe) return;
+  const queue = erroCloudQueueRead();
+  if (!queue.includes(safe)) erroCloudQueueWrite([...queue, safe]);
+  erroCloudKick();
+}
+
+function erroCloudMarkSynced(db, id) {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(ERRO_IMG.store, "readwrite");
+      const store = tx.objectStore(ERRO_IMG.store);
+      const request = store.get(id);
+      request.onsuccess = () => {
+        if (request.result) store.put({ ...request.result, synced: true }); // só se ainda existir (não ressuscita apagado)
+      };
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = tx.onabort = () => resolve(false);
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+/** Lista os prints locais ainda não enviados que pertencem ao estado atual. */
+async function erroCloudPending(db) {
+  const wanted = new Set(typeof state !== "undefined" ? erroAllPrintIds(state) : []);
+  if (!db || !wanted.size) return [];
+  const { result } = await erroImgRequest(db, "readonly", (store) => store.getAll());
+  return (result || []).filter((record) => record && record.blob && !record.synced && wanted.has(record.id));
+}
+
+async function erroCloudSync() {
+  if (erroCloud.busy) {
+    erroCloud.again = true;
+    return;
+  }
+  erroCloud.busy = true;
+  try {
+    const auth = await erroCloudAuth();
+    if (!auth) return;
+    const left = [];
+    for (const id of erroCloudQueueRead()) if (!(await erroCloudRemove(auth, id))) left.push(id);
+    erroCloudQueueWrite(left);
+    const db = await erroImgOpenDB();
+    for (const record of await erroCloudPending(db)) {
+      if (left.includes(record.id)) continue;
+      if (await erroCloudUpload(auth, record.id, record.blob)) await erroCloudMarkSynced(db, record.id);
+      else if (erroCloud.lastError) break; // erro do servidor (ex.: bucket inexistente): não insiste em cada print
+    }
+  } catch (error) {
+    // best-effort: a próxima rodada tenta de novo
+  } finally {
+    erroCloud.busy = false;
+    erroCloudStatusRefresh();
+    if (erroCloud.again) {
+      erroCloud.again = false;
+      erroCloudKick();
+    }
+  }
+}
+
+/** Agenda uma rodada de envio (junta várias chamadas seguidas numa só). */
+function erroCloudKick(delay = 400) {
+  if (typeof window === "undefined") return;
+  clearTimeout(erroCloud.timer);
+  erroCloud.timer = window.setTimeout(erroCloudSync, delay);
+}
+
+async function erroCloudStatusRefresh() {
+  if (typeof document === "undefined") return;
+  const box = document.getElementById("errorCloudStatus");
+  if (!box) return;
+  const hasShots = typeof state !== "undefined" && erroAllPrintIds(state).length > 0;
+  const auth = await erroCloudAuth();
+  let text = "";
+  if (!auth) text = hasShots ? "Prints guardados só neste aparelho. Entre numa conta online para guardá-los na nuvem." : "";
+  else {
+    const pending = (await erroCloudPending(await erroImgOpenDB())).length;
+    if (erroCloud.lastError === "bucket") text = "Os prints não estão indo para a nuvem: falta criar o bucket “erro-prints” (rode supabase-storage.sql no Supabase).";
+    else if (erroCloud.lastError) text = `Falha ao enviar prints para a nuvem (${erroCloud.lastError}). Vou tentar de novo.`;
+    else if (pending) text = `Enviando prints para a sua conta… ${pending} pendente${pending === 1 ? "" : "s"}.`;
+    else if (hasShots) text = "Prints guardados na sua conta online.";
+  }
+  box.textContent = text;
+  box.classList.toggle("hidden", !text);
+}
+
+function erroCloudBind() {
+  if (erroCloud.bound || typeof window === "undefined") return;
+  erroCloud.bound = true;
+  window.addEventListener("online", () => erroCloudKick(1000));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") erroCloudKick(1000);
+  });
+  window.setInterval(erroCloudSync, ERRO_CLOUD.intervalMs);
+  erroCloudKick(2500);
+}
+
+/** Apaga os prints do estado (aparelho e nuvem), mais qualquer sobra da pasta do usuário na conta. */
+async function erroPrintsPurge(source) {
+  await Promise.all(erroAllPrintIds(source).map((id) => erroImgDelete(id)));
+  const auth = await erroCloudAuth();
+  if (!auth) return;
+  try {
+    const listed = await fetch(`${auth.url}/storage/v1/object/list/${ERRO_CLOUD.bucket}`, {
+      method: "POST",
+      headers: erroCloudHeaders(auth, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ prefix: auth.uid, limit: 1000 }),
+    });
+    if (!listed.ok) return;
+    const names = (await listed.json()).map((item) => item && item.name).filter(Boolean);
+    if (!names.length) return;
+    await fetch(`${auth.url}/storage/v1/object/${ERRO_CLOUD.bucket}`, {
+      method: "DELETE",
+      headers: erroCloudHeaders(auth, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ prefixes: names.map((name) => `${auth.uid}/${name}`) }),
+    });
+  } catch (error) {
+    // exclusão manual no painel do Supabase continua possível
+  }
+}
+
+/* ---------- backup em arquivo: leva os prints junto ---------- */
+
+function erroBlobToDataURL(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(blob);
+  });
+}
+
+function erroDataURLToBlob(dataUrl) {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(String(dataUrl || ""));
+  if (!match) return null;
+  const type = match[1] || "image/webp";
+  const bytes = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+  const array = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) array[index] = bytes.charCodeAt(index);
+  return new Blob([array], { type });
+}
+
+/** { id: "data:image/webp;base64,..." } de todos os prints do estado que dá para obter (aparelho ou nuvem). */
+async function erroPrintsExport(source) {
+  const out = {};
+  for (const id of erroAllPrintIds(source)) {
+    const blob = await erroImgGet(id);
+    if (!blob) continue;
+    const dataUrl = await erroBlobToDataURL(blob);
+    if (dataUrl) out[id] = dataUrl;
+  }
+  return out;
+}
+
+/** Devolve ao aparelho (e, com conta online, à nuvem) os prints de um backup em arquivo. Retorna quantos entraram. */
+async function erroPrintsRestore(prints) {
+  let count = 0;
+  for (const [rawId, dataUrl] of Object.entries(prints || {})) {
+    const id = erroSafeId(rawId);
+    const blob = id ? erroDataURLToBlob(dataUrl) : null;
+    if (!blob || !blob.size) continue;
+    erroImgUrls.delete(id);
+    erroCloudMiss.delete(id);
+    if (await erroImgPut(id, blob)) count += 1;
+  }
+  if (count) erroCloudKick(600);
+  return count;
 }
 
 /* ------------------------------------------------------------------ */
@@ -367,7 +668,7 @@ function erroShotHTML(image, { slot, label, index, total, removable, gallery }) 
         <img data-img-id="${id}" alt="${label} ${index + 1}" decoding="async" />
       </button>
       ${removable ? `<button type="button" class="shot-remove" data-shot-remove data-slot="${slot}" data-id="${id}" aria-label="Remover ${label} ${index + 1}">&times;</button>` : ""}
-      <figcaption class="shot-missing">Print salvo em outro aparelho</figcaption>
+      <figcaption class="shot-missing">Print indisponível (precisa de internet e de login)</figcaption>
     </figure>`;
 }
 
@@ -408,7 +709,7 @@ async function erroImgLoadInto(img) {
     figure?.classList.add("is-missing");
     if (!figure) {
       img.classList.add("is-missing");
-      img.alt = "Print salvo em outro aparelho";
+      img.alt = "Print indisponível (precisa de internet e de login)";
     }
   }
 }
@@ -475,7 +776,7 @@ async function erroViewerShow() {
   const url = id ? await erroImgUrl(id) : null;
   img.removeAttribute("src");
   if (url) img.src = url;
-  else img.alt = "Esse print está salvo em outro aparelho.";
+  else img.alt = "Esse print não está disponível agora (precisa de internet e de login).";
   element.classList.toggle("is-zoomed", erroViewer.zoom);
   element.querySelector("#shotViewerCount").textContent = `Print ${erroViewer.index + 1} de ${erroViewer.ids.length}`;
   element.querySelectorAll('[data-shot-viewer="prev"], [data-shot-viewer="next"]').forEach((button) => button.classList.toggle("hidden", erroViewer.ids.length < 2));
@@ -693,6 +994,7 @@ let cadernoBound = false;
 function bindCadernoEvents() {
   if (cadernoBound || typeof document === "undefined") return;
   cadernoBound = true;
+  erroCloudBind();
 
   document.addEventListener("paste", cadernoOnPaste);
 
@@ -800,5 +1102,5 @@ function bindCadernoEvents() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildErrorNav, groupErrorsByScope, erroEntryScope, erroScopeMatches, erroMaps, erroImgFit, erroNotesSanitize, erroNotesText, erroNotesImageIds };
+  module.exports = { buildErrorNav, groupErrorsByScope, erroEntryScope, erroScopeMatches, erroMaps, erroImgFit, erroNotesSanitize, erroNotesText, erroNotesImageIds, erroAllPrintIds, erroDataURLToBlob };
 }

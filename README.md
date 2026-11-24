@@ -252,7 +252,11 @@ O código fica em `ciclo.js` (carregado antes do `app.js`); os dados entram no m
 - **Menu por matéria e assunto** (à esquerda): árvore Matéria > Assunto com o total de erros e, em laranja, quantos vencem hoje. Os números respeitam os filtros de situação, motivo e busca, então batem com a lista ao clicar. Com "Todas as matérias" a lista vem agrupada por matéria; ao escolher uma matéria, agrupada por assunto. Uma trilha (Todas > Matéria > Assunto) mostra onde você está.
 - **Prints**: cole a imagem com **Ctrl+V** (ou Cmd+V) dentro do formulário, ou arraste o arquivo, ou use o botão para escolher da galeria/câmera. Há um campo de prints para a **questão** e outro para o **gabarito/comentário** (até 6 em cada). Com o formulário fechado, colar um print na aba abre o formulário já na matéria/assunto selecionado no menu. O texto da questão deixa de ser obrigatório quando há print. Ao refazer, o print do gabarito fica escondido junto com o texto. Clique no print para ampliar (setas para navegar, Esc para fechar).
 - Depois de salvar um erro novo, o formulário continua aberto com matéria, assunto, data e fonte mantidos, para lançar vários erros de um simulado em sequência.
-- **Onde ficam os prints:** são reduzidos (no máximo 1600 px) e gravados em **IndexedDB, neste aparelho**. No restante dos dados ficam só os metadados. Por isso eles **não** entram no backup JSON nem na sincronização entre aparelhos: em outro aparelho o erro aparece com o aviso "Print salvo em outro aparelho". Limpar os dados do navegador apaga os prints.
+- **Onde ficam os prints:** são reduzidos (no máximo 1600 px) e gravados em **IndexedDB, neste aparelho** (cache rápido). Com **conta online**, cada print também é enviado ao **Supabase Storage** (bucket privado `erro-prints`, uma pasta por usuário). No restante dos dados ficam só os metadados. Em outro aparelho, o print é baixado da conta na primeira vez que aparece e guardado no aparelho.
+- **Sem internet?** O print fica na fila e é enviado quando a conexão voltar (também ao reabrir o app ou voltar para a aba). Exclusões na nuvem seguem a mesma fila. Uma linha no topo da lista diz se os prints estão "guardados na sua conta online", "enviando… N pendentes" ou se falta criar o bucket.
+- **Backup em arquivo (Baixar backup / Exportar)** inclui os prints do caderno (em base64, só dentro do arquivo). Ao restaurar o arquivo, eles voltam ao aparelho e, com conta online, à nuvem. O código de backup para copiar e colar **não** leva imagens (ficaria enorme).
+- **Excluir meus dados** apaga também os prints (aparelho e nuvem).
+- **Configuração (uma vez):** rode `supabase-storage.sql` no SQL Editor do Supabase. Ele cria o bucket privado (limite de 5 MB por print) e as políticas para que cada usuário só acesse a própria pasta. Sem isso, o app continua funcionando só com o armazenamento local e avisa na lista.
 
 ### Lei seca
 
@@ -355,9 +359,9 @@ node tests/sessao-tests.js    # janela "O que você estudou?": criação de mat�
 node tests/merge-tests.js     # junção de estados entre aparelhos: coleções, exclusões (lápides), convergência
 node tests/mesclar-tests.js   # mesclar assuntos e matérias, com desfazer
 node tests/retencao-tests.js  # sequência, mapa de dias, aderência, retenção, carga e erros
-node tests/caderno-tests.js    # menu por matéria/assunto, filtros, agrupamento e redução de prints
+node tests/caderno-tests.js    # menu por matéria/assunto, filtros, agrupamento, anotações, ids de prints e redução de imagens
 npm install && npx playwright install chromium    # uma vez, para os testes no navegador
-npm run test:e2e              # roteiros no Chromium: ciclo, caderno de erros (colar print, menu, persistência), lembretes, Hoje, janela de sessão (e foco preso), sincronização
+npm run test:e2e              # roteiros no Chromium: ciclo, caderno de erros (colar print, menu, persistência), prints na nuvem (outro aparelho, exclusão, fila offline, backup), lembretes, Hoje, janela de sessão (e foco preso), sincronização
                               # entre dois aparelhos contra um Supabase falso, mesclagem e relatórios
 ```
 

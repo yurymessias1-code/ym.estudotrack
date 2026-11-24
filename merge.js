@@ -21,6 +21,7 @@ const MERGE_PATHS = [
   ["revisions"],
   ["errorNotebook"],
   ["lawPlans"],
+  ["pendingSessions"],
   ["cases", "STJ"],
   ["cases", "STF"],
   ["edital", "items"],
@@ -121,6 +122,21 @@ function mergeCollectIds(state) {
 function mergeAttachIds(state) {
   Object.defineProperty(state, "__ids", { value: mergeCollectIds(state), enumerable: false, writable: true, configurable: true });
   return state;
+}
+
+/**
+ * Prepara uma restauração de verdade (voltar a uma versão anterior da conta): o que existe agora e não existe
+ * na versão restaurada vira exclusão lembrada, e o que a versão tem e já tinha sido excluído volta como "revivido".
+ * Sem isso, a junção com os outros aparelhos traria de volta tudo o que a restauração tirou.
+ * Mantém as lápides e revividos atuais e entrega os ids de antes para o próximo salvamento registrar a diferença
+ * (via mergeRecordDeletions, chamado pelo saveState).
+ */
+function mergeCarryForwardForRestore(restored, previous) {
+  const tombstones = mergeUnionTimes(normalizeTombstones(previous?.meta?.tombstones), normalizeTombstones(restored.meta?.tombstones));
+  const revivals = mergeUnionTimes(normalizeTombstones(previous?.meta?.revivals), normalizeTombstones(restored.meta?.revivals));
+  restored.meta = { ...(restored.meta || {}), tombstones, revivals };
+  Object.defineProperty(restored, "__ids", { value: mergeCollectIds(previous || {}), enumerable: false, writable: true, configurable: true });
+  return restored;
 }
 
 /**
@@ -297,6 +313,7 @@ if (typeof module !== "undefined" && module.exports) {
     mergeUnionTimes,
     mergeCollectIds,
     mergeAttachIds,
+    mergeCarryForwardForRestore,
     mergeRecordDeletions,
     mergeStatesDetailed,
     mergeStates,

@@ -65,7 +65,13 @@ execFileSync(process.execPath, [path.join(__dirname, "caderno-tests.js")], { std
 assert(html.includes('src="caderno.js?v='), "caderno.js nao foi carregado no HTML.");
 assert(html.indexOf('src="caderno.js') < html.indexOf('src="ciclo.js'), "caderno.js deve carregar antes do ciclo.js.");
 ["errorNewBtn", "errorNav", "errorCrumb", "errorShotsQuestion", "errorShotsAnswer"].forEach((id) => assert(html.includes(`id="${id}"`), `#${id} ausente no HTML.`));
-assert(!/data:image|dataUrl/.test(caderno.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/image\/webp|image\/jpeg/g, "")), "caderno.js nao pode guardar prints em base64 no estado.");
+// base64 só existe no bloco do backup em arquivo (fora do estado); no resto do caderno.js e no ciclo.js é proibido.
+const backupBlock = caderno.slice(caderno.indexOf("/* ---------- backup em arquivo"), caderno.indexOf("/* Compressão"));
+assert(backupBlock.includes("erroPrintsExport") && backupBlock.includes("erroPrintsRestore"), "bloco de backup dos prints ausente no caderno.js.");
+const stripCode = (text) => text.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/image\/webp|image\/jpeg/g, "");
+assert(!/data:image|dataUrl/.test(stripCode(caderno.replace(backupBlock, ""))), "caderno.js nao pode guardar prints em base64 no estado.");
+assert(!/data:image|dataUrl|base64/i.test(stripCode(fs.readFileSync(path.join(root, "ciclo.js"), "utf8"))), "ciclo.js nao pode guardar prints em base64 no estado.");
+assert(fs.existsSync(path.join(root, "supabase-storage.sql")) && fs.readFileSync(path.join(root, "supabase-storage.sql"), "utf8").includes("auth.uid()"), "supabase-storage.sql ausente ou sem politica por usuario.");
 assert(css.includes(".error-nav") && css.includes(".shot-viewer") && css.includes(".shot-grid"), "Estilos do menu/prints do caderno ausentes.");
 assert(fs.existsSync(path.join(__dirname, "e2e", "caderno.e2e.js")), "tests/e2e/caderno.e2e.js ausente.");
 assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("caderno.e2e.js"), "run-all.js nao inclui o roteiro do caderno.");

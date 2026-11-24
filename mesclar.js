@@ -106,11 +106,18 @@ function mesclarCountRefs(state, { subjectId = "", topicId = "" }) {
 /** Remapeia chaves de revisão automática (study:/weak:) e resolve colisões mantendo a que mais avançou. */
 function mesclarRemapRevisionKeys(state, recorder, fromId, toId) {
   const pattern = /^(study|weak):([^:]+):(.+)$/;
+  const remapKey = (key) => {
+    const found = pattern.exec(key || "");
+    return found && found[2] === fromId ? `${found[1]}:${toId}:${found[3]}` : key;
+  };
   state.revisions.forEach((revision) => {
-    const match = pattern.exec(revision.originKey || "");
-    if (match && match[2] === fromId) {
+    const newOrigin = remapKey(revision.originKey);
+    const absorbed = Array.isArray(revision.absorbedKeys) ? revision.absorbedKeys : [];
+    const newAbsorbed = absorbed.map(remapKey);
+    if (newOrigin !== revision.originKey || newAbsorbed.some((key, index) => key !== absorbed[index])) {
       recorder.touch("revisions", revision);
-      revision.originKey = `${match[1]}:${toId}:${match[3]}`;
+      revision.originKey = newOrigin;
+      if (absorbed.length) revision.absorbedKeys = newAbsorbed;
     }
   });
   const byKey = new Map();

@@ -19,8 +19,16 @@ const AUXILIARY_BACKUP_INDEX_KEY = "ymEstudos.auxBackup.index.v1";
 const AUXILIARY_BACKUP_DB_NAME = "estudosTrackAuxiliaryBackups";
 const AUXILIARY_BACKUP_DB_VERSION = 1;
 const AUXILIARY_BACKUP_STORE = "snapshots";
-const AUXILIARY_BACKUP_MAX_PER_PROFILE = 5;
-const AUXILIARY_BACKUP_MIN_INTERVAL_MS = 60 * 1000;
+const AUXILIARY_BACKUP_MAX_PER_PROFILE = 12; // cópias automáticas guardadas por perfil (no IndexedDB)
+const AUXILIARY_BACKUP_MAX_SPECIAL = 6; // cópias manuais e de "antes de restaurar": não são empurradas pelas automáticas
+const AUXILIARY_BACKUP_LOCAL_FALLBACK_MAX = 2; // só se o navegador não tiver IndexedDB
+const AUXILIARY_BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
+const AUXILIARY_BACKUP_LAST_KEY_PREFIX = "ymEstudos.auxLast.";
+const AUXILIARY_KIND_LABELS = {
+  auto: "Cofre auxiliar IndexedDB",
+  manual: "Cofre auxiliar: backup manual",
+  "antes-de-restaurar": "Cofre auxiliar: cópia de antes de restaurar",
+};
 const FORM_DRAFT_KEY_PREFIX = "ymEstudos.formDraft.";
 const POMODORO_CHECKPOINT_KEY_PREFIX = "ymEstudos.pomodoroCheckpoint.";
 const POMODORO_CHECKPOINT_VERSION = 1;
@@ -251,6 +259,8 @@ function createSupabaseFallbackQuery(table) {
   let selectedColumns = "*";
   const filters = [];
   let updatePayload = null;
+  let orderParam = "";
+  let limitCount = 0;
   const sessionToken = () => getStoredSupabaseFallbackSession()?.access_token || "";
   const filterQuery = () => {
     const query = new URLSearchParams();
@@ -283,6 +293,36 @@ function createSupabaseFallbackQuery(table) {
     eq(column, value) {
       filters.push([column, value]);
       return this;
+    },
+    order(column, options = {}) {
+      orderParam = `${column}.${options.ascending === false ? "desc" : "asc"}`;
+      return this;
+    },
+    limit(count) {
+      limitCount = Number(count) || 0;
+      return this;
+    },
+    /** select(...).eq(...).order(...).limit(...) pode ser aguardado direto, como no supabase-js. */
+    then(resolve, reject) {
+      return this.runList().then(resolve, reject);
+    },
+    async runList() {
+      const query = filterQuery();
+      query.set("select", selectedColumns);
+      if (orderParam) query.set("order", orderParam);
+      if (limitCount) query.set("limit", String(limitCount));
+      const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}?${query}`, { token: sessionToken() });
+      if (error) return { data: null, error };
+      return { data: Array.isArray(data) ? data : data ? [data] : [], error: null };
+    },
+    async insert(payload) {
+      const { data, error } = await supabaseFallbackFetch(`/rest/v1/${encodeURIComponent(table)}`, {
+        method: "POST",
+        token: sessionToken(),
+        headers: { Prefer: "return=minimal" },
+        body: payload,
+      });
+      return { data, error };
     },
     async maybeSingle() {
       const query = filterQuery();
@@ -607,6 +647,8 @@ async function deleteCurrentProfileData() {
   const confirmed = window.confirm("Excluir todos os dados deste perfil? Esta acao nao pode ser desfeita sem backup.");
   if (!confirmed) return;
 
+  if (typeof erroPrintsPurge === "function") await erroPrintsPurge(state).catch(() => {}); // prints do caderno (aparelho e nuvem)
+
   if (isRemoteSessionActive()) {
     const client = getSupabaseClient();
     const settings = getSupabaseSettings();
@@ -614,6 +656,11 @@ async function deleteCurrentProfileData() {
     try {
       clearTimeout(remoteStore.saveTimer);
       remoteStore.saveTimer = null;
+      try {
+        await client.from(`${settings.table}_history`).delete().eq("user_id", user.id); // versões antigas também são dados da pessoa
+      } catch {
+        /* a tabela de histórico pode nem existir */
+      }
       const { error } = await client.from(settings.table).delete().eq("user_id", user.id);
       if (error) throw error;
       await client.auth.signOut();
@@ -877,6 +924,7 @@ async function loadSupabaseProfile(user, options = {}) {
     }
     resetTimer();
     render();
+    if (typeof erroCloudKick === "function") erroCloudKick(800); // envia/atualiza prints do caderno de erros
     if (!options.recovery) {
       showToast(
         mergeBoth && differsFromRemote
@@ -1426,6 +1474,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
     revisions: Array.isArray(candidate.revisions) ? candidate.revisions.map(normalizeRevision) : empty.revisions,
     errorNotebook: Array.isArray(candidate.errorNotebook) ? candidate.errorNotebook.map(normalizeErrorEntry) : empty.errorNotebook,
     lawPlans: Array.isArray(candidate.lawPlans) ? candidate.lawPlans.map(normalizeLawPlan) : empty.lawPlans,
+    pendingSessions: typeof sessionPendingNormalize === "function" ? sessionPendingNormalize(candidate.pendingSessions) : [],
     cycleSettings: normalizeCycleSettings(candidate.cycleSettings),
     edital: normalizeEditalData(candidate.edital || empty.edital),
     media: {
@@ -1521,6 +1570,7 @@ function createEmptyState(profile = {}) {
     revisions: [],
     errorNotebook: [],
     lawPlans: [],
+    pendingSessions: [],
     cycleSettings: normalizeCycleSettings(),
     edital: normalizeEditalData(),
     media: { url: "" },
@@ -2475,6 +2525,7 @@ function renderAccountPanel() {
   if (forceSyncBtn) forceSyncBtn.disabled = !authenticated;
   if (deleteBtn) deleteBtn.disabled = !authenticated;
   renderLocalRecoveryList();
+  renderCloudVersions();
 }
 
 function getRecoveryDataCounts(candidate) {
@@ -2490,6 +2541,9 @@ function getRecoveryDataCounts(candidate) {
     legalMaterials: "leis/tabelas",
     editalItems: "edital",
     competitions: "concursos",
+    errorNotebook: "erros",
+    revisions: "revisoes",
+    lawPlans: "lei seca",
   };
   return Object.entries(keys).map(([key, label]) => ({
     key,
@@ -2552,17 +2606,20 @@ function saveAuxiliaryBackupIndex(items) {
 function shouldCreateAuxiliaryBackup(profileId, savedAt, options = {}) {
   if (options.force) return true;
   const savedMs = timestampMs(savedAt) || Date.now();
-  const newest = getAuxiliaryBackupIndex()
-    .filter((item) => item.profileId === profileId)
-    .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0))[0];
-  return !newest || savedMs - Number(newest.createdMs || 0) >= AUXILIARY_BACKUP_MIN_INTERVAL_MS;
+  let lastMs = 0;
+  try {
+    lastMs = Number(localStorage.getItem(`${AUXILIARY_BACKUP_LAST_KEY_PREFIX}${profileId}`)) || 0;
+  } catch {
+    lastMs = 0;
+  }
+  return savedMs - lastMs >= AUXILIARY_BACKUP_MIN_INTERVAL_MS;
 }
 
 function trimAuxiliaryLocalBackups(profileId, items) {
   const profileItems = items
     .filter((item) => item.profileId === profileId)
     .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0));
-  const keep = new Set(profileItems.slice(0, AUXILIARY_BACKUP_MAX_PER_PROFILE).map((item) => item.key));
+  const keep = new Set(profileItems.slice(0, AUXILIARY_BACKUP_LOCAL_FALLBACK_MAX).map((item) => item.key));
   const nextItems = items.filter((item) => {
     if (item.profileId !== profileId || keep.has(item.key)) return true;
     safeStorageRemove(localStorage, item.key);
@@ -2571,27 +2628,43 @@ function trimAuxiliaryLocalBackups(profileId, items) {
   saveAuxiliaryBackupIndex(nextItems);
 }
 
-function writeAuxiliaryBackupSnapshot(serializedState, savedAt, options = {}) {
-  if (!state.profile?.id || !stateHasMeaningfulData(state) || !shouldCreateAuxiliaryBackup(state.profile.id, savedAt, options)) return;
-  const createdMs = timestampMs(savedAt) || Date.now();
-  const key = `${AUXILIARY_BACKUP_KEY_PREFIX}${state.profile.id}.${createdMs}.v1`;
-  const item = {
-    key,
-    profileId: state.profile.id,
-    label: state.account?.email || state.profile?.name || "Perfil",
-    updatedAt: savedAt,
-    createdMs,
-    total: getRecoveryDataTotal(state),
-  };
-  const items = getAuxiliaryBackupIndex().filter((backup) => backup.key !== key);
-  if (safeStorageSet(localStorage, key, serializedState)) {
-    items.unshift(item);
-    trimAuxiliaryLocalBackups(state.profile.id, items);
+/**
+ * Guarda uma cópia do estado no cofre auxiliar (IndexedDB, que tem muito mais espaço que o localStorage).
+ * Só cai no localStorage, com poucas cópias, se o navegador não tiver IndexedDB.
+ * kind: "auto" (a cada alguns minutos), "manual" ou "antes-de-restaurar". Devolve o item guardado ou null.
+ */
+async function writeAuxiliaryBackupSnapshot(serializedState, savedAt, options = {}) {
+  try {
+    if (!state.profile?.id || !stateHasMeaningfulData(state) || !shouldCreateAuxiliaryBackup(state.profile.id, savedAt, options)) return null;
+    const profileId = state.profile.id;
+    const kind = Object.prototype.hasOwnProperty.call(AUXILIARY_KIND_LABELS, options.kind) ? options.kind : "auto";
+    const createdMs = timestampMs(savedAt) || Date.now();
+    const key = `${AUXILIARY_BACKUP_KEY_PREFIX}${profileId}.${createdMs}.v1`;
+    const item = {
+      key,
+      profileId,
+      label: state.account?.email || state.profile?.name || "Perfil",
+      updatedAt: savedAt,
+      createdMs,
+      total: getRecoveryDataTotal(state),
+      kind,
+    };
+    safeStorageSet(localStorage, `${AUXILIARY_BACKUP_LAST_KEY_PREFIX}${profileId}`, String(createdMs));
+    if (await writeAuxiliaryIndexedBackupSnapshot(item, serializedState)) return item;
+    const items = getAuxiliaryBackupIndex().filter((backup) => backup.key !== key);
+    if (safeStorageSet(localStorage, key, serializedState)) {
+      items.unshift(item);
+      trimAuxiliaryLocalBackups(profileId, items);
+      return item;
+    }
+    return null;
+  } catch (error) {
+    console.warn("Falha ao gravar o cofre auxiliar:", error);
+    return null;
   }
-  writeAuxiliaryIndexedBackupSnapshot(item, serializedState);
 }
 
-function createAuxiliaryBackupNow() {
+async function createAuxiliaryBackupNow() {
   if (!state.profile?.id || !isProfileAuthenticated()) {
     showToast("Entre na conta antes de criar o backup auxiliar.");
     return;
@@ -2604,9 +2677,46 @@ function createAuxiliaryBackupNow() {
   state.meta = { ...(state.meta || {}), localSavedAt: savedAt };
   const serializedState = JSON.stringify(state);
   safeStorageSet(localStorage, meaningfulStateBackupStorageKey(state.profile.id), serializedState);
-  writeAuxiliaryBackupSnapshot(serializedState, savedAt, { force: true });
+  const item = await writeAuxiliaryBackupSnapshot(serializedState, savedAt, { force: true, kind: "manual" });
   renderLocalRecoveryList();
-  showToast("Backup auxiliar criado neste navegador.");
+  showToast(item ? "Backup auxiliar criado neste navegador." : "Nao foi possivel criar o backup auxiliar. Baixe um backup em arquivo.");
+}
+
+/**
+ * Cópias auxiliares antigas ficavam no localStorage (até 5 por perfil, além das outras cópias do estado),
+ * o que gastava a cota do navegador. Leva todas para o IndexedDB e libera o espaço.
+ */
+async function migrateAuxiliaryBackupsToIndexedDB() {
+  try {
+    if (!globalThis.indexedDB) return;
+    const items = getAuxiliaryBackupIndex();
+    const keys = new Set(items.map((item) => item.key));
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key && key.startsWith(AUXILIARY_BACKUP_KEY_PREFIX) && key !== AUXILIARY_BACKUP_INDEX_KEY) keys.add(key);
+    }
+    for (const key of keys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        JSON.parse(raw);
+      } catch {
+        safeStorageRemove(localStorage, key); // cópia corrompida: não serve para recuperar nada
+        continue;
+      }
+      let record = items.find((item) => item.key === key);
+      if (!record) {
+        const found = /^ymEstudos\.auxBackup\.(.+)\.(\d+)\.v1$/.exec(key);
+        if (!found) continue;
+        record = { key, profileId: found[1], label: "Perfil", updatedAt: new Date(Number(found[2])).toISOString(), createdMs: Number(found[2]), total: 0 };
+      }
+      if (!(await writeAuxiliaryIndexedBackupSnapshot({ ...record, kind: record.kind || "auto" }, raw))) return; // sem IndexedDB: mantém as cópias locais
+      safeStorageRemove(localStorage, key);
+    }
+    safeStorageRemove(localStorage, AUXILIARY_BACKUP_INDEX_KEY);
+  } catch (error) {
+    console.warn("Falha ao mover cópias auxiliares para o IndexedDB:", error);
+  }
 }
 
 function openAuxiliaryBackupDB() {
@@ -2643,19 +2753,21 @@ function waitForRequest(request) {
 async function writeAuxiliaryIndexedBackupSnapshot(item, serializedState) {
   try {
     const db = await openAuxiliaryBackupDB();
-    if (!db) return;
+    if (!db) return false;
     const transaction = db.transaction(AUXILIARY_BACKUP_STORE, "readwrite");
     const complete = waitForTransaction(transaction);
     transaction.objectStore(AUXILIARY_BACKUP_STORE).put({
       ...item,
       state: JSON.parse(serializedState),
-      sourceLabel: "Cofre auxiliar IndexedDB",
+      sourceLabel: AUXILIARY_KIND_LABELS[item.kind] || AUXILIARY_KIND_LABELS.auto,
     });
     await complete;
     db.close();
     trimAuxiliaryIndexedBackups(item.profileId);
+    return true;
   } catch (error) {
     console.warn("Falha ao gravar cofre auxiliar IndexedDB:", error);
+    return false;
   }
 }
 
@@ -2667,10 +2779,9 @@ async function trimAuxiliaryIndexedBackups(profileId) {
     const readComplete = waitForTransaction(readTransaction);
     const all = await waitForRequest(readTransaction.objectStore(AUXILIARY_BACKUP_STORE).getAll());
     await readComplete;
-    const extras = all
-      .filter((item) => item.profileId === profileId)
-      .sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0))
-      .slice(AUXILIARY_BACKUP_MAX_PER_PROFILE);
+    const mine = all.filter((item) => item.profileId === profileId).sort((a, b) => Number(b.createdMs || 0) - Number(a.createdMs || 0));
+    // As cópias manuais e as de "antes de restaurar" têm cota própria: as automáticas não as empurram para fora.
+    const extras = [...mine.filter((item) => (item.kind || "auto") === "auto").slice(AUXILIARY_BACKUP_MAX_PER_PROFILE), ...mine.filter((item) => (item.kind || "auto") !== "auto").slice(AUXILIARY_BACKUP_MAX_SPECIAL)];
     if (extras.length) {
       const writeTransaction = db.transaction(AUXILIARY_BACKUP_STORE, "readwrite");
       const writeComplete = waitForTransaction(writeTransaction);
@@ -2811,8 +2922,12 @@ async function restoreLocalRecoveryCandidate(key) {
     showToast("Backup local nao encontrado neste navegador.");
     return;
   }
-  const confirmed = window.confirm(`Restaurar esta copia local com ${candidate.total} itens? Ela substitui o estado aberto neste login.`);
+  const confirmed = window.confirm(`Restaurar esta copia local com ${candidate.total} itens? Ela substitui o estado aberto neste login. Antes, o app guarda uma copia dos dados atuais no cofre automatico.`);
   if (!confirmed) return;
+  if (stateHasMeaningfulData(state)) {
+    const safety = await writeAuxiliaryBackupSnapshot(JSON.stringify(state), new Date().toISOString(), { force: true, kind: "antes-de-restaurar" });
+    if (!safety && !window.confirm("Nao consegui guardar uma copia dos dados atuais antes de restaurar. Continuar mesmo assim?")) return;
+  }
 
   const currentProfile = makeProfile(state.profile);
   const currentAccount = { ...(state.account || {}) };
@@ -2836,6 +2951,139 @@ async function restoreLocalRecoveryCandidate(key) {
   resetTimer();
   render();
   showToast(synced ? "Copia local restaurada e reenviada ao Supabase." : "Copia local restaurada neste navegador.");
+}
+
+/* ---------- Versões na nuvem (histórico mantido pelo Supabase, ver supabase-history.sql) ---------- */
+
+const CLOUD_HISTORY_KIND_LABELS = { auto: "Automática", "antes-de-restaurar": "Cópia de antes de restaurar" };
+const cloudHistory = { loading: false, loaded: false, items: [], message: "" };
+
+function cloudHistoryTable() {
+  return `${getSupabaseSettings().table}_history`;
+}
+
+function cloudHistoryErrorMessage(error) {
+  const text = `${error?.code || ""} ${error?.message || ""}`;
+  if (error?.code === "PGRST205" || error?.code === "42P01" || Number(error?.status) === 404 || /schema cache|does not exist|find the table/i.test(text)) {
+    return "O histórico ainda não está ativado na sua conta do Supabase. Rode o arquivo supabase-history.sql no SQL Editor (uma vez) e tente de novo.";
+  }
+  return "Não foi possível buscar as versões agora. Tente de novo em instantes.";
+}
+
+function renderCloudVersions() {
+  const list = $("#cloudVersionsList");
+  if (!list) return;
+  if (cloudHistory.loading) {
+    list.innerHTML = `<div class="empty-state">Buscando as versões salvas…</div>`;
+    return;
+  }
+  if (!cloudHistory.items.length) {
+    list.innerHTML = cloudHistory.message ? `<div class="empty-state">${escapeHTML(cloudHistory.message)}</div>` : "";
+    return;
+  }
+  list.innerHTML = cloudHistory.items
+    .map(
+      (item) => `
+        <article class="local-recovery-card">
+          <div>
+            <strong>${escapeHTML(new Date(item.saved_at).toLocaleString("pt-BR"))}</strong>
+            <small>${escapeHTML(CLOUD_HISTORY_KIND_LABELS[item.kind] || CLOUD_HISTORY_KIND_LABELS.auto)}</small>
+          </div>
+          <div class="inline-actions">
+            <button class="mini-button success" data-action="restoreCloudVersion" data-id="${escapeHTML(String(item.id))}" type="button">Voltar a esta versão</button>
+          </div>
+        </article>`
+    )
+    .join("");
+}
+
+async function loadCloudVersions() {
+  if (!isRemoteSessionActive() || !remoteStore.user) {
+    cloudHistory.items = [];
+    cloudHistory.message = "Entre com e-mail e senha para ver as versões salvas na nuvem.";
+    renderCloudVersions();
+    return;
+  }
+  cloudHistory.loading = true;
+  renderCloudVersions();
+  try {
+    const client = getSupabaseClient();
+    const { data, error } = await client.from(cloudHistoryTable()).select("id,saved_at,kind").eq("user_id", remoteStore.user.id).order("saved_at", { ascending: false }).limit(60);
+    if (error) throw error;
+    cloudHistory.items = Array.isArray(data) ? data : [];
+    cloudHistory.message = cloudHistory.items.length ? "" : "Ainda não há versões guardadas. Elas aparecem conforme você usa o site (no máximo uma a cada 2 horas).";
+  } catch (error) {
+    console.warn("Falha ao buscar versões na nuvem:", error);
+    cloudHistory.items = [];
+    cloudHistory.message = cloudHistoryErrorMessage(error);
+  }
+  cloudHistory.loading = false;
+  cloudHistory.loaded = true;
+  renderCloudVersions();
+}
+
+/**
+ * Volta a conta para uma versão guardada no Supabase. Diferente de importar um backup (que se junta ao que há
+ * na nuvem), aqui o que a versão não tem sai também dos outros aparelhos. Antes, guarda uma cópia do que está
+ * aberto agora no cofre do navegador e no histórico da nuvem.
+ */
+async function restoreCloudVersion(versionId) {
+  if (!isRemoteSessionActive() || !remoteStore.user) {
+    showToast("Entre com e-mail e senha para voltar a uma versão da nuvem.");
+    return;
+  }
+  const client = getSupabaseClient();
+  const table = cloudHistoryTable();
+  let row = null;
+  try {
+    const { data, error } = await client.from(table).select("id,saved_at,kind,state").eq("user_id", remoteStore.user.id).eq("id", versionId).maybeSingle();
+    if (error) throw error;
+    row = data;
+  } catch (error) {
+    showToast(cloudHistoryErrorMessage(error));
+    return;
+  }
+  if (!row?.state) {
+    showToast("Essa versão não foi encontrada. Atualize a lista.");
+    return;
+  }
+  const restored = normalizeState(row.state, state.profile?.id);
+  if (!stateHasMeaningfulData(restored)) {
+    showToast("Essa versão está vazia. Escolha outra.");
+    return;
+  }
+  const counts = getRecoveryDataCounts(restored).filter((item) => item.count > 0).map((item) => `${item.label}: ${item.count}`).join(", ");
+  const confirmed = window.confirm(
+    `Voltar a conta para a versão de ${new Date(row.saved_at).toLocaleString("pt-BR")}?\n\nConteudo: ${counts}.\n\nO que existe agora e nao esta nessa versao sai da conta e dos seus outros aparelhos (${getRecoveryDataTotal(state)} itens abertos agora). Antes, o app guarda uma copia do que esta aberto, no navegador e na nuvem, para voce poder voltar atras.`
+  );
+  if (!confirmed) return;
+
+  const safetyLocal = stateHasMeaningfulData(state) ? await writeAuxiliaryBackupSnapshot(JSON.stringify(state), new Date().toISOString(), { force: true, kind: "antes-de-restaurar" }) : true;
+  let safetyCloud = !stateHasMeaningfulData(state);
+  if (!safetyCloud) {
+    try {
+      const { error } = await client.from(table).insert({ user_id: remoteStore.user.id, state: JSON.parse(JSON.stringify(state)), kind: "antes-de-restaurar" });
+      safetyCloud = !error;
+    } catch {
+      safetyCloud = false;
+    }
+  }
+  if (!safetyLocal && !safetyCloud && !window.confirm("Nao consegui guardar uma copia do que esta aberto agora. Continuar mesmo assim?")) return;
+
+  const previous = state;
+  restored.profile = previous.profile;
+  restored.account = previous.account;
+  restored.ui = previous.ui;
+  mergeCarryForwardForRestore(restored, previous);
+  state = restored;
+  saveState({ syncRemote: false });
+  clearTimeout(remoteStore.saveTimer);
+  remoteStore.saveTimer = null;
+  const synced = await saveRemoteStateNow();
+  resetTimer();
+  render();
+  showToast(synced ? "Conta restaurada para essa versão. Os outros aparelhos recebem a mudança ao abrir o site." : "Versão restaurada neste navegador. O envio para a nuvem será tentado de novo.");
+  loadCloudVersions();
 }
 
 async function accessProfileByNameAndPin(name, pin, options = {}) {
@@ -8906,6 +9154,16 @@ function handleAction(action) {
     return;
   }
 
+  if (type === "loadCloudVersions") {
+    loadCloudVersions();
+    return;
+  }
+
+  if (type === "restoreCloudVersion") {
+    restoreCloudVersion(id);
+    return;
+  }
+
   if (type === "quickQuestion") {
     const isCorrect = action.dataset.result === "correct";
     state.questionLogs.push({
@@ -9372,8 +9630,9 @@ function handleAction(action) {
   }
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+async function exportData() {
+  const prints = typeof erroPrintsExport === "function" ? await erroPrintsExport(state) : {};
+  const blob = new Blob([JSON.stringify(Object.keys(prints).length ? { ...state, __prints: prints } : state, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -9383,22 +9642,24 @@ function exportData() {
   if (typeof cycleMarkBackup === "function") cycleMarkBackup();
 }
 
-function createBackupPayload() {
+function createBackupPayload(extra = {}) {
   return JSON.stringify(
     {
       app: "estudos-track",
       version: 2,
       exportedAt: new Date().toISOString(),
       data: state,
+      ...extra,
     },
     null,
     2
   );
 }
 
-function downloadBackupFile() {
-  const payload = createBackupPayload();
-  $("#backupCode").value = payload;
+async function downloadBackupFile() {
+  $("#backupCode").value = createBackupPayload(); // o código para copiar não leva os prints (seriam gigantes)
+  const prints = typeof erroPrintsExport === "function" ? await erroPrintsExport(state) : {};
+  const payload = createBackupPayload(Object.keys(prints).length ? { prints } : {});
   const blob = new Blob([payload], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -9406,46 +9667,76 @@ function downloadBackupFile() {
   anchor.download = `estudos-track-backup-${todayISO()}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
-  showToast("Arquivo de backup baixado.");
+  const printCount = Object.keys(prints).length;
+  showToast(printCount ? `Arquivo de backup baixado, com ${printCount} print${printCount === 1 ? "" : "s"} do caderno.` : "Arquivo de backup baixado.");
   if (typeof cycleMarkBackup === "function") cycleMarkBackup();
 }
 
-function restoreBackupFromText(text) {
+const BACKUP_KNOWN_LISTS = ["subjects", "topics", "studyLogs", "questionLogs", "flashcards", "sources", "notes", "goals", "competitions", "legalMaterials", "revisions", "errorNotebook", "lawPlans"];
+
+/** Confere se o texto é mesmo um backup do app (e não um JSON qualquer, que viraria um estado vazio). */
+function inspectBackupText(text) {
+  let parsed;
   try {
-    const parsed = JSON.parse(String(text || ""));
-    const payload = parsed.data ? parsed.data : parsed;
-    const currentProfile = makeProfile(state.profile);
-    const restored = normalizeState(payload);
-    restored.profile = currentProfile;
-    state = restored;
-    saveState();
-    resetTimer();
-    render();
-    showToast("Backup restaurado.");
+    parsed = JSON.parse(String(text || ""));
   } catch {
-    showToast("Backup inválido. Cole um JSON gerado pelo app.");
+    return { ok: false };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false };
+  const payload = parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data) ? parsed.data : parsed;
+  const recognized = BACKUP_KNOWN_LISTS.some((key) => Array.isArray(payload[key])) || Boolean(payload.cases && typeof payload.cases === "object");
+  if (!recognized) return { ok: false };
+  return { ok: true, payload, prints: parsed.prints || parsed.__prints || null, exportedAt: parsed.exportedAt || payload.meta?.localSavedAt || "" };
+}
+
+/**
+ * Restaura um backup (arquivo ou código colado): confere o conteúdo, mostra o que vai entrar,
+ * pede confirmação, guarda uma cópia dos dados atuais no cofre e só então troca o estado.
+ */
+async function applyBackupText(text, { success, invalid }) {
+  const info = inspectBackupText(text);
+  let restored = null;
+  if (info.ok) {
+    try {
+      restored = normalizeState(info.payload);
+    } catch {
+      restored = null;
+    }
+  }
+  if (!restored) {
+    showToast(invalid);
+    return false;
+  }
+  const counts = getRecoveryDataCounts(restored).filter((item) => item.count > 0).map((item) => `${item.label}: ${item.count}`).join(", ") || "nenhum dado de estudo";
+  const printCount = info.prints && typeof info.prints === "object" ? Object.keys(info.prints).length : 0;
+  const when = info.exportedAt && Number.isFinite(Date.parse(info.exportedAt)) ? ` (de ${new Date(info.exportedAt).toLocaleString("pt-BR")})` : "";
+  const confirmed = window.confirm(
+    `Restaurar este backup${when}?\n\nConteudo: ${counts}${printCount ? `; ${printCount} print(s) do caderno` : ""}.\n\nIsso substitui os dados abertos agora (${getRecoveryDataTotal(state)} itens). Antes, o app guarda uma copia dos dados atuais no cofre automatico, para voce poder voltar atras.`
+  );
+  if (!confirmed) return false;
+  if (stateHasMeaningfulData(state)) {
+    const safety = await writeAuxiliaryBackupSnapshot(JSON.stringify(state), new Date().toISOString(), { force: true, kind: "antes-de-restaurar" });
+    if (!safety && !window.confirm("Nao consegui guardar uma copia dos dados atuais antes de restaurar. Continuar mesmo assim? Se tiver duvida, cancele e baixe um backup primeiro.")) return false;
+  }
+  if (printCount && typeof erroPrintsRestore === "function") await erroPrintsRestore(info.prints);
+  restored.profile = makeProfile(state.profile);
+  state = restored;
+  saveState();
+  resetTimer();
+  render();
+  showToast(success);
+  return true;
+}
+
+function restoreBackupFromText(text) {
+  return applyBackupText(text, { success: "Backup restaurado.", invalid: "Backup inválido. Cole um JSON gerado pelo app." });
 }
 
 function importData(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const parsed = JSON.parse(String(reader.result));
-      const currentProfile = makeProfile(state.profile);
-      const imported = normalizeState(parsed.data ? parsed.data : parsed);
-      imported.profile = currentProfile;
-      state = imported;
-      saveState();
-      resetTimer();
-      render();
-      showToast("Dados importados.");
-    } catch {
-      showToast("Arquivo inválido.");
-    }
-  };
+  reader.onload = () => applyBackupText(String(reader.result), { success: "Dados importados.", invalid: "Arquivo inválido." });
   reader.readAsText(file);
   event.target.value = "";
 }
@@ -9455,3 +9746,4 @@ bindCycleEvents();
 resetTimer();
 render();
 initializeSupabaseAuth();
+migrateAuxiliaryBackupsToIndexedDB();

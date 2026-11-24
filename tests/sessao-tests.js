@@ -165,7 +165,8 @@ test("fila de sessões: pergunta conforme a configuração e guarda neste aparel
   assert.strictEqual(saved[0].minutes, 25);
   assert.strictEqual(saved[0].cycle, 2);
   assert.strictEqual(saved[0].subjectId, "s1");
-  assert.ok(on.store.get("ymEstudos.pendingSessions.p1"));
+  assert.strictEqual(on.ctx.state.pendingSessions.length, 1, "a fila fica no estado (vai para a conta), não só no aparelho");
+  assert.strictEqual(on.store.get("ymEstudos.pendingSessions.p1"), undefined, "nada fica só no localStorage");
 
   const off = makeContext({ subjects: SUBJECTS, topics: TOPICS, askAtSave: false });
   assert.strictEqual(off.ctx.sessionAskBeforeSave(entry), false, "desligada e com matéria: salva direto");
@@ -180,12 +181,42 @@ test("fila de sessões: limite, dados corrompidos e minutos fora da faixa", () =
   assert.strictEqual(c.sessionPendingRead().length, 20, "guarda só as 20 mais recentes");
   assert.strictEqual(c.sessionPendingRead()[0].id, "e5");
   store.set("ymEstudos.pendingSessions.p1", "isto não é json");
-  assert.strictEqual(c.sessionPendingRead().length, 0);
-  store.set("ymEstudos.pendingSessions.p1", JSON.stringify([{ id: "a", minutes: 0 }, { id: "b", minutes: 9999, date: "lixo" }, null, { minutes: 5 }]));
+  assert.strictEqual(c.sessionPendingRead().length, 20, "cópia antiga corrompida é descartada sem apagar a fila do estado");
+  assert.strictEqual(store.has("ymEstudos.pendingSessions.p1"), false);
+  c.sessionPendingWrite([{ id: "a", minutes: 0 }, { id: "b", minutes: 9999, date: "lixo" }, null, { minutes: 5 }]);
   const read = c.sessionPendingRead();
   assert.strictEqual(read.length, 1);
   assert.strictEqual(read[0].minutes, 600);
   assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(read[0].date));
+});
+
+test("fila de sessões: traz para o estado a cópia antiga do localStorage, sem duplicar", () => {
+  const { ctx: c, store } = makeContext({ subjects: SUBJECTS });
+  let saves = 0;
+  c.saveState = () => { saves += 1; };
+  c.state.pendingSessions = [{ id: "x1", minutes: 20, date: "2026-11-16" }];
+  store.set("ymEstudos.pendingSessions.p1", JSON.stringify([{ id: "x1", minutes: 20, date: "2026-11-16" }, { id: "x2", minutes: 30, date: "2026-11-15" }]));
+  const read = c.sessionPendingRead();
+  assert.strictEqual(json(read.map((item) => item.id)), json(["x1", "x2"]), "x1 não duplica");
+  assert.strictEqual(c.state.pendingSessions.length, 2);
+  assert.strictEqual(store.has("ymEstudos.pendingSessions.p1"), false, "cópia antiga removida depois de migrar");
+  assert.strictEqual(saves, 1, "salva uma vez ao migrar");
+  c.sessionPendingRead();
+  assert.strictEqual(saves, 1, "não salva de novo sem cópia antiga");
+});
+
+test("fila de sessões: cada gravação salva o estado e a junção entre aparelhos soma as sessões", () => {
+  const { ctx: c } = makeContext({ subjects: SUBJECTS });
+  let saves = 0;
+  c.saveState = () => { saves += 1; };
+  c.sessionAskBeforeSave({ id: "e1", minutes: 25, date: "2026-11-16", subjectId: "", topicId: "" });
+  assert.strictEqual(saves, 1);
+  const merge = require(path.join(root, "merge.js"));
+  assert.ok(merge.MERGE_PATHS.some((p) => p.join(".") === "pendingSessions"), "pendingSessions entra na junção");
+  const local = { pendingSessions: [{ id: "a", minutes: 10 }], meta: {} };
+  const remote = { pendingSessions: [{ id: "b", minutes: 20 }], meta: {} };
+  const out = merge.mergeStates(local, remote);
+  assert.strictEqual(json(out.pendingSessions.map((item) => item.id).sort()), json(["a", "b"]));
 });
 
 test("configuração askAtSave: ligada por padrão", () => {

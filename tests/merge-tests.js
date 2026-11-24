@@ -326,4 +326,43 @@ test("impressão digital não depende da ordem das listas nem das chaves", () =>
   assert.notStrictEqual(m.stateFingerprint(c), m.stateFingerprint(d), "a ordem do histórico (cronológica) continua importando");
 });
 
+test("restaurar versão da conta: tira o que a versão não tem e revive o que ela tem, mesmo com outro aparelho desatualizado", () => {
+  const T0 = "2026-11-01T10:00:00.000Z";
+  const T1 = "2026-11-10T10:00:00.000Z";
+  const T2 = "2026-11-20T10:00:00.000Z";
+  const old = base(); // versão antiga que será restaurada: tem a e z
+  old.subjects = [{ id: "a", createdAt: T0 }, { id: "z", createdAt: T0 }];
+  const current = base(); // hoje: z foi excluído em T1 e b foi criado depois
+  current.subjects = [{ id: "a", createdAt: T0 }, { id: "b", createdAt: T1 }];
+  current.meta.tombstones = { subjects: { z: T1 } };
+  const otherDevice = clone(current); // outro aparelho ainda no estado de hoje
+
+  m.mergeCarryForwardForRestore(old, current);
+  assert.ok(old.__ids.subjects.has("b") && !old.__ids.subjects.has("z"), "guarda os ids de antes para registrar a diferença");
+  assert.ok(!Object.keys(old).includes("__ids"), "e não entra no JSON");
+  old.__ids = m.mergeRecordDeletions(old, old.__ids, T2); // é o que o saveState faz
+  assert.strictEqual(old.meta.tombstones.subjects.b, T2, "b, que a versão não tem, vira exclusão");
+  assert.strictEqual(old.meta.revivals.subjects.z, T2, "z, que estava excluído, volta como revivido");
+  assert.strictEqual(old.meta.tombstones.subjects.z, T1, "a lápide antiga continua guardada");
+
+  [m.mergeStates(otherDevice, old), m.mergeStates(old, otherDevice), m.mergeStates(otherDevice, old, { preferRemoteScalars: true })].forEach((merged) => {
+    assert.strictEqual(json(ids(merged.subjects)), json(["a", "z"]), "o outro aparelho não traz b de volta nem mata z");
+  });
+});
+
+test("restaurar versão da conta: o que o aparelho desatualizado criou DEPOIS da restauração é mantido", () => {
+  const T0 = "2026-11-01T10:00:00.000Z";
+  const T2 = "2026-11-20T10:00:00.000Z";
+  const T3 = "2026-11-21T10:00:00.000Z";
+  const old = base();
+  old.subjects = [{ id: "a", createdAt: T0 }];
+  const current = base();
+  current.subjects = [{ id: "a", createdAt: T0 }, { id: "b", createdAt: T0 }];
+  const other = clone(current);
+  other.subjects.push({ id: "novo", createdAt: T3 });
+  m.mergeCarryForwardForRestore(old, current);
+  old.__ids = m.mergeRecordDeletions(old, old.__ids, T2);
+  assert.strictEqual(json(ids(m.mergeStates(other, old).subjects)), json(["a", "novo"]), "b some, o item novo fica");
+});
+
 console.log(`merge-tests: ${passed} testes passaram.`);

@@ -314,7 +314,7 @@ function getWeeklyPlanData() {
 function getTodayData(summary = getCycleSummary()) {
   const today = cycleToday();
   const dueRevisions = getDueRevisions(today);
-  const dueErrors = getDueErrors(today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const dueErrors = getDueErrors(today); // já vem com os reincidentes primeiro
   const revDone = state.revisions.reduce((sum, revision) => sum + revision.history.filter((entry) => entry.date === today).length, 0);
   const errDone = state.errorNotebook.filter((entry) => entry.lastReviewed === today).length;
   const lawItems = summary.laws

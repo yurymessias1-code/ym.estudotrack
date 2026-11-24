@@ -438,4 +438,170 @@ test("caderno de erros: prints normalizados (só metadados, ids seguros, no máx
   assert.strictEqual(JSON.stringify(e.answerImages), "[]");
 });
 
+
+/* ---------- uma cadeia de revisão por assunto, unificação e refação de erros com 4 notas ---------- */
+
+vm.runInContext(
+  `function getTopic(id) { return (state.topics || []).find((t) => t.id === id); }
+   function getSubject(id) { return (state.subjects || []).find((s) => s.id === id); }
+   function getEntrySubjectId(entry) { return entry.subjectId || (getTopic(entry.topicId) || {}).subjectId || ""; }`,
+  ctx
+);
+
+function freshState(extra = {}) {
+  ctx.state = {
+    subjects: [{ id: "s1", name: "Penal" }, { id: "s2", name: "Português" }],
+    topics: [{ id: "t1", subjectId: "s1", name: "HC" }, { id: "t2", subjectId: "s2", name: "Crase" }],
+    studyLogs: [],
+    revisions: [],
+    errorNotebook: [],
+    cycleSettings: ctx.normalizeCycleSettings({ autoSince: "2026-01-01" }),
+    ...extra,
+  };
+  return ctx.state;
+}
+const log = (topicId, date, minutes = 30, subjectId = "") => ({ id: `${topicId}${date}`, topicId, subjectId, date, minutes });
+
+test("revisão automática: estudar o mesmo assunto em vários dias abre uma cadeia só", () => {
+  const st = freshState();
+  st.studyLogs = [log("t1", "2026-11-10"), log("t1", "2026-11-11"), log("t1", "2026-11-12"), log("t2", "2026-11-11")];
+  assert.strictEqual(ctx.syncAutoRevisions(), 2, "uma cadeia para t1 e uma para t2");
+  const t1 = st.revisions.filter((r) => r.topicId === "t1");
+  assert.strictEqual(t1.length, 1);
+  assert.strictEqual(t1[0].originKey, "study:t1:2026-11-10", "a cadeia nasce do primeiro dia estudado");
+  assert.strictEqual(JSON.stringify(t1[0].absorbedKeys), JSON.stringify(["study:t1:2026-11-11", "study:t1:2026-11-12"]));
+  assert.strictEqual(ctx.syncAutoRevisions(), 0, "rodar de novo não cria nada");
+  assert.strictEqual(st.revisions.length, 2);
+});
+
+test("revisão automática: terminada a cadeia, um novo estudo abre outra; matéria sem assunto tem a sua", () => {
+  const st = freshState();
+  st.studyLogs = [log("t1", "2026-11-10")];
+  ctx.syncAutoRevisions();
+  st.revisions[0].status = "done";
+  st.studyLogs.push(log("t1", "2026-11-20"));
+  assert.strictEqual(ctx.syncAutoRevisions(), 1, "cadeia anterior estava concluída");
+  assert.strictEqual(st.revisions.filter((r) => r.status === "pending" && r.topicId === "t1").length, 1);
+  st.studyLogs.push(log("", "2026-11-21", 20, "s2"), log("", "2026-11-22", 20, "s2"));
+  assert.strictEqual(ctx.syncAutoRevisions(), 1, "dois dias da mesma matéria sem assunto: uma cadeia");
+  assert.ok(st.revisions.some((r) => r.originKey === "study:s2:2026-11-21" && r.absorbedKeys.includes("study:s2:2026-11-22")));
+  st.studyLogs.push(log("t2", "2026-11-23", 5));
+  assert.strictEqual(ctx.syncAutoRevisions(), 0, "menos de 10 minutos não conta");
+});
+
+test("revisão: absorbedKeys sobrevive à normalização e é limitado", () => {
+  const keys = Array.from({ length: 80 }, (_, i) => `study:t1:2026-01-${i}`);
+  const r = normalizeRevision({ kind: "study", subjectId: "s1", topicId: "t1", absorbedKeys: [...keys, "", null] });
+  assert.strictEqual(r.absorbedKeys.length, 60);
+  assert.strictEqual(normalizeRevision({}).absorbedKeys.length, 0);
+});
+
+test("unificar cadeias repetidas: fica a mais avançada de cada assunto e nada além de 'study' aberto é tocado", () => {
+  const mk = (id, over) => normalizeRevision({ id, kind: "study", subjectId: "s1", topicId: "t1", originKey: `study:t1:${id}`, ...over });
+  const revisions = [
+    mk("a", { stage: 0, dueDate: "2026-11-11" }),
+    mk("b", { stage: 2, dueDate: "2026-11-30", history: [{ date: "2026-11-12", stage: 0, result: "ok" }, { date: "2026-11-19", stage: 1, result: "ok" }] }),
+    mk("c", { stage: 0, dueDate: "2026-11-12", absorbedKeys: ["study:t1:x"] }),
+    mk("d", { stage: 3, status: "done" }),
+    normalizeRevision({ id: "w", kind: "weak", subjectId: "s1", topicId: "t1", originKey: "weak:t1:2026-11-12" }),
+    normalizeRevision({ id: "m", kind: "manual", subjectId: "s1", topicId: "t1", originKey: "manual:t1" }),
+    normalizeRevision({ id: "o", kind: "study", subjectId: "s2", topicId: "t2", originKey: "study:t2:2026-11-10" }),
+  ];
+  const plan = ctx.cycleConsolidatePlan(revisions);
+  assert.strictEqual(plan.groups, 1);
+  assert.strictEqual(JSON.stringify([...plan.remove].sort()), JSON.stringify(["a", "c"]));
+  assert.strictEqual(JSON.stringify(Object.keys(plan.keepers)), JSON.stringify(["b"]));
+  assert.strictEqual(JSON.stringify([...plan.keepers.b].sort()), JSON.stringify(["study:t1:a", "study:t1:c", "study:t1:x"]));
+  assert.strictEqual(ctx.cycleConsolidatePlan([mk("z", {})]).remove.length, 0, "uma cadeia só: nada a fazer");
+});
+
+test("caderno de erros: refação com 4 notas", () => {
+  const st = freshState();
+  const make = (over) => {
+    const e = normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q", date: "2026-11-01", stage: 2, lapses: 0, dueDate: "2026-11-10", ...over });
+    st.errorNotebook = [e];
+    return e;
+  };
+  let e = make({});
+  let step = ctx.retestErrorEntry("e1", "forgot");
+  assert.strictEqual(e.stage, 0);
+  assert.strictEqual(e.lapses, 1);
+  assert.strictEqual(e.lastResult, "wrong");
+  assert.strictEqual(step.result, "forgot");
+  assert.strictEqual(step.leech, false);
+
+  e = make({ stage: 2 });
+  step = ctx.retestErrorEntry("e1", "hard");
+  assert.strictEqual(e.stage, 2, "acertar com dúvida não avança");
+  assert.strictEqual(e.lapses, 0, "e não conta como erro");
+  assert.strictEqual(e.lastResult, "hard");
+  assert.strictEqual(step.gap, Math.ceil(ctx.state.cycleSettings.errorIntervals[2] / 2), "volta com metade do intervalo da etapa");
+  assert.strictEqual(e.attempts, 1);
+
+  e = make({ stage: 1 });
+  ctx.retestErrorEntry("e1", "ok");
+  assert.strictEqual(e.stage, 2);
+  assert.strictEqual(e.lastResult, "ok");
+  const okGap = ctx.state.cycleSettings.errorIntervals[2];
+
+  e = make({ stage: 1 });
+  step = ctx.retestErrorEntry("e1", "easy");
+  assert.strictEqual(e.lastResult, "easy");
+  assert.strictEqual(step.gap, Math.round(okGap * 1.5), "fácil: intervalo 1,5× maior");
+
+  const last = ctx.state.cycleSettings.errorIntervals.length - 1;
+  e = make({ stage: last });
+  ctx.retestErrorEntry("e1", "hard");
+  assert.strictEqual(e.mastered, false, "com dúvida na última etapa ainda não domina");
+  e = make({ stage: last });
+  step = ctx.retestErrorEntry("e1", "ok");
+  assert.strictEqual(e.mastered, true);
+  assert.strictEqual(e.dueDate, "");
+  assert.strictEqual(step.done, true);
+});
+
+test("caderno de erros: aceita true/false do jeito antigo e ignora valores estranhos", () => {
+  assert.strictEqual(ctx.errorRetestResult(true), "ok");
+  assert.strictEqual(ctx.errorRetestResult(false), "forgot");
+  assert.strictEqual(ctx.errorRetestResult("wrong"), "forgot");
+  assert.strictEqual(ctx.errorRetestResult("easy"), "easy");
+  assert.strictEqual(ctx.errorRetestResult("???"), "ok");
+  for (const lastResult of ["ok", "wrong", "hard", "easy"]) assert.strictEqual(normalizeErrorEntry({ statement: "q", lastResult }).lastResult, lastResult);
+  assert.strictEqual(normalizeErrorEntry({ statement: "q", lastResult: "lixo" }).lastResult, "");
+  assert.strictEqual(ctx.retestErrorEntry("não existe", "ok"), null);
+});
+
+test("caderno de erros: reincidente aparece na terceira vez e passa na frente da fila", () => {
+  const st = freshState();
+  st.errorNotebook = [
+    normalizeErrorEntry({ id: "velho", subjectId: "s1", statement: "a", dueDate: "2026-11-01" }),
+    normalizeErrorEntry({ id: "reinc", subjectId: "s1", statement: "b", dueDate: "2026-11-09", lapses: 2 }),
+    normalizeErrorEntry({ id: "novo", subjectId: "s1", statement: "c", dueDate: "2026-11-05" }),
+    normalizeErrorEntry({ id: "futuro", subjectId: "s1", statement: "d", dueDate: "2026-12-30", lapses: 9 }),
+    normalizeErrorEntry({ id: "dominado", subjectId: "s1", statement: "e", mastered: true, lapses: 5 }),
+  ];
+  assert.strictEqual(ctx.errorIsLeech(st.errorNotebook[1]), false, "2 erros ainda não é reincidente");
+  const step = ctx.retestErrorEntry("reinc", "forgot");
+  assert.strictEqual(step.leech, true);
+  assert.strictEqual(ctx.errorIsLeech(st.errorNotebook[1]), true);
+  assert.strictEqual(ctx.errorIsLeech(st.errorNotebook[4]), false, "dominado não é reincidente");
+  const due = ctx.getDueErrors("2026-12-01").map((entry) => entry.id);
+  assert.strictEqual(JSON.stringify(due), JSON.stringify(["reinc", "velho", "novo"]), "reincidentes primeiro, depois os mais antigos");
+});
+
+test("caderno de erros: reforço do assunto não duplica e exige matéria", () => {
+  const st = freshState();
+  const entry = normalizeErrorEntry({ id: "e1", subjectId: "s1", topicId: "t1", statement: "q" });
+  st.errorNotebook = [entry];
+  const first = ctx.errorCreateReinforcement(entry);
+  assert.ok(first.created);
+  assert.strictEqual(first.created.kind, "weak");
+  assert.strictEqual(first.created.topicId, "t1");
+  assert.strictEqual(first.created.dueDate, ctx.cycleToday(), "aparece nas revisões de hoje");
+  assert.ok(ctx.errorCreateReinforcement(entry).existing, "já aberto: não cria outro");
+  assert.strictEqual(st.revisions.length, 1);
+  const orphan = normalizeErrorEntry({ id: "e2", statement: "q" });
+  assert.ok(ctx.errorCreateReinforcement(orphan).error);
+});
+
 console.log(`ciclo-tests: ${passed} testes passaram.`);

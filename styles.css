@@ -3769,6 +3769,20 @@ td {
   font-weight: 700;
 }
 
+.status-tag.leech-tag {
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 800;
+}
+
+.retest-box.leech-box {
+  border-color: var(--red);
+}
+
+.retest-box.leech-box p {
+  font-weight: 600;
+}
+
 /* ---------- Caderno de erros: formulário com prints ---------- */
 
 .error-form-panel {

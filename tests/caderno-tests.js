@@ -122,3 +122,23 @@ console.log(`caderno-tests: ${passed} testes passaram.`);
   assertEq.strictEqual(erroNotesSanitize("   "), "");
   console.log("caderno-tests (anotações): ok");
 }
+
+// ---- prints na nuvem: funções puras ----
+{
+  const assertEq = require("assert");
+  const { erroAllPrintIds, erroDataURLToBlob } = require("../caderno.js");
+  const ids = erroAllPrintIds({
+    errorNotebook: [
+      { images: [{ id: "img_a" }], answerImages: [{ id: "img_b" }, { id: "img_a" }], notes: '<p>x</p><img data-img-id="img_c">' },
+      { images: [], answerImages: [], notes: "" },
+      { notes: '<img data-img-id="img_d">' },
+    ],
+  });
+  assertEq.deepStrictEqual(ids.sort(), ["img_a", "img_b", "img_c", "img_d"], "ids únicos de todos os campos");
+  assertEq.deepStrictEqual(erroAllPrintIds(null), []);
+  const blob = erroDataURLToBlob("data:image/webp;base64,AAEC");
+  assertEq.strictEqual(blob.type, "image/webp");
+  assertEq.strictEqual(blob.size, 3);
+  assertEq.strictEqual(erroDataURLToBlob("não é data url"), null);
+  console.log("caderno-tests (nuvem): ok");
+}

@@ -6,6 +6,7 @@
 
 const CYCLE_DEFAULT_INTERVALS = [1, 7, 30, 60];
 const CYCLE_DEFAULT_ERROR_INTERVALS = [1, 3, 7, 15, 30];
+const CYCLE_LEECH_LAPSES = 3; // errou de novo tantas vezes: vira reincidente
 const CYCLE_MIN_AUTO_MINUTES = 10;
 const CYCLE_BACKFILL_DAYS = 14;
 const CYCLE_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -162,6 +163,8 @@ function normalizeRevision(item = {}) {
     topicId: cycleText(item.topicId),
     label: cycleText(item.label),
     originKey: cycleText(item.originKey),
+    // Dias de estudo que entraram nesta cadeia em vez de abrir uma nova (ver syncAutoRevisions).
+    absorbedKeys: (Array.isArray(item.absorbedKeys) ? item.absorbedKeys : []).map(cycleText).filter(Boolean).slice(-60),
     baseDate: cycleIsISO(item.baseDate) ? item.baseDate : cycleToday(),
     stage: cycleInt(item.stage, 0, 20, 0),
     dueDate: cycleIsISO(item.dueDate) ? item.dueDate : cycleToday(),
@@ -214,7 +217,7 @@ function normalizeErrorEntry(item = {}) {
     dueDate: mastered ? "" : cycleIsISO(item.dueDate) ? item.dueDate : cycleAddDays(date, firstGap),
     attempts: cycleInt(item.attempts, 0, 9999, 0),
     lapses: cycleInt(item.lapses, 0, 9999, 0),
-    lastResult: item.lastResult === "ok" || item.lastResult === "wrong" ? item.lastResult : "",
+    lastResult: ["ok", "wrong", "hard", "easy"].includes(item.lastResult) ? item.lastResult : "",
     lastReviewed: cycleIsISO(item.lastReviewed) ? item.lastReviewed : "",
     mastered,
     createdAt: item.createdAt || new Date().toISOString(),
@@ -507,7 +510,7 @@ function createRevision(data) {
   return revision;
 }
 
-/** Cria uma cadeia de revisões por assunto/dia estudado (sem duplicar). */
+/** Abre uma cadeia de revisões por assunto estudado; estudar o mesmo assunto de novo reaproveita a cadeia aberta. */
 function syncAutoRevisions(options = {}) {
   ensureCycleState();
   const settings = state.cycleSettings;
@@ -525,14 +528,89 @@ function syncAutoRevisions(options = {}) {
     group.minutes += Number(log.minutes) || 0;
     groups.set(key, group);
   });
-  const known = new Set(state.revisions.map((revision) => revision.originKey));
-  let created = 0;
-  groups.forEach((group) => {
-    if (known.has(group.key) || group.minutes < CYCLE_MIN_AUTO_MINUTES) return;
-    createRevision({ kind: "study", subjectId: group.subjectId, topicId: group.topicId, originKey: group.key, baseDate: group.date });
-    created += 1;
+  const known = new Set();
+  state.revisions.forEach((revision) => {
+    known.add(revision.originKey);
+    (revision.absorbedKeys || []).forEach((key) => known.add(key));
   });
+  let created = 0;
+  // Do dia mais antigo para o mais novo: o primeiro estudo de um assunto abre a cadeia e os seguintes se juntam a ela.
+  [...groups.values()]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key))
+    .forEach((group) => {
+      if (known.has(group.key) || group.minutes < CYCLE_MIN_AUTO_MINUTES) return;
+      const owner = cycleOpenStudyChain(state.revisions, group);
+      if (owner) {
+        // Estudar o mesmo assunto de novo não abre outra cadeia de revisões: a que está aberta continua valendo.
+        owner.absorbedKeys = [...(owner.absorbedKeys || []), group.key].slice(-60);
+        known.add(group.key);
+        return;
+      }
+      createRevision({ kind: "study", subjectId: group.subjectId, topicId: group.topicId, originKey: group.key, baseDate: group.date });
+      known.add(group.key);
+      created += 1;
+    });
   return created;
+}
+
+/** Cadeia de revisão por estudo ainda aberta para o mesmo assunto (ou matéria, quando não há assunto). */
+function cycleOpenStudyChain(revisions, scope) {
+  return (
+    revisions.find(
+      (revision) =>
+        revision.kind === "study" &&
+        revision.status === "pending" &&
+        (scope.topicId ? revision.topicId === scope.topicId : !revision.topicId && revision.subjectId === scope.subjectId)
+    ) || null
+  );
+}
+
+/**
+ * Para quem já tem várias cadeias abertas do mesmo assunto (uma por dia estudado): mantém a mais
+ * avançada de cada assunto e junta as outras nela. Função pura: devolve o plano, não altera nada.
+ * Retorna { groups, remove: [ids], keepers: { idMantida: [originKeys juntadas] } }.
+ */
+function cycleConsolidatePlan(revisions) {
+  const buckets = new Map();
+  revisions.forEach((revision, index) => {
+    if (revision.kind !== "study" || revision.status !== "pending") return;
+    const key = revision.topicId ? `t:${revision.topicId}` : `s:${revision.subjectId}`;
+    const list = buckets.get(key) || [];
+    list.push({ revision, index });
+    buckets.set(key, list);
+  });
+  const remove = [];
+  const keepers = {};
+  let groups = 0;
+  buckets.forEach((list) => {
+    if (list.length < 2) return;
+    const rank = (item) => item.revision.stage * 1000 + (item.revision.history?.length || 0);
+    list.sort((a, b) => rank(b) - rank(a) || a.revision.dueDate.localeCompare(b.revision.dueDate) || a.index - b.index);
+    const [keeper, ...rest] = list;
+    groups += 1;
+    keepers[keeper.revision.id] = rest.flatMap((item) => [item.revision.originKey, ...(item.revision.absorbedKeys || [])]).filter(Boolean);
+    rest.forEach((item) => remove.push(item.revision.id));
+  });
+  return { groups, remove, keepers };
+}
+
+function cycleConsolidateAction() {
+  const plan = cycleConsolidatePlan(state.revisions);
+  if (!plan.remove.length) {
+    showToast("Não há cadeias repetidas para unificar.");
+    return;
+  }
+  if (!window.confirm(`Unificar ${cyclePlural(plan.groups, "assunto com cadeias repetidas", "assuntos com cadeias repetidas")}? Fica a cadeia mais avançada de cada um e ${cyclePlural(plan.remove.length, "revisão repetida sai", "revisões repetidas saem")} da fila. O estudo de cada dia continua registrado.`)) return;
+  const removeSet = new Set(plan.remove);
+  state.revisions.forEach((revision) => {
+    const joined = plan.keepers[revision.id];
+    if (!joined) return;
+    revision.absorbedKeys = [...new Set([...(revision.absorbedKeys || []), ...joined])].slice(-60);
+    revision.updatedAt = new Date().toISOString();
+  });
+  state.revisions = state.revisions.filter((revision) => !removeSet.has(revision.id));
+  cycleRefresh();
+  showToast(`${cyclePlural(plan.remove.length, "revisão repetida unificada", "revisões repetidas unificadas")}.`);
 }
 
 function revisionLabel(revision) {
@@ -627,16 +705,35 @@ function errorStatusLabel(entry) {
   return { open: "Aberto", review: "Em revisão", mastered: "Dominado" }[errorStatus(entry)];
 }
 
-function retestErrorEntry(id, isCorrect) {
+const ERROR_RETEST_RESULTS = { forgot: "wrong", hard: "hard", ok: "ok", easy: "easy" };
+
+/** Aceita true/false (jeito antigo) ou "forgot" | "hard" | "ok" | "easy" (e "wrong" como sinônimo de forgot). */
+function errorRetestResult(value) {
+  if (value === true) return "ok";
+  if (value === false || value === "wrong") return "forgot";
+  return Object.prototype.hasOwnProperty.call(ERROR_RETEST_RESULTS, value) ? value : "ok";
+}
+
+/** Erro reincidente: ainda não dominado e já errado de novo várias vezes. */
+function errorIsLeech(entry) {
+  return Boolean(entry) && !entry.mastered && Number(entry.lapses) >= CYCLE_LEECH_LAPSES;
+}
+
+/**
+ * Refação do erro. result: "forgot" (errei), "hard" (acertei, mas chutei ou com dúvida: repete mais cedo,
+ * não conta como erro), "ok" (acertei) ou "easy" (acertei fácil: intervalo maior).
+ */
+function retestErrorEntry(id, rawResult) {
   const entry = state.errorNotebook.find((item) => item.id === id);
   if (!entry) return null;
+  const result = errorRetestResult(rawResult);
   const today = cycleToday();
   const intervals = state.cycleSettings.errorIntervals;
-  const step = cycleReviewStep(entry.stage, isCorrect ? "ok" : "forgot", intervals);
+  const step = cycleReviewStep(entry.stage, result, intervals);
   entry.attempts += 1;
   entry.lastReviewed = today;
-  entry.lastResult = isCorrect ? "ok" : "wrong";
-  if (!isCorrect) entry.lapses += 1;
+  entry.lastResult = ERROR_RETEST_RESULTS[result];
+  if (result === "forgot") entry.lapses += 1;
   entry.stage = step.stage;
   if (step.done) {
     entry.mastered = true;
@@ -646,11 +743,27 @@ function retestErrorEntry(id, isCorrect) {
     entry.dueDate = cycleAddDays(today, step.gap);
   }
   entry.updatedAt = new Date().toISOString();
-  return step;
+  return { ...step, result, leech: errorIsLeech(entry) };
+}
+
+/** Fila de refação: os reincidentes primeiro, depois os mais antigos. */
+function errorDueCompare(a, b) {
+  return (Number(b.lapses) || 0) - (Number(a.lapses) || 0) || String(a.dueDate).localeCompare(String(b.dueDate));
 }
 
 function getDueErrors(today = cycleToday()) {
-  return state.errorNotebook.filter((entry) => !entry.mastered && entry.dueDate && entry.dueDate <= today);
+  return state.errorNotebook.filter((entry) => !entry.mastered && entry.dueDate && entry.dueDate <= today).sort(errorDueCompare);
+}
+
+/** Cria um reforço de revisão para o assunto (ou matéria) do erro. Devolve a revisão, ou null se já houver uma aberta. */
+function errorCreateReinforcement(entry) {
+  const subjectId = getEntrySubjectId(entry);
+  if (!subjectId || !getSubject(subjectId)) return { error: "Vincule uma matéria ao erro para criar o reforço." };
+  const topicId = entry.topicId && getTopic(entry.topicId) ? entry.topicId : "";
+  const open = state.revisions.find((revision) => revision.kind === "weak" && revision.status === "pending" && (topicId ? revision.topicId === topicId : !revision.topicId && revision.subjectId === subjectId));
+  if (open) return { existing: open };
+  const today = cycleToday();
+  return { created: createRevision({ kind: "weak", subjectId, topicId, originKey: `weak:${topicId || subjectId}:${today}`, baseDate: today, dueDate: today }) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -851,6 +964,14 @@ function renderRevisions() {
     $("#revisionQueue").insertAdjacentHTML(
       "beforeend",
       `<div class="inline-actions"><button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(overdueCount, "atrasada", "atrasadas")} (até ${state.cycleSettings.dailyLimit} por dia)</button></div>`
+    );
+  }
+
+  const duplicated = cycleConsolidatePlan(state.revisions);
+  if (duplicated.remove.length) {
+    $("#revisionQueue").insertAdjacentHTML(
+      "beforeend",
+      `<div class="inline-actions"><button class="button secondary" data-cycle-action="consolidateRevisions" type="button">Unificar ${cyclePlural(duplicated.remove.length, "revisão repetida", "revisões repetidas")} de ${cyclePlural(duplicated.groups, "assunto", "assuntos")}</button></div>`
     );
   }
 
@@ -1133,6 +1254,7 @@ function renderErrors() {
     .filter((entry) => erroScopeMatches(erroEntryScope(entry, maps), filters))
     .sort((a, b) => Number(a.mastered) - Number(b.mastered) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || b.date.localeCompare(a.date));
 
+  if (typeof erroCloudStatusRefresh === "function") erroCloudStatusRefresh();
   $("#errorListSummary").textContent = all.length
     ? `${matches.length} de ${all.length} ${all.length === 1 ? "erro" : "erros"} no filtro atual.`
     : "Seu caderno está vazio.";
@@ -1202,12 +1324,22 @@ function errorCardHTML(entry, today) {
   const retestArea = retesting
     ? answerHidden
       ? `<div class="retest-box"><p>Responda sem olhar o gabarito. Quando estiver pronto, confira.</p><button class="button primary" data-cycle-action="showErrorAnswer" data-id="${entry.id}" type="button">Mostrar gabarito</button></div>`
-      : `<div class="retest-box"><p>Você acertou desta vez?</p><div class="inline-actions">
+      : `<div class="retest-box"><p>Como foi desta vez?</p><div class="inline-actions">
+           <button class="button ghost danger" data-cycle-action="errorResult" data-result="forgot" data-id="${entry.id}" type="button">Errei de novo</button>
+           <button class="button secondary" data-cycle-action="errorResult" data-result="hard" data-id="${entry.id}" type="button">Acertei, mas chutei ou com dúvida</button>
            <button class="button primary" data-cycle-action="errorResult" data-result="ok" data-id="${entry.id}" type="button">Acertei</button>
-           <button class="button ghost danger" data-cycle-action="errorResult" data-result="wrong" data-id="${entry.id}" type="button">Errei de novo</button>
+           <button class="button primary" data-cycle-action="errorResult" data-result="easy" data-id="${entry.id}" type="button">Acertei fácil</button>
          </div></div>`
     : "";
   const showAnswer = !answerHidden && (entry.correctAnswer || answerShots);
+  const leech = errorIsLeech(entry);
+  const leechBox = leech && !answerHidden
+    ? `<div class="retest-box leech-box"><p><strong>Reincidente:</strong> você errou este ${entry.lapses}×. Só refazer não está bastando. ${entry.rule ? "Releia a regra e veja se ela está clara o bastante." : "Escreva a regra de como não errar de novo."}</p><div class="inline-actions">
+         <button class="mini-button success" data-cycle-action="errorReinforce" data-id="${entry.id}" type="button">Criar reforço do assunto</button>
+         <button class="mini-button" data-cycle-action="errorToFlashcard" data-id="${entry.id}" type="button">Gerar flashcard</button>
+         <button class="mini-button" data-cycle-action="editError" data-id="${entry.id}" type="button">${entry.rule ? "Reescrever a regra" : "Escrever a regra"}</button>
+       </div></div>`
+    : "";
   return `
     <article class="error-card status-${status} ${due ? "is-due" : ""}">
       <div class="performance-top">
@@ -1215,7 +1347,7 @@ function errorCardHTML(entry, today) {
           <strong>${escapeHTML(getEntryScopeLabel(entry))}</strong>
           <small>${formatDate(entry.date)}${entry.source ? ` · ${escapeHTML(entry.source)}` : ""}</small>
         </div>
-        <div class="chip-row"><span class="tag reason-tag">${escapeHTML(ERROR_REASONS[entry.reason])}</span><span class="tag status-tag status-${status}">${errorStatusLabel(entry)}</span></div>
+        <div class="chip-row"><span class="tag reason-tag">${escapeHTML(ERROR_REASONS[entry.reason])}</span>${leech ? `<span class="tag status-tag leech-tag">Reincidente</span>` : ""}<span class="tag status-tag status-${status}">${errorStatusLabel(entry)}</span></div>
       </div>
       <div class="error-block"><span class="field-title">Questão ou dúvida</span>${entry.statement ? `<p class="pre-wrap">${escapeHTML(entry.statement)}</p>` : ""}${questionShots}</div>
       ${entry.myAnswer && !answerHidden ? `<div class="error-block wrong"><span class="field-title">O que eu respondi</span><p class="pre-wrap">${escapeHTML(entry.myAnswer)}</p></div>` : ""}
@@ -1230,6 +1362,7 @@ function errorCardHTML(entry, today) {
         ${nextText ? `<span>${escapeHTML(nextText)}</span>` : ""}
       </div>
       ${retestArea}
+      ${leechBox}
       <div class="inline-actions">
         ${entry.mastered ? `<button class="mini-button" data-cycle-action="reopenError" data-id="${entry.id}" type="button">Reabrir</button>` : `<button class="mini-button success" data-cycle-action="retestError" data-id="${entry.id}" type="button">${retesting ? "Reiniciar" : "Refazer agora"}</button>`}
         <button class="mini-button" data-cycle-action="errorToFlashcard" data-id="${entry.id}" type="button">Gerar flashcard</button>
@@ -1500,6 +1633,10 @@ function handleCycleAction(button) {
     cycleRedistributeAction();
     return undefined;
   }
+  if (type === "consolidateRevisions") {
+    cycleConsolidateAction();
+    return undefined;
+  }
   if (type === "notifyToggle") {
     cycleToggleNotifications();
     return undefined;
@@ -1638,12 +1775,30 @@ function handleCycleAction(button) {
     return undefined;
   }
   if (type === "errorResult") {
-    const ok = button.dataset.result === "ok";
-    const step = retestErrorEntry(id, ok);
+    const step = retestErrorEntry(id, button.dataset.result);
     cycleUI.errorRetest = { id: "", open: false };
     cycleRefresh();
-    if (step) showToast(ok ? (step.done ? "Erro dominado!" : `Acertou. Volta em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}.`) : "Sem problema: volta amanhã para refazer.");
+    if (step) {
+      const days = `${step.gap} ${step.gap === 1 ? "dia" : "dias"}`;
+      if (step.result === "forgot") showToast(step.leech ? `Errou de novo (${CYCLE_LEECH_LAPSES}× ou mais). Veja as sugestões para este erro reincidente.` : "Sem problema: volta amanhã para refazer.");
+      else if (step.done) showToast("Erro dominado!");
+      else if (step.result === "hard") showToast(`Acertou com dúvida. Volta em ${days} para firmar.`);
+      else if (step.result === "easy") showToast(`Fácil! Volta em ${days}.`);
+      else showToast(`Acertou. Volta em ${days}.`);
+    }
     if (typeof todayAfterAction === "function") todayAfterAction("err");
+    return undefined;
+  }
+  if (type === "errorReinforce") {
+    const entry = state.errorNotebook.find((item) => item.id === id);
+    if (!entry) return undefined;
+    const made = errorCreateReinforcement(entry);
+    if (made.error) {
+      showToast(made.error);
+      return undefined;
+    }
+    cycleRefresh();
+    showToast(made.existing ? "Já existe um reforço aberto para este assunto." : "Reforço criado: aparece nas revisões de hoje.");
     return undefined;
   }
   if (type === "masterError" || type === "reopenError") {
@@ -1886,6 +2041,7 @@ function bindCycleEvents() {
       }
       resetErrorForm({ keepContext: !existing }); // erro novo: segue aberto, na mesma matéria, para o próximo
       if (existing) errorFormSet(false);
+      if (typeof erroCloudKick === "function") erroCloudKick(); // manda os prints novos para a conta online
       cycleRefresh();
       showToast(
         shots.failed
@@ -2538,6 +2694,11 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeWeights,
     normalizeStudyWeekdays,
     cycleRedistributeOverdue,
+    cycleConsolidatePlan,
+    errorRetestResult,
+    errorIsLeech,
+    errorDueCompare,
+    cycleOpenStudyChain,
     cycleReminderMessage,
     cycleProjectStages,
     cycleCalendarGroups,

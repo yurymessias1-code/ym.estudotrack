@@ -76,3 +76,27 @@ Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, sele
 - **Janelas:** `modal.js` (foco preso, fundo inerte, foco devolvido), usado pela janela de sessão e pela de mesclagem.
 - **Testes novos:** `merge-tests` (20), `mesclar-tests` (14), `retencao-tests` (12) e os roteiros `sync`, `mesclar` e `relatorios` em `tests/e2e/`; `tests/e2e/fake-supabase.js` é um Supabase falso em memória (autenticação, `study_profiles` com o carimbo de `updated_at` feito pelo servidor).
 - Limite conhecido: a sincronização foi testada contra o Supabase falso (que reproduz o comportamento do PostgREST usado), não contra um projeto real. Antes de contar com ela, teste com dois aparelhos.
+
+## Caderno de erros: anotações livres e prints na nuvem (novembro/2026)
+
+- Cada erro tem o campo **Meu caderno** (texto formatado, colar explicações, prints no meio do texto). Só matéria + algum conteúdo são obrigatórios; "Resposta correta" é opcional. O filtro padrão da lista é **Todos**.
+- Prints vão para o **Supabase Storage** (`supabase-storage.sql`, bucket `erro-prints`, pasta por usuário) com fila offline, download sob demanda em outro aparelho, exclusão junto com o erro e inclusão no backup em arquivo.
+- `tests/e2e/prints-nuvem.e2e.js` usa o Supabase falso (agora com Storage) para cobrir envio, outro aparelho, exclusão, falha sem internet, backup/restauração e aviso de bucket ausente.
+- Regra mantida: prints em base64 nunca entram no `state`; só no arquivo de backup (o teste de fumaça vigia isso).
+
+## Proteção dos dados, uma cadeia de revisão por assunto e refação com 4 notas (novembro/2026)
+
+- **Tudo na conta:** as sessões do Pomodoro ainda sem matéria agora ficam em `state.pendingSessions` (entram na junção entre aparelhos, no Supabase e no backup em arquivo). A cópia antiga que ficava só no `localStorage` é trazida para o estado na primeira leitura e removida.
+- **Cofre auxiliar só no IndexedDB:** as cópias automáticas (a cada 10 minutos, 12 por perfil) e as de "manual" e "antes de restaurar" (6 por perfil, não são empurradas pelas automáticas) ficam no IndexedDB. Cópias antigas do `localStorage` são migradas e apagadas, liberando a cota. Só se o navegador não tiver IndexedDB sobram até 2 cópias locais.
+- **Restaurar com segurança:** o backup (arquivo ou código) é conferido antes (JSON que não é backup é recusado), mostra o que vai entrar, pede confirmação e guarda uma cópia dos dados atuais no cofre antes de trocar. A cópia aparece na lista de recuperação da aba Conta. Os prints só são restaurados depois da confirmação.
+- **Uma cadeia de revisão por assunto:** estudar o mesmo assunto em outro dia reaproveita a cadeia aberta (`absorbedKeys` guarda os dias juntados). Quem já tem cadeias repetidas vê o botão **Unificar revisões repetidas** na aba Revisão (fica a mais avançada de cada assunto).
+- **Caderno de erros:** a refação tem 4 notas (Errei de novo, Acertei mas chutei/com dúvida, Acertei, Acertei fácil). "Com dúvida" não conta como erro e repete mais cedo; "fácil" aumenta o intervalo. Com 3 ou mais erros o item vira **Reincidente**, com atalhos para criar reforço do assunto, gerar flashcard e reescrever a regra. A fila de refação mostra os reincidentes primeiro.
+- **Testes:** `ciclo-tests` (47), `sessao-tests` (16) e o roteiro `tests/e2e/protecao.e2e.js`.
+- **Para os prints irem para a nuvem** é preciso ter rodado `supabase-storage.sql` no Supabase (uma vez).
+
+## Histórico de versões da conta (novembro/2026)
+
+- **Servidor:** `supabase-history.sql` (rodar uma vez no SQL Editor, depois do `supabase-schema.sql`) cria a tabela `study_profiles_history` e um gatilho que guarda a versão anterior a cada atualização da conta, no máximo uma a cada 2 horas. Ficam todas as versões das últimas 24 horas, depois a primeira de cada dia até 14 dias. As cópias "antes de restaurar" (feitas pelo app) ficam as 5 mais recentes. Cada pessoa só vê e apaga as suas; ninguém edita versões. Atenção ao espaço do plano gratuito: cada versão é uma cópia inteira dos dados.
+- **Site:** aba Conta, **Versões na nuvem** → "Ver versões salvas" → "Voltar a esta versão". Antes de trocar, o app guarda uma cópia do que está aberto no cofre do navegador e no histórico da nuvem. A volta é de verdade: o que a versão não tem sai também dos outros aparelhos (vira exclusão lembrada) e o que ela tem e já tinha sido excluído volta (`mergeCarryForwardForRestore` em `merge.js`). Importar um backup em arquivo continua se juntando ao que há na nuvem.
+- **Excluir meus dados** também apaga o histórico da conta.
+- **Testes:** `merge-tests` (22) e o roteiro `tests/e2e/historico.e2e.js` (dois aparelhos contra o Supabase falso com a tabela de histórico).

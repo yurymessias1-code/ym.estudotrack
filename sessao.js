@@ -1,7 +1,7 @@
 /*
  * Salvar o que foi estudado na hora de registrar o tempo (Pomodoro, registro manual e registro rápido).
  * Ao terminar um foco, uma janela pergunta matéria e assunto e permite criar os dois na hora,
- * sem passar pela aba Matérias. As sessões ainda sem destino ficam guardadas neste aparelho até serem salvas.
+ * sem passar pela aba Matérias. As sessões ainda sem destino ficam guardadas no estado (sincronizado com a conta) até serem salvas.
  * Carregado depois do push.js e antes do app.js.
  */
 
@@ -102,42 +102,71 @@ function sessionApplyTypedTopic(subjectId, typedName) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Sessões aguardando destino (guardadas neste aparelho)               */
+/* Sessões aguardando destino (guardadas no estado, vão para a conta)  */
 /* ------------------------------------------------------------------ */
 
 function sessionStoreKey() {
   return `${SESSION_STORE_PREFIX}${state?.profile?.id || "default"}`;
 }
 
-function sessionPendingRead() {
+/** Limpa e valida uma lista de sessões (do estado, do backup ou da cópia antiga deste aparelho). */
+function sessionPendingNormalize(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((item) => item && item.id && Number(item.minutes) >= 1)
+    .map((item) => ({
+      id: String(item.id),
+      minutes: Math.min(600, Math.round(Number(item.minutes))),
+      date: cycleIsISO(item.date) ? item.date : cycleToday(),
+      endedAt: String(item.endedAt || ""),
+      cycle: Number(item.cycle) || 0,
+      subjectId: String(item.subjectId || ""),
+      topicId: String(item.topicId || ""),
+      competitionId: String(item.competitionId || ""),
+      source: String(item.source || "Pomodoro"),
+      note: String(item.note || ""),
+    }));
+}
+
+/**
+ * As sessões aguardando destino agora fazem parte do estado (`state.pendingSessions`): vão para o
+ * Supabase e para o backup em arquivo, e aparecem em outro navegador. Versões antigas guardavam
+ * a fila só no localStorage; na primeira leitura ela é trazida para o estado e a cópia antiga some.
+ */
+function sessionLegacyMigrate() {
+  if (typeof state === "undefined" || !state) return;
+  let raw = null;
   try {
-    const raw = JSON.parse(localStorage.getItem(sessionStoreKey()) || "[]");
-    return (Array.isArray(raw) ? raw : [])
-      .filter((item) => item && item.id && Number(item.minutes) >= 1)
-      .map((item) => ({
-        id: String(item.id),
-        minutes: Math.min(600, Math.round(Number(item.minutes))),
-        date: cycleIsISO(item.date) ? item.date : cycleToday(),
-        endedAt: String(item.endedAt || ""),
-        cycle: Number(item.cycle) || 0,
-        subjectId: String(item.subjectId || ""),
-        topicId: String(item.topicId || ""),
-        competitionId: String(item.competitionId || ""),
-        source: String(item.source || "Pomodoro"),
-        note: String(item.note || ""),
-      }));
+    raw = localStorage.getItem(sessionStoreKey());
   } catch {
-    return [];
+    return;
+  }
+  if (raw === null) return;
+  let legacy = [];
+  try {
+    legacy = sessionPendingNormalize(JSON.parse(raw));
+  } catch {
+    legacy = [];
+  }
+  const current = sessionPendingNormalize(state.pendingSessions);
+  const known = new Set(current.map((item) => item.id));
+  const merged = [...current, ...legacy.filter((item) => !known.has(item.id))].slice(-SESSION_MAX_PENDING);
+  state.pendingSessions = merged;
+  if (merged.length !== current.length && typeof saveState === "function") saveState();
+  try {
+    localStorage.removeItem(sessionStoreKey());
+  } catch {
+    /* sem armazenamento: a cópia antiga fica, mas já foi trazida para o estado */
   }
 }
 
+function sessionPendingRead() {
+  sessionLegacyMigrate();
+  return sessionPendingNormalize(typeof state !== "undefined" && state ? state.pendingSessions : []);
+}
+
 function sessionPendingWrite(list) {
-  try {
-    if (list.length) localStorage.setItem(sessionStoreKey(), JSON.stringify(list.slice(-SESSION_MAX_PENDING)));
-    else localStorage.removeItem(sessionStoreKey());
-  } catch {
-    /* sem armazenamento: a sessão não fica guardada, mas o fluxo continua */
-  }
+  state.pendingSessions = sessionPendingNormalize(list).slice(-SESSION_MAX_PENDING);
+  if (typeof saveState === "function") saveState();
 }
 
 /**
@@ -366,5 +395,5 @@ function bindSessionEvents() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { sessionClean, sessionResolveTarget };
+  module.exports = { sessionClean, sessionResolveTarget, sessionPendingNormalize };
 }

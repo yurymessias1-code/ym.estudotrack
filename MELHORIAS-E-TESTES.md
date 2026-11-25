@@ -128,3 +128,19 @@ Por que acumulava: cada assunto estudado volta 4 vezes (1, 7, 30 e 60 dias) e ca
 - **Mínimo para abrir revisão:** estudo de um assunto só abre revisões com pelo menos 20 minutos no dia (era 10; ajustável de 5 a 120 em "Minutos mínimos de estudo de um assunto para abrir revisões"). Toques rápidos de 10 a 19 minutos deixam de gerar uma cadeia de 4 revisões.
 - **Aviso de ritmo sustentável (`cycleSteadyLoad`, `cycleSustainabilityNote`):** usa os assuntos e erros novos dos últimos 14 dias e quantas etapas tem cada escada para estimar quantas revisões por dia o seu ritmo vai gerar. Se passar do limite, a aba Hoje e a aba Revisão avisam e sugerem estudar menos assuntos novos por vez, aumentar o limite ou usar uma escada mais curta (ex.: 1, 7 e 30). Também avisa quando há itens aguardando espaço.
 - **Testes:** `ciclo-tests` (64) e `tests/e2e/protecao.e2e.js` (passo 12: fila de 3 de 6, "Revisar mais 5 hoje", avisos na aba Hoje).
+
+## Layout: topo compacto, aviso fino e painel (novembro/2026)
+
+- **Topo numa linha só no desktop:** título, busca e botões (status, modo escuro, Pomodoro, Nova matéria) cabem lado a lado; a data some do topo entre 1121 e 1520 px (ela já aparece na tela Hoje). Botões menores. No celular, botões do topo mais baixos.
+- **Aviso "Hora de revisar" mais fino:** uma linha de texto (sem a frase explicativa) e botões "Revisar", "Erros" e "Depois", menores. No celular, o texto fica em cima e os botões numa linha.
+- **Títulos sem repetição:** o Caderno de erros passou a "Transforme cada erro em ponto" (antes repetia o nome da tela).
+- **Visão geral:** os quatro números (Hoje, Semana, Questões, Precisão) vêm antes da ilustração, que ficou mais baixa.
+- **Status de salvamento mais claro:** "Neste aparelho" (só neste navegador), "Salvando...", "Salvo na conta", "Conta offline" e "Erro ao salvar", com explicação ao passar o mouse.
+- **"Redistribuir atrasados"** só aparece a partir de 3 atrasados (revisões e erros somados) na tela de Revisão e na de Caderno de erros.
+
+## Aviso de erro repetido enquanto digita (novembro/2026)
+
+- **Aviso ao vivo:** no formulário do Caderno de erros, enquanto você cola ou digita o enunciado, aparece um aviso se ele já está no caderno: "Parece que você já registrou este erro (data · quantas vezes errou depois · matéria)". Botões: **Somar mais um erro nele** (soma no registro existente, sem perguntar de novo) e **Ver esse erro** (filtra a lista por ele). Ao editar um erro, só aparece "Ver esse erro". Se for outra questão, é só ignorar e salvar.
+- **Reconhece enunciados parecidos, não só idênticos:** compara as palavras do enunciado (sem acento e pontuação, ignorando palavras de 1 ou 2 letras e usando o começo das palavras longas, então "contrário" e "contrária" valem o mesmo). Considera o mesmo erro a partir de 70% de palavras em comum, ou quando um enunciado está quase todo dentro do outro. Textos com menos de 6 palavras só são comparados se forem idênticos.
+- **Na hora de salvar** a pergunta continua (OK soma, Cancelar salva como novo), agora também para enunciados parecidos.
+- **Testes:** `ciclo-tests` (65) e `tests/e2e/protecao.e2e.js` (passo 13).

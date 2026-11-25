@@ -530,17 +530,21 @@ function renderSyncStatus() {
   if (!badge) return;
   const status = remoteStore.syncStatus || (isSupabaseConfigured() ? "offline" : "local");
   const labels = {
-    local: "Salvo local",
-    offline: "Online inativo",
+    local: "Neste aparelho",
+    offline: "Conta offline",
     saving: "Salvando...",
-    saved: "Salvo",
+    saved: "Salvo na conta",
     error: "Erro ao salvar",
   };
-  badge.textContent = labels[status] || "Salvo";
+  const hints = {
+    local: "Seus dados estão salvos só neste navegador. Entre com e-mail e senha para guardá-los também na conta.",
+    offline: "Sem conexão com a conta agora. Os dados continuam salvos neste aparelho e sobem quando a conexão voltar.",
+  };
+  badge.textContent = labels[status] || "Salvo na conta";
   badge.className = `sync-status ${status}`;
   const detail = status === "saved" && remoteStore.lastSyncAt
     ? `Ultimo salvamento: ${new Date(remoteStore.lastSyncAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
-    : remoteStore.lastSyncError || labels[status] || "";
+    : remoteStore.lastSyncError || hints[status] || labels[status] || "";
   badge.title = detail;
 }
 

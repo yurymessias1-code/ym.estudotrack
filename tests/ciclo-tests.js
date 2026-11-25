@@ -982,4 +982,28 @@ test("ritmo sustentável: estima as revisões por dia que o ritmo atual vai gera
   assert.ok(waiting && /aguarda/.test(waiting.title), "aviso de espera: " + (waiting && waiting.title));
 });
 
+
+test("erro repetido: reconhece enunciados parecidos, não só idênticos", () => {
+  const base = "A tentativa é punível quando o crime não se consuma por circunstâncias alheias à vontade do agente, salvo disposição em contrário.";
+  const entries = [
+    normalizeErrorEntry({ id: "a", subjectId: "s1", statement: base }),
+    normalizeErrorEntry({ id: "b", subjectId: "s1", statement: "A prescrição da pretensão punitiva extingue a punibilidade do réu antes do trânsito em julgado da sentença." }),
+    normalizeErrorEntry({ id: "c", subjectId: "s1", statement: "curto demais" }),
+  ];
+  const sim = ctx.errorStatementSimilarity;
+  assert.ok(sim(base, "Tentativa punível quando o crime não se consuma por circunstâncias alheias à vontade do agente, salvo disposição em contrário no Código Penal.") >= 0.7, "mesma questão com palavras a mais");
+  assert.ok(sim(base, "Conforme o Código, a tentativa é punível se o crime não se consuma por circunstâncias alheias à vontade do agente, salvo previsão contrária.") >= 0.7, "mesma questão reescrita");
+  assert.ok(sim(base, entries[1].statement) < 0.3, "assuntos diferentes não se parecem");
+  assert.strictEqual(sim("poucas palavras aqui", "poucas palavras aqui"), 0, "textos com menos de 6 palavras não são comparados por semelhança");
+  const found = ctx.errorFindDuplicate(entries, { statement: "Tentativa punível quando o crime não se consuma por circunstâncias alheias à vontade do agente salvo disposição em contrário no Código Penal" });
+  assert.strictEqual(found && found.id, "a");
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "Tentativa punível quando o crime não se consuma por circunstâncias alheias à vontade do agente" }, "a"), null, "ignora o próprio registro");
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "A competência para julgar crimes federais é da Justiça Federal, conforme a Constituição da República." }), null, "outra questão");
+  // enunciado inteiro contido no outro (com trechos a mais) conta como o mesmo, mesmo abaixo do limite de palavras em comum
+  const shortBase = "tentativa punivel quando crime consuma circunstancias alheias vontade agente disposicao";
+  const longer = shortBase + " salvo contrario penal codigo artigo";
+  assert.ok(sim(shortBase, longer) >= 0.7, "contido: " + sim(shortBase, longer));
+  assert.ok(sim(shortBase, shortBase + " um dois tres quatro cinco seis sete oito nove dez") < 0.7, "contido, mas o outro é bem maior: não conta");
+});
+
 console.log(`ciclo-tests: ${passed} testes passaram.`);

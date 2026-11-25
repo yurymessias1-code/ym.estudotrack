@@ -10,6 +10,9 @@ const CYCLE_LAPSE_DROP = 2; // errar/esquecer faz descer só esta quantidade de 
 const CYCLE_LEECH_LAPSES = 3; // errou de novo tantas vezes: vira reincidente
 const CYCLE_MIN_AUTO_MINUTES = 20; // padrão: estudo mais curto que isso não abre cadeia de revisões (ajustável)
 const CYCLE_STEADY_WINDOW_DAYS = 14;
+const CYCLE_DUP_MIN_WORDS = 6; // enunciados com menos palavras não são comparados por semelhança
+const CYCLE_DUP_SIMILARITY = 0.7; // palavras em comum sobre o total para considerar o mesmo enunciado
+const CYCLE_REDISTRIBUTE_MIN = 3; // só oferece "redistribuir atrasados" a partir de tantos atrasados
 const CYCLE_BACKFILL_DAYS = 14;
 const CYCLE_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const CYCLE_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -33,6 +36,7 @@ const cycleUI = {
   recall: "",
   errorEditId: "",
   errorPrefill: null,
+  errorForceMerge: "",
   errorRetest: { id: "", open: false },
   errorFilters: { search: "", subject: "", topic: "", reason: "", status: "all" },
   errorFormOpen: false,
@@ -971,22 +975,101 @@ function retestErrorEntry(id, rawResult) {
   return { ...step, result, leech: errorIsLeech(entry) };
 }
 
-/** Texto do enunciado sem acento, pontuação e maiúsculas, para reconhecer o mesmo erro cadastrado duas vezes. */
-function errorStatementKey(text) {
+/** Enunciado sem acento, pontuação e maiúsculas (e sem espaços repetidos). */
+function errorStatementNormalize(text) {
   return String(text || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .slice(0, 240);
+    .trim();
 }
 
-/** Erro já cadastrado com o mesmo enunciado (enunciados curtos demais não são comparados). */
+/** Início do enunciado normalizado: chave para reconhecer o mesmo erro cadastrado duas vezes. */
+function errorStatementKey(text) {
+  return errorStatementNormalize(text).slice(0, 240);
+}
+
+/**
+ * Palavras do enunciado (3 letras ou mais, sem repetir), para comparar textos parecidos. Palavras longas
+ * ficam só com o começo, para "contrário" e "contrária" ou "punível" e "puníveis" valerem como a mesma.
+ */
+function errorStatementTokens(text) {
+  return new Set(
+    errorStatementNormalize(text)
+      .split(" ")
+      .filter((word) => word.length >= 3)
+      .map((word) => (word.length > 6 ? word.slice(0, 6) : word))
+  );
+}
+
+/**
+ * Quanto dois enunciados se parecem (0 a 1): palavras em comum sobre o total de palavras.
+ * Textos com poucas palavras não são comparados (devolve 0).
+ */
+function errorStatementSimilarity(a, b) {
+  const first = a instanceof Set ? a : errorStatementTokens(a);
+  const second = b instanceof Set ? b : errorStatementTokens(b);
+  const small = Math.min(first.size, second.size);
+  if (small < CYCLE_DUP_MIN_WORDS) return 0;
+  let shared = 0;
+  first.forEach((word) => {
+    if (second.has(word)) shared += 1;
+  });
+  const jaccard = shared / (first.size + second.size - shared);
+  // um enunciado quase todo contido no outro (colou com ou sem as alternativas) também conta
+  const contained = shared / small >= 0.95 && small / Math.max(first.size, second.size) >= 0.6;
+  return contained ? Math.max(jaccard, CYCLE_DUP_SIMILARITY) : jaccard;
+}
+
+/**
+ * Erro já cadastrado com o mesmo enunciado: igual (sem contar acento e pontuação) ou muito parecido.
+ * Enunciados curtos demais não são comparados. Devolve o mais parecido.
+ */
 function errorFindDuplicate(entries, candidate, ignoreId = "") {
   const key = errorStatementKey(candidate?.statement);
   if (key.length < 25) return null;
-  return (entries || []).find((entry) => entry.id !== ignoreId && errorStatementKey(entry.statement) === key) || null;
+  const list = (entries || []).filter((entry) => entry.id !== ignoreId);
+  const same = list.find((entry) => errorStatementKey(entry.statement) === key);
+  if (same) return same;
+  const tokens = errorStatementTokens(candidate.statement);
+  if (tokens.size < CYCLE_DUP_MIN_WORDS) return null;
+  let best = null;
+  let bestScore = CYCLE_DUP_SIMILARITY - 0.0001;
+  list.forEach((entry) => {
+    const score = errorStatementSimilarity(tokens, entry.statement);
+    if (score > bestScore) {
+      best = entry;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+/** Avisa, enquanto a pessoa digita o enunciado, que ele parece já estar no caderno. */
+function errorUpdateDuplicateWarning() {
+  const box = $("#errorDuplicateWarning");
+  if (!box) return;
+  const statement = $("#errorStatement")?.value || "";
+  const match = cycleUI.errorFormOpen ? errorFindDuplicate(state.errorNotebook, { statement }, cycleUI.errorEditId) : null;
+  box.classList.toggle("hidden", !match);
+  if (!match) {
+    box.innerHTML = "";
+    return;
+  }
+  const when = String(match.date || "").split("-").reverse().join("/");
+  const facts = [
+    match.lapses ? `já errou ${match.lapses}× depois` : "",
+    match.mastered ? "estava dominado" : "",
+    getEntryScopeLabel(match) ? escapeHTML(getEntryScopeLabel(match)) : "",
+  ].filter(Boolean);
+  box.innerHTML = `
+    <p><strong>Parece que você já registrou este erro</strong> (${escapeHTML(when)}${facts.length ? ` · ${facts.join(" · ")}` : ""}).</p>
+    <div class="inline-actions">
+      ${cycleUI.errorEditId ? "" : `<button class="mini-button success" data-cycle-action="errorMergeDuplicate" data-id="${match.id}" type="button">Somar mais um erro nele</button>`}
+      <button class="mini-button" data-cycle-action="errorShowDuplicate" data-id="${match.id}" type="button">Ver esse erro</button>
+    </div>
+    <small>${cycleUI.errorEditId ? "" : "Somar evita duplicar: reabre o erro e conta mais uma vez. "}Se for outra questão, ignore este aviso e salve normalmente.</small>`;
 }
 
 /**
@@ -1251,7 +1334,7 @@ function renderRevisions() {
     : `<div class="empty-state">Nenhuma revisão pendente para hoje. Registre estudo no Pomodoro ou agende uma revisão manual.</div>`;
 
   const overdueCount = getDueRevisions(today).filter((revision) => revision.dueDate < today).length + getDueErrors(today).filter((entry) => entry.dueDate < today).length;
-  if (overdueCount > 0) {
+  if (overdueCount >= CYCLE_REDISTRIBUTE_MIN) {
     $("#revisionQueue").insertAdjacentHTML(
       "beforeend",
       `<div class="inline-actions"><button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(overdueCount, "atrasada", "atrasadas")} (até ${state.cycleSettings.dailyLimit} por dia)</button></div>`
@@ -1517,6 +1600,7 @@ function renderErrors() {
   $("#errorFilterReason").innerHTML = cycleReasonOptions(filters.reason, { withAll: true });
   $("#errorFilterStatus").value = filters.status;
   cycleSetValueIfIdle("#errorSearch", filters.search);
+  errorUpdateDuplicateWarning();
 
   if (cycleUI.errorPrefill) {
     const prefill = cycleUI.errorPrefill;
@@ -1538,9 +1622,10 @@ function renderErrors() {
   const topReason = reasonCounts[0]?.count ? reasonCounts[0] : null;
   const errOverdue = getDueErrors(today).filter((entry) => entry.dueDate < today).length;
   const redistribute = $("#errorRedistribute");
+  const showRedistribute = errOverdue >= CYCLE_REDISTRIBUTE_MIN; // com poucos atrasados o botão só atrapalha
   if (redistribute) {
-    redistribute.classList.toggle("hidden", !errOverdue);
-    redistribute.innerHTML = errOverdue ? `<button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(errOverdue, "erro atrasado", "erros atrasados")} (até ${state.cycleSettings.dailyLimit} por dia)</button>` : "";
+    redistribute.classList.toggle("hidden", !showRedistribute);
+    redistribute.innerHTML = showRedistribute ? `<button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(errOverdue, "erro atrasado", "erros atrasados")} (até ${state.cycleSettings.dailyLimit} por dia)</button>` : "";
   }
   $("#errorStats").innerHTML = [
     cycleStat("Para refazer hoje", String(dueCount), dueCount ? (errQueue.waitingErrors ? `venceram · ${errQueue.waitingErrors} aguardam` : "venceram na revisão") : errQueue.waitingErrors ? `${errQueue.waitingErrors} aguardam espaço` : "nada vencido"),
@@ -1703,6 +1788,7 @@ function resetErrorForm({ keepContext = false } = {}) {
   erroDraftReset();
   if (typeof erroNotesSet === "function") erroNotesSet("");
   errorFormMessage("");
+  errorUpdateDuplicateWarning();
   updateErrorFormMode();
 }
 
@@ -1940,6 +2026,20 @@ function handleCycleAction(button) {
   }
   if (type === "redistributeOverdue") {
     cycleRedistributeAction();
+    return undefined;
+  }
+  if (type === "errorMergeDuplicate") {
+    cycleUI.errorForceMerge = id;
+    $("#errorForm").requestSubmit();
+    return undefined;
+  }
+  if (type === "errorShowDuplicate") {
+    const target = state.errorNotebook.find((entry) => entry.id === id);
+    if (target) {
+      cycleUI.errorFilters = { ...cycleUI.errorFilters, search: target.statement.trim().slice(0, 40), subject: "", topic: "", reason: "", status: "all" };
+      renderCycle();
+      $("#errorSearch")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
     return undefined;
   }
   if (type === "queueMore") {
@@ -2249,6 +2349,10 @@ function bindCycleEvents() {
       cycleUI.errorFilters.search = event.target.value;
       renderCycle();
     }
+    if (event.target.id === "errorStatement") {
+      window.clearTimeout(cycleUI.dupTimer);
+      cycleUI.dupTimer = window.setTimeout(errorUpdateDuplicateWarning, 250);
+    }
   });
 
   $("#revisionSubject").addEventListener("change", () => {
@@ -2314,6 +2418,8 @@ function bindCycleEvents() {
 
   $("#errorForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const forcedMerge = cycleUI.errorForceMerge; // vem do botão "Somar mais um erro nele" do aviso
+    cycleUI.errorForceMerge = "";
     const subjectId = $("#errorSubject").value;
     const statement = $("#errorStatement").value.trim();
     const correctAnswer = $("#errorCorrect").value.trim();
@@ -2358,12 +2464,13 @@ function bindCycleEvents() {
         Object.assign(existing, updated);
       } else {
         const firstGap = state.cycleSettings.errorIntervals[0];
-        const duplicate = errorFindDuplicate(state.errorNotebook, data);
+        const duplicate = forcedMerge ? state.errorNotebook.find((entry) => entry.id === forcedMerge) : errorFindDuplicate(state.errorNotebook, data);
         const sumUp =
           duplicate &&
+          (Boolean(forcedMerge) ||
           window.confirm(
             `Este erro parece já estar no caderno (cadastrado em ${duplicate.date.split("-").reverse().join("/")}${duplicate.lapses ? `, errado ${duplicate.lapses}× depois` : ""}).\n\nOK: somar mais um erro nele, sem duplicar.\nCancelar: salvar como um registro novo mesmo assim.`
-          );
+          ));
         if (sumUp) {
           const { entry: merged, droppedImages } = errorRegisterRepeat(duplicate, normalizeErrorEntry({ ...data, createdAt: new Date().toISOString() }));
           droppedImages.forEach((image) => erroImgDelete(image.id));
@@ -2935,12 +3042,12 @@ function renderReviewBanner(summary) {
   }
   if (summary.errorsDue) parts.push(`${cyclePlural(summary.errorsDue, "erro", "erros")} para refazer`);
   banner.innerHTML = `
-    <div><strong>Hora de revisar:</strong> ${escapeHTML(parts.join(" · "))}. É a revisão no tempo certo que fixa o conteúdo.</div>
+    <div><strong>Hora de revisar:</strong> ${escapeHTML(parts.join(" · "))}</div>
     <div class="inline-actions">
-      ${summary.revDue ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : ""}
-      ${summary.errorsDue ? `<button class="button secondary" data-view="erros" type="button">Refazer erros</button>` : ""}
+      ${summary.revDue ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar</button>` : ""}
+      ${summary.errorsDue ? `<button class="button secondary" data-view="erros" type="button">Erros</button>` : ""}
       ${summary.revOverdue + summary.errOverdue > state.cycleSettings.dailyLimit ? `<button class="button ghost" data-cycle-action="redistributeOverdue" type="button">Redistribuir atrasadas</button>` : ""}
-      <button class="mini-button" data-cycle-action="dismissBanner" type="button">Depois</button>
+      <button class="mini-button" data-cycle-action="dismissBanner" type="button" title="Esconder este aviso por enquanto">Depois</button>
     </div>`;
 }
 
@@ -3039,6 +3146,9 @@ if (typeof module !== "undefined" && module.exports) {
     cycleConsolidatePlan,
     errorRetestResult,
     errorStatementKey,
+    errorStatementNormalize,
+    errorStatementTokens,
+    errorStatementSimilarity,
     errorFindDuplicate,
     errorRegisterRepeat,
     cycleNextExamDate,

@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261129-fila" />
+    <link rel="stylesheet" href="styles.css?v=20261201-duplicado" />
   </head>
   <body>
     <div class="app-shell">
@@ -97,7 +97,7 @@
             <span id="syncStatus" class="sync-status">Local</span>
             <button class="button ghost" id="themeToggleBtn" type="button" aria-pressed="false">Modo escuro</button>
             <span id="currentDate" class="date-pill"></span>
-            <button class="button secondary" data-view="pomodoro" type="button">Abrir Pomodoro</button>
+            <button class="button secondary" data-view="pomodoro" type="button">Pomodoro</button>
             <button class="button primary" data-view="plano" type="button">Nova matéria</button>
           </div>
         </header>
@@ -107,6 +107,8 @@
         <div class="review-banner hidden" id="mergeUndoBar" role="status" aria-live="polite"></div>
 
         <section class="view" id="dashboard" aria-labelledby="dashboardTitle">
+          <div class="stat-grid" id="statGrid"></div>
+
           <div class="dashboard-visual">
             <div class="visual-copy">
               <p class="eyebrow">Visão geral</p>
@@ -122,8 +124,6 @@
             </div>
             <canvas id="studyCanvas" width="620" height="330" aria-label="Resumo visual do progresso"></canvas>
           </div>
-
-          <div class="stat-grid" id="statGrid"></div>
 
           <section class="panel cycle-panel" aria-labelledby="cyclePanelTitle">
             <div class="panel-header">
@@ -630,7 +630,7 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">Aprendizado</p>
-              <h2 id="errosTitle">Caderno de erros: transforme cada erro em ponto</h2>
+              <h2 id="errosTitle">Transforme cada erro em ponto</h2>
             </div>
             <button class="button primary" id="errorNewBtn" data-cycle-action="openErrorForm" type="button">Novo erro</button>
           </div>
@@ -672,6 +672,7 @@
                     Questão ou dúvida
                     <textarea id="errorStatement" rows="4" placeholder="Cole ou resuma o enunciado / a afirmação que você errou (ou só cole o print abaixo)"></textarea>
                   </label>
+                  <div class="retest-box duplicate-warning hidden" id="errorDuplicateWarning" role="status" aria-live="polite"></div>
                   <div class="shot-grid shot-draft" id="errorShotsQuestion" role="list"></div>
                   <button class="shot-drop" type="button" data-shot-pick="question">Colar (Ctrl+V), arrastar ou escolher o print da questão</button>
                   <input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-label="Escolher prints da questão" data-shot-input="question" />
@@ -2310,14 +2311,14 @@
 
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
-    <script src="merge.js?v=20261129-fila"></script>
-    <script src="caderno.js?v=20261129-fila"></script>
-    <script src="ciclo.js?v=20261129-fila"></script>
-    <script src="hoje.js?v=20261129-fila"></script>
+    <script src="merge.js?v=20261201-duplicado"></script>
+    <script src="caderno.js?v=20261201-duplicado"></script>
+    <script src="ciclo.js?v=20261201-duplicado"></script>
+    <script src="hoje.js?v=20261201-duplicado"></script>
     <script src="push.js?v=20261117-sync"></script>
-    <script src="sessao.js?v=20261129-fila"></script>
-    <script src="mesclar.js?v=20261129-fila"></script>
+    <script src="sessao.js?v=20261201-duplicado"></script>
+    <script src="mesclar.js?v=20261201-duplicado"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="app.js?v=20261129-fila"></script>
+    <script src="app.js?v=20261201-duplicado"></script>
   </body>
 </html>

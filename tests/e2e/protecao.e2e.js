@@ -267,6 +267,34 @@ const auxRecords = (page) =>
   assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleCapQueue").checked), true, "limitar a fila: ligado por padrão");
   assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleMinAuto").value), "20", "mínimo de 20 minutos por padrão");
 
+  // 13) aviso de erro repetido enquanto digita o enunciado
+  await page.evaluate(() => {
+    state.errorNotebook = [normalizeErrorEntry({ id: "ex1", subjectId: "s1", statement: "A tentativa é punível quando o crime não se consuma por circunstâncias alheias à vontade do agente, salvo disposição em contrário.", lapses: 1, date: cycleToday(), dueDate: cycleToday() })];
+    saveState();
+    setView("erros");
+    errorFormSet(true);
+  });
+  await page.waitForTimeout(250);
+  assert.ok(!(await page.isVisible("#errorDuplicateWarning")), "sem texto, sem aviso");
+  await page.fill("#errorStatement", "Tentativa punível quando o crime não se consuma por circunstâncias alheias à vontade do agente, salvo disposição em contrário no Código Penal.");
+  await page.waitForSelector("#errorDuplicateWarning:not(.hidden)", { timeout: 3000 });
+  const warning = await page.textContent("#errorDuplicateWarning");
+  assert.ok(/já registrou este erro/.test(warning) && /já errou 1× depois/.test(warning), "aviso mostra o que já existe: " + warning.replace(/\s+/g, " "));
+  assert.ok(await page.isVisible('[data-cycle-action="errorMergeDuplicate"]'));
+  await page.fill("#errorStatement", "A competência para julgar crimes federais é da Justiça Federal, conforme a Constituição da República.");
+  await page.waitForSelector("#errorDuplicateWarning.hidden", { state: "attached", timeout: 3000 });
+  assert.ok(!(await page.isVisible("#errorDuplicateWarning")), "outra questão: o aviso some");
+  await page.fill("#errorStatement", "Tentativa punível quando o crime não se consuma por circunstâncias alheias à vontade do agente, salvo disposição em contrário no Código Penal.");
+  await page.waitForSelector("#errorDuplicateWarning:not(.hidden)", { timeout: 3000 });
+  const dialogsBeforeMerge = dialogs.length;
+  await page.evaluate(() => { document.querySelector("#errorSubject").value = "s1"; });
+  await page.click('[data-cycle-action="errorMergeDuplicate"]');
+  await page.waitForTimeout(500);
+  const merged = await page.evaluate(() => ({ count: state.errorNotebook.length, lapses: state.errorNotebook[0].lapses }));
+  assert.strictEqual(JSON.stringify(merged), JSON.stringify({ count: 1, lapses: 2 }), "somou no registro existente, sem duplicar");
+  assert.strictEqual(dialogs.length, dialogsBeforeMerge, "sem pergunta extra: o clique já foi a confirmação");
+  assert.ok(!(await page.isVisible("#errorDuplicateWarning")), "formulário limpo, aviso some");
+
   assert.strictEqual(errors.length, 0, "erros de JS: " + errors.join(" | "));
   console.log("ERROS JS: nenhum");
   console.log("E2E PROTECAO OK");

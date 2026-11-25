@@ -5096,3 +5096,129 @@ body.modal-open {
 .error-block.notes{border-left:4px solid #6d5dfc}
 .form-msg{margin:6px 0;padding:10px 12px;border-radius:8px;background:#fdecea;border:1px solid #f5b5ae;color:#8a1f11;font-weight:600}
 .form-msg.hidden{display:none}
+
+
+/* ---------- Topo compacto no desktop, aviso de revisão fino e painel com os números primeiro ---------- */
+
+@media (min-width: 1121px) {
+  .topbar {
+    flex-wrap: nowrap;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .topbar > div:first-child {
+    flex: 0 0 auto;
+  }
+
+  .topbar .eyebrow {
+    white-space: nowrap;
+  }
+
+  .topbar h1 {
+    font-size: 1.7rem;
+    white-space: nowrap;
+  }
+
+  .topbar .global-search {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 360px;
+  }
+
+  .topbar-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .topbar-actions .button {
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .topbar-actions .sync-status {
+    white-space: nowrap;
+  }
+}
+
+/* a data já aparece na tela Hoje; no topo só entra em telas bem largas */
+@media (min-width: 1121px) and (max-width: 1520px) {
+  .topbar-actions .date-pill {
+    display: none;
+  }
+}
+
+.review-banner {
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  font-size: 0.93rem;
+}
+
+.review-banner .inline-actions {
+  gap: 8px;
+}
+
+.review-banner .button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 720px) {
+  .review-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .review-banner .inline-actions {
+    flex-wrap: nowrap;
+  }
+
+  .review-banner .inline-actions .button {
+    flex: 1 1 auto;
+  }
+
+  .dashboard-visual {
+    padding: 14px;
+  }
+}
+
+.dashboard-visual {
+  padding: 16px 20px;
+}
+
+#studyCanvas {
+  max-height: 210px;
+  object-fit: contain;
+}
+
+@media (max-width: 720px) {
+  .topbar-actions .button,
+  .topbar-actions .sync-status {
+    min-height: 36px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 0.88rem;
+  }
+}
+
+.duplicate-warning {
+  margin-top: 8px;
+  border: 1px solid var(--amber);
+  border-style: solid;
+  background: var(--panel);
+}
+
+.duplicate-warning p {
+  font-weight: 600;
+}
+
+.duplicate-warning small {
+  color: var(--muted);
+}

@@ -118,3 +118,13 @@ Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, sele
 - **Redistribuir atrasados** agora inclui os erros do caderno: revisões e erros dividem o mesmo limite por dia, os mais antigos primeiro. Há botão também na tela do Caderno de erros, e o aviso do topo conta os dois.
 - **Aba Hoje:** "Amanhã" passou a somar os erros que vencem amanhã às revisões.
 - **Testes:** `ciclo-tests` (58) e `tests/e2e/protecao.e2e.js`.
+
+## Contra a bola de neve de revisões (novembro/2026)
+
+Por que acumulava: cada assunto estudado volta 4 vezes (1, 7, 30 e 60 dias) e cada erro 5, e tudo que vencia aparecia de uma vez, sem ligação com o seu limite por dia. Estudando poucos assuntos novos por dia, a fila estabiliza num valor alto; o atraso só cresce.
+
+- **Fila do dia limitada (`cycleTodayQueue`):** aparece no máximo o limite por dia (padrão 12, ajustável), revisões e erros juntos, já descontando o que foi feito hoje. Entram primeiro os mais urgentes (`cyclePriority`: atraso até 30 pontos, erro reincidente, reforço e primeira revisão pesam mais). O resto aguarda e entra nos próximos dias, e quem fica muito tempo esperando acaba passando na frente de itens novos, então nada é esquecido. "Revisar mais 5 hoje" libera mais cinco quando você tem tempo. Contadores, avisos, sessão de revisão, aba Hoje e lembretes usam a fila limitada. Opção para desligar: "Limitar a fila do dia ao meu limite por dia".
+- **Agendamento por capacidade (`cycleLevelGap` com `limit`, `cycleCapacityDueDate`):** ao marcar a próxima revisão, erro ou a primeira revisão de um assunto novo, se o dia previsto (e o melhor vizinho) já está no limite, usa o primeiro dia seguinte com vaga, dentro de uma folga (2 dias nos intervalos curtos, até 10 nos longos) e sem passar do dia limite da prova.
+- **Mínimo para abrir revisão:** estudo de um assunto só abre revisões com pelo menos 20 minutos no dia (era 10; ajustável de 5 a 120 em "Minutos mínimos de estudo de um assunto para abrir revisões"). Toques rápidos de 10 a 19 minutos deixam de gerar uma cadeia de 4 revisões.
+- **Aviso de ritmo sustentável (`cycleSteadyLoad`, `cycleSustainabilityNote`):** usa os assuntos e erros novos dos últimos 14 dias e quantas etapas tem cada escada para estimar quantas revisões por dia o seu ritmo vai gerar. Se passar do limite, a aba Hoje e a aba Revisão avisam e sugerem estudar menos assuntos novos por vez, aumentar o limite ou usar uma escada mais curta (ex.: 1, 7 e 30). Também avisa quando há itens aguardando espaço.
+- **Testes:** `ciclo-tests` (64) e `tests/e2e/protecao.e2e.js` (passo 12: fila de 3 de 6, "Revisar mais 5 hoje", avisos na aba Hoje).

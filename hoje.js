@@ -313,8 +313,9 @@ function getWeeklyPlanData() {
 
 function getTodayData(summary = getCycleSummary()) {
   const today = cycleToday();
-  const dueRevisions = getDueRevisions(today);
-  const dueErrors = getDueErrors(today); // já vem com os reincidentes primeiro
+  const queue = cycleTodayQueue(today); // já limitada ao limite por dia, com os mais urgentes primeiro
+  const dueRevisions = queue.revisions;
+  const dueErrors = queue.errors;
   const revDone = state.revisions.reduce((sum, revision) => sum + revision.history.filter((entry) => entry.date === today).length, 0);
   const errDone = state.errorNotebook.filter((entry) => entry.lastReviewed === today).length;
   const lawItems = summary.laws
@@ -328,8 +329,8 @@ function getTodayData(summary = getCycleSummary()) {
   const today_ = today;
   const flashDone = state.flashcards.filter((card) => card.lastReviewed === today_).length;
   const flash = { done: flashDone, pending: flashItems.length, items: flashItems };
-  const rev = { done: revDone, pending: dueRevisions.length, items: dueRevisions };
-  const err = { done: errDone, pending: dueErrors.length, items: dueErrors };
+  const rev = { done: revDone, pending: dueRevisions.length, items: dueRevisions, waiting: queue.waitingRevisions };
+  const err = { done: errDone, pending: dueErrors.length, items: dueErrors, waiting: queue.waitingErrors };
   const law = { done: lawDone, pending: lawItems.length - lawDone, items: lawItems };
   const study = { done: studyDone, pending: studyItems.length - studyDone, items: studyItems };
   const total = rev.done + rev.pending + flash.done + flash.pending + err.done + err.pending + lawItems.length + studyItems.length;
@@ -363,6 +364,10 @@ function getTodayInsights(data) {
       text: `${reason.count} de ${reason.total} erros dos últimos 60 dias. ${CYCLE_REASON_TIPS[reason.reason] || ""}`,
       actions: [{ label: "Ver esses erros", action: "goErrors", reason: reason.reason }],
     });
+  }
+  const pace = cycleSustainabilityNote(data.today);
+  if (pace) {
+    insights.push({ tone: pace.tone, title: pace.title, text: pace.text, actions: [{ label: "Ajustar na Revisão", action: "goRevision" }] });
   }
   const tomorrow = cycleAddDays(data.today, 1);
   const tomorrowRevisions = state.revisions.filter((revision) => revision.status === "pending" && revision.dueDate === tomorrow).length;
@@ -490,6 +495,7 @@ function renderToday(data) {
   const cards = [];
 
   // revisões
+  const waitNote = (count) => (count ? `<p class="muted-note">+ ${count} aguardando espaço (limite de ${state.cycleSettings.dailyLimit} por dia). Entram nos próximos dias, os mais urgentes primeiro.</p>` : "");
   const revItems = data.rev.items.slice(0, 4);
   cards.push(
     todayCard({
@@ -503,8 +509,8 @@ function renderToday(data) {
               const late = cycleDiffDays(revision.dueDate, data.today);
               return `<li>${escapeHTML(revisionLabel(revision))} <small>${revisionStageLabel(revision)}${late > 0 ? ` · atrasada ${late}d` : ""}</small></li>`;
             })
-            .join("")}${data.rev.items.length > 4 ? `<li class="more">+ ${data.rev.items.length - 4} outras</li>` : ""}</ul>`
-        : `<p class="muted-note">${data.rev.done ? "Revisões de hoje concluídas." : "Nenhuma revisão para hoje. Estude um assunto por 10 minutos ou mais e a trilha começa sozinha."}</p>`,
+            .join("")}${data.rev.items.length > 4 ? `<li class="more">+ ${data.rev.items.length - 4} outras</li>` : ""}</ul>${waitNote(data.rev.waiting)}`
+        : `${waitNote(data.rev.waiting)}<p class="muted-note">${data.rev.done ? "Revisões de hoje concluídas." : `Nenhuma revisão para hoje. Estude um assunto por ${state.cycleSettings.minAutoMinutes} minutos ou mais e a trilha começa sozinha.`}</p>`,
       actions: data.rev.pending ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : `<button class="mini-button" data-view="revisao" type="button">Abrir Revisão</button>`,
     })
   );
@@ -533,8 +539,8 @@ function renderToday(data) {
       total: data.err.done + data.err.pending,
       muted: !data.err.done && !data.err.pending,
       body: errItems.length
-        ? `<ul class="today-list">${errItems.map((entry) => `<li>${escapeHTML(typeof errorExcerpt === "function" ? errorExcerpt(entry, 80) : cycleExcerpt(entry.statement, 80))} <small>${escapeHTML(ERROR_REASONS[entry.reason])}</small></li>`).join("")}${data.err.items.length > 3 ? `<li class="more">+ ${data.err.items.length - 3} outros</li>` : ""}</ul>`
-        : `<p class="muted-note">${data.err.done ? "Erros de hoje refeitos." : "Nenhum erro para refazer hoje."}</p>`,
+        ? `<ul class="today-list">${errItems.map((entry) => `<li>${escapeHTML(typeof errorExcerpt === "function" ? errorExcerpt(entry, 80) : cycleExcerpt(entry.statement, 80))} <small>${escapeHTML(ERROR_REASONS[entry.reason])}</small></li>`).join("")}${data.err.items.length > 3 ? `<li class="more">+ ${data.err.items.length - 3} outros</li>` : ""}</ul>${waitNote(data.err.waiting)}`
+        : `${waitNote(data.err.waiting)}<p class="muted-note">${data.err.done ? "Erros de hoje refeitos." : "Nenhum erro para refazer hoje."}</p>`,
       actions: data.err.pending ? `<button class="button primary" data-cycle-action="goErrors" data-status="due" type="button">Refazer erros</button>` : `<button class="mini-button" data-view="erros" type="button">Abrir caderno</button>`,
     })
   );
@@ -826,6 +832,10 @@ function handleTodayAction(type, button) {
     }
     cycleUI.dayFlow = true;
     todayGoToStage(stage, data);
+    return true;
+  }
+  if (type === "goRevision") {
+    setView("revisao", { scrollTop: true });
     return true;
   }
   if (type === "goErrors") {

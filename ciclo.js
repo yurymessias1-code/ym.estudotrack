@@ -8,7 +8,8 @@ const CYCLE_DEFAULT_INTERVALS = [1, 7, 30, 60];
 const CYCLE_DEFAULT_ERROR_INTERVALS = [1, 3, 7, 15, 30];
 const CYCLE_LAPSE_DROP = 2; // errar/esquecer faz descer só esta quantidade de etapas (não volta ao começo)
 const CYCLE_LEECH_LAPSES = 3; // errou de novo tantas vezes: vira reincidente
-const CYCLE_MIN_AUTO_MINUTES = 10;
+const CYCLE_MIN_AUTO_MINUTES = 20; // padrão: estudo mais curto que isso não abre cadeia de revisões (ajustável)
+const CYCLE_STEADY_WINDOW_DAYS = 14;
 const CYCLE_BACKFILL_DAYS = 14;
 const CYCLE_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const CYCLE_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -100,6 +101,11 @@ function cycleInt(value, min, max, fallback) {
   return Math.min(max, Math.max(min, number));
 }
 
+/** Dias de a até b (negativo se b for antes de a). */
+function cycleDaysBetween(a, b) {
+  return Math.round((cycleDate(b) - cycleDate(a)) / 86400000);
+}
+
 function cyclePlural(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -147,6 +153,8 @@ function normalizeCycleSettings(raw = {}) {
     askAtSave: source.askAtSave !== false,
     examAdapt: source.examAdapt !== false,
     levelLoad: source.levelLoad !== false,
+    capQueue: source.capQueue !== false,
+    minAutoMinutes: cycleInt(source.minAutoMinutes, 5, 120, CYCLE_MIN_AUTO_MINUTES),
     autoWeak: source.autoWeak !== false,
     weakAccuracy: cycleInt(source.weakAccuracy, 30, 95, 70),
     weakMinQuestions: cycleInt(source.weakMinQuestions, 5, 100, 10),
@@ -359,25 +367,35 @@ function cycleLevelRadius(gap) {
  * Escolhe, perto do dia previsto, o dia mais vazio. Só troca se o outro dia tiver menos itens;
  * em empate, fica o mais perto do previsto (e, se igual, o mais cedo). `maxGap` impede passar do limite.
  */
-function cycleLevelGap(gap, load, today, { maxGap = Infinity } = {}) {
-  const radius = cycleLevelRadius(gap);
-  if (!radius) return gap;
+function cycleLevelGap(gap, load, today, { maxGap = Infinity, limit = Infinity } = {}) {
   const loadOf = (candidate) => load[cycleAddDays(today, candidate)] || 0;
-  const to = Math.min(gap + radius, Math.max(gap, maxGap));
+  const top = (extra) => Math.min(gap + extra, Math.max(gap, maxGap));
   let best = gap;
-  for (let candidate = Math.max(1, gap - radius); candidate <= to; candidate += 1) {
-    const better = loadOf(candidate) < loadOf(best);
-    const sameLoadCloser = loadOf(candidate) === loadOf(best) && (Math.abs(candidate - gap) < Math.abs(best - gap) || (Math.abs(candidate - gap) === Math.abs(best - gap) && candidate < best));
-    if (better || sameLoadCloser) best = candidate;
+  const radius = cycleLevelRadius(gap);
+  if (radius) {
+    for (let candidate = Math.max(1, gap - radius); candidate <= top(radius); candidate += 1) {
+      const better = loadOf(candidate) < loadOf(best);
+      const sameLoadCloser = loadOf(candidate) === loadOf(best) && (Math.abs(candidate - gap) < Math.abs(best - gap) || (Math.abs(candidate - gap) === Math.abs(best - gap) && candidate < best));
+      if (better || sameLoadCloser) best = candidate;
+    }
+  }
+  // Capacidade: se até o melhor dia já está no limite, usa o primeiro dia seguinte com vaga (dentro da folga).
+  if (Number.isFinite(limit) && loadOf(best) >= limit) {
+    for (let candidate = best + 1; candidate <= top(cycleCapacitySlack(gap)); candidate += 1) if (loadOf(candidate) < limit) return candidate;
   }
   return best;
+}
+
+/** Quanto uma revisão pode escorregar para depois quando os dias estão cheios: pouco nos intervalos curtos. */
+function cycleCapacitySlack(gap) {
+  return gap <= 2 ? 2 : Math.min(10, Math.ceil(gap * 0.35));
 }
 
 /** O passo já ajustado pela prova passa pelo nivelamento da carga (se a opção estiver ligada). */
 function cycleLeveledStep(step, today, exclude = {}) {
   if (step.done || (typeof state !== "undefined" && state.cycleSettings?.levelLoad === false)) return step;
   const load = cycleLoadByDate(state.revisions, state.errorNotebook, today, exclude);
-  const gap = cycleLevelGap(step.gap, load, today, { maxGap: step.examDate ? step.gap : Infinity });
+  const gap = cycleLevelGap(step.gap, load, today, { maxGap: step.examDate ? step.gap : Infinity, limit: state.cycleSettings.dailyLimit });
   return gap === step.gap ? step : { ...step, gap, leveled: true };
 }
 
@@ -583,14 +601,28 @@ function revisionIntervals() {
   return state.cycleSettings.intervals;
 }
 
+/**
+ * Primeira revisão de uma cadeia nova: vai para o dia previsto, mas se esse dia já está no limite
+ * escorrega para o primeiro dia seguinte com vaga (sem passar da prova).
+ */
+function cycleCapacityDueDate(nominalDue, subjectId = "", today = cycleToday()) {
+  if (state.cycleSettings.levelLoad === false || nominalDue <= today) return nominalDue;
+  const gap = cycleDaysBetween(today, nominalDue);
+  const examDate = state.cycleSettings.examAdapt === false ? "" : cycleNextExamDate(subjectId, today);
+  const maxGap = examDate ? Math.max(gap, cycleDaysBetween(today, examDate) - 1) : Infinity;
+  const load = cycleLoadByDate(state.revisions, state.errorNotebook, today);
+  return cycleAddDays(today, cycleLevelGap(gap, load, today, { maxGap, limit: state.cycleSettings.dailyLimit }));
+}
+
 function createRevision(data) {
   const intervals = revisionIntervals();
   const baseDate = cycleIsISO(data.baseDate) ? data.baseDate : cycleToday();
+  const nominalDue = cycleIsISO(data.dueDate) ? data.dueDate : cycleAddDays(baseDate, intervals[0]);
   const revision = normalizeRevision({
     ...data,
     baseDate,
     stage: 0,
-    dueDate: cycleIsISO(data.dueDate) ? data.dueDate : cycleAddDays(baseDate, intervals[0]),
+    dueDate: cycleIsISO(data.dueDate) ? nominalDue : cycleCapacityDueDate(nominalDue, data.subjectId || ""),
     createdAt: new Date().toISOString(),
   });
   state.revisions.push(revision);
@@ -625,7 +657,7 @@ function syncAutoRevisions(options = {}) {
   [...groups.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key))
     .forEach((group) => {
-      if (known.has(group.key) || group.minutes < CYCLE_MIN_AUTO_MINUTES) return;
+      if (known.has(group.key) || group.minutes < (settings.minAutoMinutes ?? CYCLE_MIN_AUTO_MINUTES)) return;
       const owner = cycleOpenStudyChain(state.revisions, group);
       if (owner) {
         // Estudar o mesmo assunto de novo não abre outra cadeia de revisões: a que está aberta continua valendo.
@@ -723,6 +755,112 @@ function getDueRevisions(today = cycleToday()) {
   return state.revisions
     .filter((revision) => revision.status === "pending" && revision.dueDate <= today)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || revisionLabel(a).localeCompare(revisionLabel(b)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Fila do dia: limitada ao limite por dia e priorizada                 */
+/* ------------------------------------------------------------------ */
+
+/** O que já foi revisado hoje (revisões e erros refeitos). */
+function cycleDoneToday(today = cycleToday()) {
+  return {
+    rev: state.revisions.reduce((total, revision) => total + revision.history.filter((entry) => entry.date === today).length, 0),
+    err: state.errorNotebook.filter((entry) => entry.lastReviewed === today).length,
+  };
+}
+
+/** Quanto mais alta, mais cedo entra na fila: atraso, erro reincidente, reforço e primeira revisão pesam mais. */
+function cyclePriority(kind, item, today) {
+  let score = Math.min(30, Math.max(0, cycleDaysBetween(item.dueDate, today)));
+  if (kind === "error") score += 2 + Math.min(9, (Number(item.lapses) || 0) * 3);
+  else {
+    if (item.kind === "weak") score += 6;
+    if (Number(item.stage) === 0) score += 4;
+  }
+  return score;
+}
+
+/**
+ * Quem vence hoje, até o limite por dia (revisões e erros juntos, já descontando o que foi feito hoje).
+ * O que passa do limite aguarda: não é "atraso para se desesperar", entra nos próximos dias, os mais urgentes
+ * primeiro. Com capQueue desligado, volta a mostrar tudo.
+ */
+function cycleTodayQueue(today = cycleToday()) {
+  const settings = state.cycleSettings;
+  const dueRevisions = getDueRevisions(today);
+  const dueErrors = getDueErrors(today);
+  const done = cycleDoneToday(today);
+  const extra = cycleUI.extra && cycleUI.extra.date === today ? cycleUI.extra.count : 0;
+  const capped = settings.capQueue !== false;
+  const budget = capped ? Math.max(0, settings.dailyLimit - done.rev - done.err) + extra : Infinity;
+  const ranked = [
+    ...dueRevisions.map((item) => ({ kind: "revision", item })),
+    ...dueErrors.map((item) => ({ kind: "error", item })),
+  ]
+    .map((entry) => ({ ...entry, score: cyclePriority(entry.kind, entry.item, today) }))
+    .sort((a, b) => b.score - a.score || a.item.dueDate.localeCompare(b.item.dueDate) || String(a.item.id).localeCompare(String(b.item.id)));
+  const chosen = new Set(ranked.slice(0, budget).map((entry) => entry.item.id));
+  const revisions = dueRevisions.filter((revision) => chosen.has(revision.id));
+  const errors = dueErrors.filter((entry) => chosen.has(entry.id));
+  return {
+    revisions,
+    errors,
+    waitingRevisions: dueRevisions.length - revisions.length,
+    waitingErrors: dueErrors.length - errors.length,
+    limit: settings.dailyLimit,
+    doneToday: done.rev + done.err,
+    totalDue: ranked.length,
+    capped,
+  };
+}
+
+function getQueueRevisions(today = cycleToday()) {
+  return cycleTodayQueue(today).revisions;
+}
+
+function getQueueErrors(today = cycleToday()) {
+  return cycleTodayQueue(today).errors;
+}
+
+/**
+ * Ritmo sustentável: quantas revisões por dia o seu ritmo recente de estudo vai gerar quando estabilizar.
+ * Cada assunto novo volta tantas vezes quantas são as etapas da escada; cada erro novo, idem.
+ */
+function cycleSteadyLoad(revisions, errors, today, { revisionIntervals: studySteps = [], errorIntervals: errorSteps = [], windowDays = CYCLE_STEADY_WINDOW_DAYS } = {}) {
+  const since = cycleAddDays(today, -windowDays);
+  const newRevisions = (revisions || []).filter((revision) => cycleIsISO(revision.baseDate) && revision.baseDate > since && revision.baseDate <= today).length;
+  const newErrors = (errors || []).filter((entry) => cycleIsISO(entry.date) && entry.date > since && entry.date <= today).length;
+  const perDay = (count) => Math.round((count / windowDays) * 10) / 10;
+  const revPerDay = perDay(newRevisions);
+  const errPerDay = perDay(newErrors);
+  return {
+    newRevisions,
+    newErrors,
+    revPerDay,
+    errPerDay,
+    revSteps: studySteps.length,
+    errSteps: errorSteps.length,
+    steadyPerDay: Math.round((revPerDay * studySteps.length + errPerDay * errorSteps.length) * 10) / 10,
+  };
+}
+
+/** Aviso (ou null) quando o ritmo atual gera mais revisões por dia do que o limite: é a bola de neve se formando. */
+function cycleSustainabilityNote(today = cycleToday()) {
+  const settings = state.cycleSettings;
+  const load = cycleSteadyLoad(state.revisions, state.errorNotebook, today, { revisionIntervals: settings.intervals, errorIntervals: settings.errorIntervals });
+  const queue = cycleTodayQueue(today);
+  const waiting = queue.waitingRevisions + queue.waitingErrors;
+  if (load.steadyPerDay <= settings.dailyLimit && !waiting) return null;
+  if (load.steadyPerDay <= settings.dailyLimit) {
+    return { tone: "warn", title: `${cyclePlural(waiting, "item aguarda", "itens aguardam")} espaço na fila`, text: `Hoje vencem mais itens do que o seu limite de ${settings.dailyLimit} por dia. Eles entram nos próximos dias, os mais urgentes primeiro.`, load, waiting };
+  }
+  return {
+    tone: "warn",
+    title: `Seu ritmo gera cerca de ${load.steadyPerDay} revisões por dia`,
+    text: `Nos últimos ${CYCLE_STEADY_WINDOW_DAYS} dias foram ${cyclePlural(load.newRevisions, "assunto novo", "assuntos novos")} e ${cyclePlural(load.newErrors, "erro novo", "erros novos")}. Cada assunto volta ${load.revSteps}× e cada erro ${load.errSteps}×, então a fila tende a ${Math.round(load.steadyPerDay)} por dia, acima do seu limite de ${settings.dailyLimit}. Para não virar bola de neve: estude menos assuntos novos por vez, aumente o limite se tiver tempo ou use uma escada mais curta (por exemplo 1, 7 e 30).${waiting ? ` Hoje ${cyclePlural(waiting, "item ficou", "itens ficaram")} aguardando.` : ""}`,
+    load,
+    waiting,
+  };
 }
 
 function completeRevision(id, result, note = "") {
@@ -922,8 +1060,9 @@ function getCycleSummary() {
   const weekQuestions = state.questionLogs.filter(getRangePredicate("week"));
   const correct = sum(weekQuestions, "correct");
   const wrong = sum(weekQuestions, "wrong");
-  const dueRevisions = getDueRevisions(today);
-  const dueErrors = getDueErrors(today);
+  const queue = cycleTodayQueue(today);
+  const dueRevisions = queue.revisions;
+  const dueErrors = queue.errors;
   const laws = state.lawPlans.map((plan) => ({ plan, info: buildLawSchedule(plan, today) }));
   const lawToday = laws.filter(({ info }) => !info.finished && info.todayIsReading && info.readToday < info.todayTarget);
   const unitLabels = [...new Set(lawToday.map(({ plan }) => plan.unitLabel))];
@@ -935,6 +1074,8 @@ function getCycleSummary() {
     revDue: dueRevisions.length,
     revOverdue: dueRevisions.filter((revision) => revision.dueDate < today).length,
     errorsDue: dueErrors.length,
+    revWaiting: queue.waitingRevisions,
+    errWaiting: queue.waitingErrors,
     errOverdue: dueErrors.filter((entry) => entry.dueDate < today).length,
     errorsOpen: state.errorNotebook.filter((entry) => !entry.mastered).length,
     laws,
@@ -1068,18 +1209,21 @@ function renderRevisions() {
   $("#cycleAutoWeak").checked = state.cycleSettings.autoWeak;
   $("#cycleExamAdapt").checked = state.cycleSettings.examAdapt;
   $("#cycleLevelLoad").checked = state.cycleSettings.levelLoad;
+  $("#cycleCapQueue").checked = state.cycleSettings.capQueue;
+  cycleSetValueIfIdle("#cycleMinAuto", state.cycleSettings.minAutoMinutes);
   cycleSetValueIfIdle("#cycleWeakAccuracy", state.cycleSettings.weakAccuracy);
   cycleSetValueIfIdle("#cycleWeakMin", state.cycleSettings.weakMinQuestions);
 
   const pending = state.revisions.filter((revision) => revision.status === "pending");
-  const due = getDueRevisions(today);
+  const queue = cycleTodayQueue(today);
+  const due = queue.revisions;
   const limit = cycleAddDays(today, 7);
   const next7 = pending.filter((revision) => revision.dueDate > today && revision.dueDate <= limit).length;
   const cutoff = cycleAddDays(today, -30);
   const recent = state.revisions.flatMap((revision) => revision.history).filter((entry) => entry.date >= cutoff);
   const kept = recent.filter((entry) => entry.result === "ok" || entry.result === "easy").length;
   $("#revisionStats").innerHTML = [
-    cycleStat("Para hoje", String(due.length), due.length ? "revisões na fila" : "fila em dia"),
+    cycleStat("Para hoje", String(due.length), due.length ? (queue.waitingRevisions ? `revisões na fila · ${queue.waitingRevisions} aguardam` : "revisões na fila") : queue.waitingRevisions ? `${queue.waitingRevisions} aguardam espaço` : "fila em dia"),
     cycleStat("Atrasadas", String(due.filter((revision) => revision.dueDate < today).length), "passaram da data prevista"),
     cycleStat("Próximos 7 dias", String(next7), `${cyclePlural(pending.length, "pendente", "pendentes")} no total`),
     cycleStat("Retenção (30 dias)", recent.length ? percent((kept / recent.length) * 100) : "–", recent.length ? `${cyclePlural(recent.length, "revisão feita", "revisões feitas")}` : "sem revisões ainda"),
@@ -1106,11 +1250,22 @@ function renderRevisions() {
         .join("")
     : `<div class="empty-state">Nenhuma revisão pendente para hoje. Registre estudo no Pomodoro ou agende uma revisão manual.</div>`;
 
-  const overdueCount = due.filter((revision) => revision.dueDate < today).length + getDueErrors(today).filter((entry) => entry.dueDate < today).length;
+  const overdueCount = getDueRevisions(today).filter((revision) => revision.dueDate < today).length + getDueErrors(today).filter((entry) => entry.dueDate < today).length;
   if (overdueCount > 0) {
     $("#revisionQueue").insertAdjacentHTML(
       "beforeend",
       `<div class="inline-actions"><button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(overdueCount, "atrasada", "atrasadas")} (até ${state.cycleSettings.dailyLimit} por dia)</button></div>`
+    );
+  }
+
+  const note = cycleSustainabilityNote(today);
+  const queueInfo = queue.waitingRevisions || queue.waitingErrors || queue.totalDue
+    ? `<p class="muted-note">Fila de hoje: ${queue.revisions.length + queue.errors.length} de ${queue.totalDue} que vencem (limite de ${queue.limit} por dia, revisões e erros juntos${queue.doneToday ? `; ${queue.doneToday} já feitos hoje` : ""}). ${queue.waitingRevisions + queue.waitingErrors ? "O resto aguarda e entra nos próximos dias, os mais urgentes primeiro." : ""}</p>`
+    : "";
+  if (queueInfo || note) {
+    $("#revisionQueue").insertAdjacentHTML(
+      "beforeend",
+      `${queueInfo}${queue.waitingRevisions + queue.waitingErrors ? `<div class="inline-actions"><button class="mini-button" data-cycle-action="queueMore" type="button">Revisar mais 5 hoje</button></div>` : ""}${note ? `<div class="retest-box leech-box"><p><strong>${escapeHTML(note.title)}</strong></p><p style="font-weight:500">${escapeHTML(note.text)}</p></div>` : ""}`
     );
   }
 
@@ -1146,7 +1301,7 @@ function renderRevisionSession(due) {
   const prompt = isLaw
     ? "Sem abrir a lei, recite o que lembra deste trecho: regra geral, prazos, exceções e palavras-chave."
     : "Sem olhar nada, explique em voz alta ou por escrito o que você lembra deste assunto: conceito, regras, exceções e pegadinhas.";
-  const position = getDueRevisions().findIndex((item) => item.id === revision.id) + 1;
+  const position = getQueueRevisions().findIndex((item) => item.id === revision.id) + 1;
 
   let body = `
     <div class="recall-box">
@@ -1377,7 +1532,8 @@ function renderErrors() {
 
   const all = state.errorNotebook;
   const open = all.filter((entry) => !entry.mastered);
-  const dueCount = getDueErrors(today).length;
+  const errQueue = cycleTodayQueue(today);
+  const dueCount = errQueue.errors.length;
   const reasonCounts = Object.keys(ERROR_REASONS).map((key) => ({ key, count: all.filter((entry) => entry.reason === key).length })).sort((a, b) => b.count - a.count);
   const topReason = reasonCounts[0]?.count ? reasonCounts[0] : null;
   const errOverdue = getDueErrors(today).filter((entry) => entry.dueDate < today).length;
@@ -1387,7 +1543,7 @@ function renderErrors() {
     redistribute.innerHTML = errOverdue ? `<button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(errOverdue, "erro atrasado", "erros atrasados")} (até ${state.cycleSettings.dailyLimit} por dia)</button>` : "";
   }
   $("#errorStats").innerHTML = [
-    cycleStat("Para refazer hoje", String(dueCount), dueCount ? "venceram na revisão" : "nada vencido"),
+    cycleStat("Para refazer hoje", String(dueCount), dueCount ? (errQueue.waitingErrors ? `venceram · ${errQueue.waitingErrors} aguardam` : "venceram na revisão") : errQueue.waitingErrors ? `${errQueue.waitingErrors} aguardam espaço` : "nada vencido"),
     cycleStat("Não dominados", String(open.length), `${all.filter((entry) => errorStatus(entry) === "review").length} em revisão`),
     cycleStat("Dominados", String(all.length - open.length), `${all.length} no caderno`),
     cycleStat("Motivo mais comum", topReason ? ERROR_REASONS[topReason.key] : "–", topReason ? `${topReason.count} ${topReason.count === 1 ? "erro" : "erros"}` : "sem erros ainda"),
@@ -1747,7 +1903,7 @@ function cycleRefresh() {
 }
 
 function cycleStartSession(id = "") {
-  const due = getDueRevisions();
+  const due = getQueueRevisions();
   const target = id ? state.revisions.find((revision) => revision.id === id) : due[0];
   if (!target) return;
   cycleUI.sessionId = target.id;
@@ -1758,7 +1914,7 @@ function cycleStartSession(id = "") {
 }
 
 function cycleNextDue(excludeId) {
-  return getDueRevisions().find((revision) => revision.id !== excludeId) || null;
+  return getQueueRevisions().find((revision) => revision.id !== excludeId) || null;
 }
 
 function handleCycleAction(button) {
@@ -1784,6 +1940,12 @@ function handleCycleAction(button) {
   }
   if (type === "redistributeOverdue") {
     cycleRedistributeAction();
+    return undefined;
+  }
+  if (type === "queueMore") {
+    const today = cycleToday();
+    cycleUI.extra = { date: today, count: (cycleUI.extra && cycleUI.extra.date === today ? cycleUI.extra.count : 0) + 5 };
+    cycleRefresh();
     return undefined;
   }
   if (type === "consolidateRevisions") {
@@ -2140,6 +2302,8 @@ function bindCycleEvents() {
     state.cycleSettings.autoWeak = $("#cycleAutoWeak").checked;
     state.cycleSettings.examAdapt = $("#cycleExamAdapt").checked;
     state.cycleSettings.levelLoad = $("#cycleLevelLoad").checked;
+    state.cycleSettings.capQueue = $("#cycleCapQueue").checked;
+    state.cycleSettings.minAutoMinutes = cycleInt($("#cycleMinAuto").value, 5, 120, CYCLE_MIN_AUTO_MINUTES);
     state.cycleSettings.weakAccuracy = cycleInt($("#cycleWeakAccuracy").value, 30, 95, 70);
     state.cycleSettings.weakMinQuestions = cycleInt($("#cycleWeakMin").value, 5, 100, 10);
     $("#cycleIntervals").value = state.cycleSettings.intervals.join(", ");
@@ -2884,6 +3048,13 @@ if (typeof module !== "undefined" && module.exports) {
     cycleLevelRadius,
     cycleLevelGap,
     cycleLeveledStep,
+    cycleCapacitySlack,
+    cyclePriority,
+    cycleTodayQueue,
+    cycleSteadyLoad,
+    cycleSustainabilityNote,
+    cycleCapacityDueDate,
+    cycleDaysBetween,
     errorIsLeech,
     errorDueCompare,
     cycleOpenStudyChain,

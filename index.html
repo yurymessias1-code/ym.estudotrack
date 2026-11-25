@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261128-carga" />
+    <link rel="stylesheet" href="styles.css?v=20261129-fila" />
   </head>
   <body>
     <div class="app-shell">
@@ -951,6 +951,14 @@
             <label class="checkbox-line">
               <input id="cycleAutoStudy" type="checkbox" />
               Agendar revisões automaticamente quando eu registrar estudo (a partir de 10 minutos por assunto no dia)
+            </label>
+            <label class="checkbox-line">
+              <input id="cycleCapQueue" type="checkbox" />
+              Limitar a fila do dia ao meu limite por dia (revisões e erros juntos; o que passar aguarda e entra nos próximos dias, os mais urgentes primeiro)
+            </label>
+            <label>
+              Minutos mínimos de estudo de um assunto para abrir revisões
+              <input id="cycleMinAuto" type="number" min="5" max="120" step="1" />
             </label>
             <label class="checkbox-line">
               <input id="cycleLevelLoad" type="checkbox" />
@@ -2302,14 +2310,14 @@
 
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
-    <script src="merge.js?v=20261128-carga"></script>
-    <script src="caderno.js?v=20261128-carga"></script>
-    <script src="ciclo.js?v=20261128-carga"></script>
-    <script src="hoje.js?v=20261128-carga"></script>
+    <script src="merge.js?v=20261129-fila"></script>
+    <script src="caderno.js?v=20261129-fila"></script>
+    <script src="ciclo.js?v=20261129-fila"></script>
+    <script src="hoje.js?v=20261129-fila"></script>
     <script src="push.js?v=20261117-sync"></script>
-    <script src="sessao.js?v=20261128-carga"></script>
-    <script src="mesclar.js?v=20261128-carga"></script>
+    <script src="sessao.js?v=20261129-fila"></script>
+    <script src="mesclar.js?v=20261129-fila"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="app.js?v=20261128-carga"></script>
+    <script src="app.js?v=20261129-fila"></script>
   </body>
 </html>

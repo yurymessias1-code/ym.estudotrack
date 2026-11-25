@@ -450,6 +450,7 @@ vm.runInContext(
   `function getTopic(id) { return (state.topics || []).find((t) => t.id === id); }
    function getSubject(id) { return (state.subjects || []).find((s) => s.id === id); }
    function getEntrySubjectId(entry) { return entry.subjectId || (getTopic(entry.topicId) || {}).subjectId || ""; }
+   function getTopicLabel(id) { const t = getTopic(id); return t ? ((getSubject(t.subjectId) || {}).name || "") + ": " + t.name : ""; }
    function normalizeHashtags(value) { return String(value || "").split(/\\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean); }`,
   ctx
 );
@@ -851,6 +852,134 @@ test("redistribuir atrasados: erros entram na conta e no limite por dia", () => 
     "mais antigos primeiro, revisões e erros dividem o mesmo limite, dominado não entra"
   );
   assert.strictEqual(JSON.stringify(ctx.cycleRedistributeOverdue(revisions, today, 2)), JSON.stringify([{ id: "velha", dueDate: "2026-11-12" }]), "sem a lista de erros, funciona como antes (só a revisão futura ocupa o dia 12)");
+});
+
+
+/* ---------- bola de neve: fila limitada, capacidade por dia, mínimo de estudo e ritmo sustentável ---------- */
+
+test("capacidade: dia cheio empurra para o primeiro dia seguinte com vaga, dentro da folga e sem passar do limite", () => {
+  const today = "2026-11-10";
+  const day = (n) => cycleAddDays(today, n);
+  const level = (gap, loads, options) => ctx.cycleLevelGap(gap, Object.fromEntries(Object.entries(loads).map(([n, count]) => [day(Number(n)), count])), today, options);
+  assert.strictEqual(level(1, { 1: 2 }, { limit: 2 }), 2, "primeira revisão: amanhã cheio, vai para depois de amanhã");
+  assert.strictEqual(level(1, { 1: 2, 2: 2, 3: 2 }, { limit: 2 }), 1, "tudo cheio na folga: fica no previsto (não foge para longe)");
+  assert.strictEqual(level(7, { 6: 3, 7: 3, 8: 3, 9: 1 }, { limit: 3 }), 9, "dia 7 cheio, 6 e 8 também: o primeiro com vaga é o 9");
+  assert.strictEqual(level(7, { 6: 3, 7: 3, 8: 3, 9: 1 }, { limit: 3, maxGap: 7 }), 7, "com limite de prova, não passa");
+  assert.strictEqual(level(7, { 7: 50 }), 6, "sem limite de capacidade vale só o nivelamento: o vizinho vazio ganha do dia cheio");
+  assert.strictEqual(ctx.cycleCapacitySlack(1), 2);
+  assert.strictEqual(ctx.cycleCapacitySlack(7), 3);
+  assert.strictEqual(ctx.cycleCapacitySlack(30), 10);
+  assert.strictEqual(ctx.cycleCapacitySlack(200), 10, "folga tem teto");
+});
+
+test("capacidade: a primeira revisão de um assunto novo escorrega para o dia com vaga", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  st.cycleSettings.dailyLimit = 2;
+  const due = (n) => ctx.cycleAddDays(today, n);
+  st.revisions = [
+    normalizeRevision({ id: "a", kind: "manual", subjectId: "s2", dueDate: due(1) }),
+    normalizeRevision({ id: "b", kind: "manual", subjectId: "s2", dueDate: due(1) }),
+  ];
+  st.studyLogs = [{ id: "l1", topicId: "t1", subjectId: "", date: today, minutes: 30 }];
+  assert.strictEqual(ctx.syncAutoRevisions(), 1);
+  const created = st.revisions.find((r) => r.originKey === `study:t1:${today}`);
+  assert.strictEqual(created.dueDate, due(2), "amanhã já tem 2 (o limite): vai para depois de amanhã");
+  st.cycleSettings.levelLoad = false;
+  st.revisions = st.revisions.slice(0, 2);
+  assert.strictEqual(ctx.syncAutoRevisions(), 1);
+  assert.strictEqual(st.revisions.find((r) => r.originKey === `study:t1:${today}`).dueDate, due(1), "com a opção desligada, o dia previsto");
+});
+
+test("mínimo de estudo para abrir revisões: 20 minutos por padrão e ajustável", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  assert.strictEqual(st.cycleSettings.minAutoMinutes, 20);
+  st.studyLogs = [{ id: "l1", topicId: "t1", date: today, minutes: 15 }];
+  assert.strictEqual(ctx.syncAutoRevisions(), 0, "15 minutos não abrem cadeia");
+  st.studyLogs.push({ id: "l2", topicId: "t1", date: today, minutes: 10 });
+  assert.strictEqual(ctx.syncAutoRevisions(), 1, "mas 15 + 10 no mesmo dia e assunto passam de 20");
+  st.revisions = [];
+  st.cycleSettings.minAutoMinutes = 30;
+  assert.strictEqual(ctx.syncAutoRevisions(), 0, "limite ajustado para 30");
+  assert.strictEqual(normalizeCycleSettings({}).minAutoMinutes, 20);
+  assert.strictEqual(normalizeCycleSettings({ minAutoMinutes: 2 }).minAutoMinutes, 5, "mínimo de 5");
+  assert.strictEqual(normalizeCycleSettings({ minAutoMinutes: 999 }).minAutoMinutes, 120, "máximo de 120");
+});
+
+test("fila do dia: limitada ao limite por dia, os mais urgentes primeiro, descontando o que já foi feito", () => {
+  const today = ctx.cycleToday();
+  const day = (n) => ctx.cycleAddDays(today, n);
+  const st = freshState();
+  st.cycleSettings.dailyLimit = 4;
+  const rev = (id, dueDate, extra = {}) => normalizeRevision({ id, kind: "study", subjectId: "s1", topicId: "t1", originKey: id, dueDate, ...extra });
+  st.revisions = [rev("r1", day(0)), rev("r2", day(0)), rev("r3", day(0)), rev("r4", day(0)), rev("r5", day(-10), { stage: 1 }), rev("r6", day(-3)), rev("futura", day(5))];
+  st.errorNotebook = [
+    normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q1", lapses: 3, dueDate: day(0) }),
+    normalizeErrorEntry({ id: "e2", subjectId: "s1", statement: "q2", dueDate: day(-1) }),
+    normalizeErrorEntry({ id: "dom", subjectId: "s1", statement: "q3", mastered: true, dueDate: day(-9) }),
+  ];
+  const queue = ctx.cycleTodayQueue(today);
+  assert.strictEqual(queue.totalDue, 8, "6 revisões e 2 erros vencem (futura e dominado não contam)");
+  assert.strictEqual(JSON.stringify(queue.revisions.map((r) => r.id)), JSON.stringify(["r5", "r6", "r1"].sort((a, b) => st.revisions.find((r) => r.id === a).dueDate.localeCompare(st.revisions.find((r) => r.id === b).dueDate) || a.localeCompare(b))), "revisões escolhidas: as mais atrasadas e a primeira da fila, mostradas por data");
+  assert.strictEqual(JSON.stringify(queue.errors.map((e) => e.id)), JSON.stringify(["e1"]), "o erro reincidente entra primeiro");
+  assert.strictEqual(queue.waitingRevisions, 3);
+  assert.strictEqual(queue.waitingErrors, 1);
+  assert.strictEqual(queue.revisions.length + queue.errors.length, 4, "no máximo o limite");
+  assert.strictEqual(ctx.getQueueRevisions(today).length, 3);
+  assert.strictEqual(ctx.getQueueErrors(today).length, 1);
+
+  // o que já foi feito hoje consome o limite
+  st.revisions.push(rev("feita", day(7), { history: [{ date: today, stage: 0, result: "ok" }] }));
+  const after = ctx.cycleTodayQueue(today);
+  assert.strictEqual(after.revisions.length + after.errors.length, 3, "1 feita hoje: sobram 3 do limite de 4");
+  assert.strictEqual(after.doneToday, 1);
+
+  // "Revisar mais 5" e a opção de desligar o limite
+  vm.runInContext(`cycleUI.extra = { date: "${today}", count: 5 };`, ctx);
+  assert.strictEqual(ctx.cycleTodayQueue(today).revisions.length + ctx.cycleTodayQueue(today).errors.length, 8, "mais 5: cabe tudo");
+  vm.runInContext("cycleUI.extra = { date: '2000-01-01', count: 99 };", ctx);
+  assert.strictEqual(ctx.cycleTodayQueue(today).waitingRevisions + ctx.cycleTodayQueue(today).waitingErrors, 5, "o extra de outro dia não vale");
+  vm.runInContext("cycleUI.extra = null;", ctx);
+  st.cycleSettings.capQueue = false;
+  const all = ctx.cycleTodayQueue(today);
+  assert.strictEqual(all.revisions.length + all.errors.length, 8);
+  assert.strictEqual(all.waitingRevisions + all.waitingErrors, 0);
+});
+
+test("fila do dia: item atrasado há muito tempo acaba passando na frente de um novo (ninguém fica esquecido)", () => {
+  const today = ctx.cycleToday();
+  const day = (n) => ctx.cycleAddDays(today, n);
+  assert.ok(ctx.cyclePriority("revision", { dueDate: day(-12), stage: 2, kind: "study" }, today) > ctx.cyclePriority("revision", { dueDate: day(0), stage: 0, kind: "study" }, today));
+  assert.strictEqual(ctx.cyclePriority("revision", { dueDate: day(-99), stage: 3, kind: "study" }, today), 30, "atraso tem teto de 30");
+  assert.ok(ctx.cyclePriority("revision", { dueDate: day(0), stage: 2, kind: "weak" }, today) > ctx.cyclePriority("revision", { dueDate: day(0), stage: 2, kind: "study" }, today), "reforço pesa mais");
+});
+
+test("ritmo sustentável: estima as revisões por dia que o ritmo atual vai gerar e avisa quando passa do limite", () => {
+  const today = ctx.cycleToday();
+  const day = (n) => ctx.cycleAddDays(today, n);
+  const st = freshState();
+  st.cycleSettings.dailyLimit = 3;
+  st.revisions = Array.from({ length: 7 }, (_, i) => normalizeRevision({ id: `n${i}`, kind: "study", subjectId: "s1", topicId: "t1", originKey: `k${i}`, baseDate: day(-i), dueDate: day(10) }));
+  st.revisions.push(normalizeRevision({ id: "velha", kind: "study", subjectId: "s1", topicId: "t1", originKey: "kv", baseDate: day(-40), dueDate: day(10) }));
+  st.errorNotebook = Array.from({ length: 7 }, (_, i) => normalizeErrorEntry({ id: `x${i}`, subjectId: "s1", statement: `enunciado ${i}`, date: day(-i), dueDate: day(10) }));
+  const load = ctx.cycleSteadyLoad(st.revisions, st.errorNotebook, today, { revisionIntervals: [1, 7, 30, 60], errorIntervals: [1, 3, 7, 15, 30] });
+  assert.strictEqual(load.newRevisions, 7, "só conta o que abriu nas últimas 2 semanas");
+  assert.strictEqual(load.newErrors, 7);
+  assert.strictEqual(load.revPerDay, 0.5);
+  assert.strictEqual(load.steadyPerDay, 4.5, "0,5 assunto/dia × 4 revisões + 0,5 erro/dia × 5 refações");
+  const note = ctx.cycleSustainabilityNote(today);
+  assert.ok(note && /4\.5/.test(note.title), "avisa: " + (note && note.title));
+  assert.ok(/bola de neve/.test(note.text) && /limite de 3/.test(note.text));
+  st.cycleSettings.dailyLimit = 12;
+  assert.strictEqual(ctx.cycleSustainabilityNote(today), null, "ritmo cabe no limite e nada aguarda: sem aviso");
+  // itens aguardando espaço também viram aviso, mesmo com ritmo ok
+  st.cycleSettings.dailyLimit = 1;
+  st.revisions.push(normalizeRevision({ id: "d1", kind: "study", subjectId: "s1", topicId: "t1", originKey: "d1", baseDate: day(-60), dueDate: day(0) }), normalizeRevision({ id: "d2", kind: "study", subjectId: "s1", topicId: "t1", originKey: "d2", baseDate: day(-60), dueDate: day(0) }));
+  st.revisions = st.revisions.filter((r) => !r.id.startsWith("n"));
+  st.errorNotebook = [];
+  const waiting = ctx.cycleSustainabilityNote(today);
+  assert.ok(waiting && /aguarda/.test(waiting.title), "aviso de espera: " + (waiting && waiting.title));
 });
 
 console.log(`ciclo-tests: ${passed} testes passaram.`);

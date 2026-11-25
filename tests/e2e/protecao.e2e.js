@@ -238,6 +238,35 @@ const auxRecords = (page) =>
   });
   assert.strictEqual(await page.evaluate(() => state.cycleSettings.levelLoad), false, "a opção é salva");
 
+  // 12) bola de neve: a fila do dia respeita o limite e o resto aguarda
+  await page.evaluate(() => {
+    state.cycleSettings.dailyLimit = 3;
+    state.cycleSettings.capQueue = true;
+    state.errorNotebook = [];
+    state.studyLogs = []; // sem estudo antigo abrindo revisão automática por cima
+    state.revisions = Array.from({ length: 6 }, (_, i) => normalizeRevision({ id: `fila${i}`, kind: "manual", subjectId: "s1", topicId: "t1", originKey: `fila${i}`, dueDate: cycleToday() }));
+    cycleUI.extra = null;
+    saveState();
+    setView("hoje");
+  });
+  await page.waitForTimeout(300);
+  const hojeCards = await page.textContent("#todayTasks");
+  const hojeInsights = await page.textContent("#todayInsights");
+  assert.ok(/\+ 3 aguardando espaço \(limite de 3 por dia\)/.test(hojeCards.replace(/\s+/g, " ")), "a aba Hoje avisa o que aguarda: " + hojeCards.replace(/\s+/g, " ").slice(0, 300));
+  assert.ok(/3 itens aguardam espaço na fila/.test(hojeInsights), "e mostra o aviso de fila: " + hojeInsights.replace(/\s+/g, " ").slice(0, 300));
+  await page.evaluate(() => setView("revisao"));
+  await page.waitForTimeout(300);
+  const queueText = await page.textContent("#revisionQueue");
+  assert.ok(/Fila de hoje: 3 de 6 que vencem \(limite de 3 por dia/.test(queueText), "a aba Revisão mostra 3 de 6: " + queueText.slice(0, 300));
+  assert.ok(await page.isVisible('[data-cycle-action="queueMore"]'), "botão para revisar mais");
+  assert.strictEqual(await page.evaluate(() => getQueueRevisions().length), 3, "só 3 na fila de hoje");
+  await page.click('[data-cycle-action="queueMore"]');
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.evaluate(() => getQueueRevisions().length), 6, "revisar mais 5: entram as outras");
+  assert.ok(!(await page.isVisible('[data-cycle-action="queueMore"]')), "sem espera, o botão some");
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleCapQueue").checked), true, "limitar a fila: ligado por padrão");
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleMinAuto").value), "20", "mínimo de 20 minutos por padrão");
+
   assert.strictEqual(errors.length, 0, "erros de JS: " + errors.join(" | "));
   console.log("ERROS JS: nenhum");
   console.log("E2E PROTECAO OK");

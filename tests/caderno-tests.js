@@ -142,3 +142,38 @@ console.log(`caderno-tests: ${passed} testes passaram.`);
   assertEq.strictEqual(erroDataURLToBlob("não é data url"), null);
   console.log("caderno-tests (nuvem): ok");
 }
+
+// ---- imagens dos documentos (jurisprudências, leis/tabelas, anotações): funções puras ----
+{
+  const assertEq = require("assert");
+  const { erroAllPrintIds, docImgIdsInText, docImgCollectIds, docImgIdsOf, docImgFindInline } = require("../caderno.js");
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  assertEq.deepStrictEqual(docImgIdsInText('<p>a</p><img data-img-id="img_1" alt="x"><img data-img-id="img_2">'), ["img_1", "img_2"]);
+  assertEq.deepStrictEqual(docImgIdsInText("ymimg:img_9"), ["img_9"]);
+  assertEq.deepStrictEqual(docImgIdsInText("texto qualquer ymimg:img_9"), [], "só vale se o texto todo for a referência");
+  assertEq.deepStrictEqual(docImgIdsInText("ymimg:../etc"), [], "ids com caracteres fora do padrão são descartados");
+
+  const state = {
+    meta: { x: '<img data-img-id="img_meta">' },
+    ui: { draft: '<img data-img-id="img_ui">' },
+    legalMaterials: [{ id: "l1", type: "image", content: "ymimg:img_legal" }, { id: "l2", type: "law", content: '<p>t</p><img data-img-id="img_lei">' }],
+    cases: { STJ: [{ id: "c1", summary: '<img data-img-id="img_caso"><img data-img-id="img_caso">' }], STF: [] },
+    errorNotebook: [{ images: [{ id: "img_print" }], answerImages: [], notes: "" }],
+    notes: [{ id: "n1", content: "sem imagem" }],
+  };
+  assertEq.deepStrictEqual([...docImgCollectIds(state, new Set())].sort(), ["img_caso", "img_legal", "img_lei"], "varre os textos do estado, menos meta e ui");
+  assertEq.deepStrictEqual(erroAllPrintIds(state).sort(), ["img_caso", "img_legal", "img_lei", "img_print"], "e o sync, o backup e a exclusão passam a enxergar essas imagens");
+  assertEq.deepStrictEqual(docImgIdsOf(state.legalMaterials[0]), ["img_legal"]);
+  assertEq.deepStrictEqual(docImgIdsOf(undefined), []);
+
+  const inline = {
+    meta: { x: PNG },
+    legalMaterials: [{ id: "l1", type: "image", content: PNG }],
+    cases: { STJ: [{ id: "c1", summary: `<p>x</p><img src="${PNG}">` }], STF: [] },
+    notes: [{ id: "n1", content: "nada" }],
+  };
+  const found = docImgFindInline(inline);
+  assertEq.strictEqual(found.length, 2, "acha as imagens em base64 (menos em meta)");
+  assertEq.deepStrictEqual(found.map((place) => place.owner.id).sort(), ["c1", "l1"], "e o item dono de cada uma");
+  console.log("caderno-tests (imagens de documentos): ok");
+}

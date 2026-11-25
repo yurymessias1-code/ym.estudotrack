@@ -241,6 +241,7 @@ function erroAllPrintIds(source) {
     [...(entry.images || []), ...(entry.answerImages || [])].forEach((image) => image && image.id && ids.add(image.id));
     erroNotesImageIds(entry.notes).forEach((id) => ids.add(id));
   });
+  docImgCollectIds(source, ids); // imagens de jurisprudências, leis/tabelas, anotações, fontes e flashcards
   return [...ids];
 }
 
@@ -388,6 +389,7 @@ async function erroCloudSync() {
   try {
     const auth = await erroCloudAuth();
     if (!auth) return;
+    await docImgMigrateState(auth); // imagens antigas em base64 dentro do estado passam para o Storage
     const left = [];
     for (const id of erroCloudQueueRead()) if (!(await erroCloudRemove(auth, id))) left.push(id);
     erroCloudQueueWrite(left);
@@ -516,6 +518,184 @@ async function erroPrintsRestore(prints) {
   }
   if (count) erroCloudKick(600);
   return count;
+}
+
+/* ------------------------------------------------------------------ */
+/* Imagens dos documentos (jurisprudências, leis/tabelas, anotações…)   */
+/* ------------------------------------------------------------------ */
+/*
+ * Mesma infraestrutura dos prints: o arquivo da imagem vai para o IndexedDB e para o bucket `erro-prints`
+ * (uma pasta por usuário) e o estado guarda só a referência. Assim o estado, que é gravado inteiro no
+ * localStorage e no Supabase a cada mudança, não carrega imagens em base64.
+ *   - texto rico (jurisprudência, anotação, fonte, flashcard...): <img data-img-id="ID"> (sem src)
+ *   - material de lei/tabela do tipo imagem: content = "ymimg:ID"
+ * Imagens antigas, que ainda estão em base64 no estado, são movidas sozinhas para a nuvem
+ * (docImgMigrateState), e só depois de o envio ser confirmado.
+ */
+const DOC_IMG_STATE_SKIP = new Set(["meta", "ui", "profile", "account"]);
+const DOC_IMG_MAX_UPLOAD_BYTES = 5_000_000; // limite do bucket
+const DOC_IMG_INLINE_SRC = /\ssrc=(["'])(data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+)\1/gi;
+const DOC_IMG_DATA_URL_EXACT = /^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i;
+
+/** Ids de imagens referenciadas dentro de um texto: <img data-img-id="ID"> ou "ymimg:ID". */
+function docImgIdsInText(text) {
+  const value = String(text || "");
+  const out = [];
+  if (value.includes("data-img-id")) for (const match of value.matchAll(/data-img-id="([\w-]+)"/g)) out.push(match[1]);
+  const reference = /^ymimg:([\w-]+)$/.exec(value.trim());
+  if (reference) out.push(reference[1]);
+  return out;
+}
+
+/** Junta em `ids` todas as imagens referenciadas em qualquer texto do estado (menos meta, ui, perfil e conta). */
+function docImgCollectIds(source, ids) {
+  if (!source || typeof source !== "object") return ids;
+  const stack = [[source, true]];
+  while (stack.length) {
+    const [node, top] = stack.pop();
+    if (typeof node === "string") {
+      docImgIdsInText(node).forEach((id) => ids.add(id));
+      continue;
+    }
+    if (!node || typeof node !== "object") continue;
+    Object.keys(node).forEach((key) => {
+      if (top && DOC_IMG_STATE_SKIP.has(key)) return;
+      stack.push([node[key], false]);
+    });
+  }
+  return ids;
+}
+
+/** Imagens referenciadas por um item só (para soltá-las quando ele é excluído). */
+function docImgIdsOf(item) {
+  return [...docImgCollectIds({ item }, new Set())];
+}
+
+/** Guarda um arquivo de imagem (reduzido) no IndexedDB. { id, stored: false } se o navegador não guardou em disco. */
+async function docImgStoreFile(file) {
+  const { blob } = await erroImgCompress(file);
+  const id = erroImgNewId();
+  const stored = await erroImgPut(id, blob);
+  if (stored) erroCloudKick(1500);
+  return { id, stored, blob };
+}
+
+/** Apaga (aparelho e nuvem) as imagens que nenhum item do estado usa mais. */
+async function docImgRelease(ids) {
+  if (typeof state === "undefined") return;
+  const stillUsed = new Set(erroAllPrintIds(state));
+  for (const id of new Set(ids || [])) if (id && !stillUsed.has(id)) await erroImgDelete(id);
+}
+
+async function docImgHashId(dataUrl) {
+  try {
+    if (typeof crypto !== "undefined" && crypto.subtle && typeof TextEncoder !== "undefined") {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dataUrl));
+      return `img_d${[...new Uint8Array(digest)].slice(0, 12).map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    }
+  } catch (error) {
+    // sem WebCrypto: id aleatório
+  }
+  return erroImgNewId();
+}
+
+/** Lugares do estado onde há imagem em base64: { parent, key, owner } (owner: item com id que a contém). */
+function docImgFindInline(root) {
+  const found = [];
+  const walk = (node, owner, top) => {
+    if (!node || typeof node !== "object") return;
+    const nextOwner = !Array.isArray(node) && node.id !== undefined ? node : owner;
+    Object.keys(node).forEach((key) => {
+      if (top && DOC_IMG_STATE_SKIP.has(key)) return;
+      const value = node[key];
+      if (typeof value === "string") {
+        if (value.includes("data:image/")) found.push({ parent: node, key, owner: nextOwner });
+      } else if (value && typeof value === "object") walk(value, nextOwner, false);
+    });
+  };
+  walk(root, null, true);
+  return found;
+}
+
+let docImgMigrating = false;
+
+/**
+ * Move para o Storage as imagens que ainda estão em base64 no estado. Só roda com conta online e troca a
+ * imagem pela referência depois de o envio ser confirmado: se algo falhar, a imagem continua onde estava.
+ */
+async function docImgMigrateState(auth) {
+  if (docImgMigrating || typeof state === "undefined" || !state || !auth) return 0;
+  docImgMigrating = true;
+  let moved = 0;
+  try {
+    const db = await erroImgOpenDB();
+    if (!db) return 0;
+    const places = docImgFindInline(state);
+    if (!places.length) return 0;
+    const done = new Map(); // dataUrl -> id (ou "" se não deu)
+    const resolve = async (dataUrl) => {
+      if (done.has(dataUrl)) return done.get(dataUrl);
+      done.set(dataUrl, "");
+      const blob = erroDataURLToBlob(dataUrl);
+      if (!blob || !blob.size || blob.size > DOC_IMG_MAX_UPLOAD_BYTES) return "";
+      const id = await docImgHashId(dataUrl);
+      if (!(await erroImgPut(id, blob))) return ""; // sem IndexedDB: deixa como está
+      if (!(await erroCloudUpload(auth, id, blob))) return "";
+      await erroCloudMarkSynced(db, id);
+      done.set(dataUrl, id);
+      return id;
+    };
+    for (const place of places) {
+      const original = place.parent[place.key];
+      if (typeof original !== "string") continue;
+      let next = original;
+      if (DOC_IMG_DATA_URL_EXACT.test(original.trim()) && place.parent.type === "image" && place.key === "content") {
+        const id = await resolve(original.trim());
+        if (id) next = `ymimg:${id}`;
+      } else {
+        const urls = [...new Set([...original.matchAll(DOC_IMG_INLINE_SRC)].map((match) => match[2]))];
+        const ids = new Map();
+        for (const url of urls) {
+          const id = await resolve(url);
+          if (id) ids.set(url, id);
+        }
+        if (ids.size) next = original.replace(DOC_IMG_INLINE_SRC, (whole, quote, url) => (ids.has(url) ? ` data-img-id="${ids.get(url)}"` : whole));
+      }
+      if (next === original || place.parent[place.key] !== original) continue; // mudou durante o envio: tenta na próxima rodada
+      place.parent[place.key] = next;
+      if (place.owner && typeof place.owner === "object") place.owner.updatedAt = new Date().toISOString(); // ganha das cópias antigas em outros aparelhos
+      moved += 1;
+    }
+    if (moved) {
+      if (typeof saveState === "function") saveState();
+      if (typeof render === "function") render();
+      if (typeof showToast === "function") showToast(`${moved} ${moved === 1 ? "imagem foi movida" : "imagens foram movidas"} para a nuvem, deixando o app mais leve.`);
+    }
+  } catch (error) {
+    // best-effort: a próxima rodada tenta de novo
+  } finally {
+    docImgMigrating = false;
+  }
+  return moved;
+}
+
+/** Carrega sozinha as imagens (<img data-img-id>) que aparecem em qualquer parte da tela. */
+let docImgObserver = null;
+function docImgObserve() {
+  if (docImgObserver || typeof MutationObserver === "undefined" || typeof document === "undefined" || !document.body) return;
+  let scheduled = false;
+  docImgObserver = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    const run = () => {
+      scheduled = false;
+      erroImgHydrate(document);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 50);
+  });
+  docImgObserver.observe(document.body, { childList: true, subtree: true });
+  erroImgHydrate(document);
 }
 
 /* ------------------------------------------------------------------ */
@@ -995,6 +1175,7 @@ function bindCadernoEvents() {
   if (cadernoBound || typeof document === "undefined") return;
   cadernoBound = true;
   erroCloudBind();
+  docImgObserve();
 
   document.addEventListener("paste", cadernoOnPaste);
 
@@ -1102,5 +1283,5 @@ function bindCadernoEvents() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildErrorNav, groupErrorsByScope, erroEntryScope, erroScopeMatches, erroMaps, erroImgFit, erroNotesSanitize, erroNotesText, erroNotesImageIds, erroAllPrintIds, erroDataURLToBlob };
+  module.exports = { buildErrorNav, groupErrorsByScope, erroEntryScope, erroScopeMatches, erroMaps, erroImgFit, erroNotesSanitize, erroNotesText, erroNotesImageIds, erroAllPrintIds, erroDataURLToBlob, docImgIdsInText, docImgCollectIds, docImgIdsOf, docImgFindInline };
 }

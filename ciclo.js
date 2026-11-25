@@ -6,6 +6,7 @@
 
 const CYCLE_DEFAULT_INTERVALS = [1, 7, 30, 60];
 const CYCLE_DEFAULT_ERROR_INTERVALS = [1, 3, 7, 15, 30];
+const CYCLE_LAPSE_DROP = 2; // errar/esquecer faz descer só esta quantidade de etapas (não volta ao começo)
 const CYCLE_LEECH_LAPSES = 3; // errou de novo tantas vezes: vira reincidente
 const CYCLE_MIN_AUTO_MINUTES = 10;
 const CYCLE_BACKFILL_DAYS = 14;
@@ -144,6 +145,8 @@ function normalizeCycleSettings(raw = {}) {
     eveningTime: cycleIsTime(source.eveningTime) ? source.eveningTime : "",
     dailyLimit: cycleInt(source.dailyLimit, 1, 200, 12),
     askAtSave: source.askAtSave !== false,
+    examAdapt: source.examAdapt !== false,
+    levelLoad: source.levelLoad !== false,
     autoWeak: source.autoWeak !== false,
     weakAccuracy: cycleInt(source.weakAccuracy, 30, 95, 70),
     weakMinQuestions: cycleInt(source.weakMinQuestions, 5, 100, 10),
@@ -282,7 +285,11 @@ function ensureCycleState() {
  */
 function cycleReviewStep(stage, result, intervals) {
   const last = intervals.length;
-  if (result === "forgot") return { done: false, stage: 0, gap: intervals[0] };
+  if (result === "forgot") {
+    // Esquecer não apaga o progresso todo: desce CYCLE_LAPSE_DROP etapas (um item de 30 dias não volta para 1 dia).
+    const dropped = Math.max(0, Math.min(stage, last - 1) - CYCLE_LAPSE_DROP);
+    return { done: false, stage: dropped, gap: intervals[dropped] };
+  }
   if (result === "hard") {
     const base = intervals[Math.min(stage, last - 1)];
     return { done: false, stage, gap: Math.max(1, Math.ceil(base / 2)) };
@@ -292,6 +299,86 @@ function cycleReviewStep(stage, result, intervals) {
   let gap = intervals[next];
   if (result === "easy") gap = Math.round(gap * 1.5);
   return { done: false, stage: next, gap };
+}
+
+/**
+ * Data da prova mais próxima (a partir de amanhã) que vale para a matéria. Concurso sem matérias marcadas
+ * vale para todas. Devolve "" se não houver nenhuma prova futura.
+ */
+function cycleNextExamDate(subjectId, today = cycleToday()) {
+  const dates = ((typeof state !== "undefined" && state.competitions) || [])
+    .filter((competition) => cycleIsISO(competition.date) && competition.date > today)
+    .filter((competition) => !competition.subjectIds?.length || !subjectId || competition.subjectIds.includes(subjectId))
+    .map((competition) => competition.date)
+    .sort();
+  return dates[0] || "";
+}
+
+/**
+ * Perto da prova os intervalos encurtam: a próxima revisão cai, no máximo, na metade do tempo que falta
+ * (assim há revisão na véspera e nada é agendado para depois da prova; com 1 dia sobrando, cai no dia da prova).
+ */
+function cycleCapGapForExam(gap, today, examDate) {
+  if (!examDate || !cycleIsISO(examDate) || examDate <= today) return gap;
+  const daysLeft = Math.round((cycleDate(examDate) - cycleDate(today)) / 86400000);
+  return Math.min(gap, Math.max(1, Math.floor(daysLeft / 2)));
+}
+
+/** cycleReviewStep + ajuste pela data da prova (se a opção estiver ligada). */
+function cycleScheduledStep(stage, result, intervals, subjectId = "", today = cycleToday()) {
+  const step = cycleReviewStep(stage, result, intervals);
+  if (step.done || (typeof state !== "undefined" && state.cycleSettings?.examAdapt === false)) return step;
+  const examDate = cycleNextExamDate(subjectId, today);
+  const gap = cycleCapGapForExam(step.gap, today, examDate);
+  return gap === step.gap ? step : { ...step, gap, examDate };
+}
+
+/**
+ * Carga do dia: quantos itens (revisões abertas e erros não dominados) vencem em cada dia, de hoje em diante.
+ * `exclude` tira da conta o item que está sendo reagendado.
+ */
+function cycleLoadByDate(revisions, errors, today, exclude = {}) {
+  const load = {};
+  (revisions || []).forEach((revision) => {
+    if (revision.status !== "pending" || !revision.dueDate || revision.dueDate < today || revision.id === exclude.revisionId) return;
+    load[revision.dueDate] = (load[revision.dueDate] || 0) + 1;
+  });
+  (errors || []).forEach((entry) => {
+    if (entry.mastered || !entry.dueDate || entry.dueDate < today || entry.id === exclude.errorId) return;
+    load[entry.dueDate] = (load[entry.dueDate] || 0) + 1;
+  });
+  return load;
+}
+
+/** Quanto o dia pode andar para mais ou para menos: nada nos intervalos curtos, 1 dia até 2 semanas, 2 dias depois. */
+function cycleLevelRadius(gap) {
+  return gap <= 2 ? 0 : gap <= 14 ? 1 : 2;
+}
+
+/**
+ * Escolhe, perto do dia previsto, o dia mais vazio. Só troca se o outro dia tiver menos itens;
+ * em empate, fica o mais perto do previsto (e, se igual, o mais cedo). `maxGap` impede passar do limite.
+ */
+function cycleLevelGap(gap, load, today, { maxGap = Infinity } = {}) {
+  const radius = cycleLevelRadius(gap);
+  if (!radius) return gap;
+  const loadOf = (candidate) => load[cycleAddDays(today, candidate)] || 0;
+  const to = Math.min(gap + radius, Math.max(gap, maxGap));
+  let best = gap;
+  for (let candidate = Math.max(1, gap - radius); candidate <= to; candidate += 1) {
+    const better = loadOf(candidate) < loadOf(best);
+    const sameLoadCloser = loadOf(candidate) === loadOf(best) && (Math.abs(candidate - gap) < Math.abs(best - gap) || (Math.abs(candidate - gap) === Math.abs(best - gap) && candidate < best));
+    if (better || sameLoadCloser) best = candidate;
+  }
+  return best;
+}
+
+/** O passo já ajustado pela prova passa pelo nivelamento da carga (se a opção estiver ligada). */
+function cycleLeveledStep(step, today, exclude = {}) {
+  if (step.done || (typeof state !== "undefined" && state.cycleSettings?.levelLoad === false)) return step;
+  const load = cycleLoadByDate(state.revisions, state.errorNotebook, today, exclude);
+  const gap = cycleLevelGap(step.gap, load, today, { maxGap: step.examDate ? step.gap : Infinity });
+  return gap === step.gap ? step : { ...step, gap, leveled: true };
 }
 
 /* ------------------------------------------------------------------ */
@@ -642,7 +729,7 @@ function completeRevision(id, result, note = "") {
   const revision = state.revisions.find((item) => item.id === id);
   if (!revision || revision.status === "done") return null;
   const today = cycleToday();
-  const step = cycleReviewStep(revision.stage, result, revisionIntervals());
+  const step = cycleLeveledStep(cycleScheduledStep(revision.stage, result, revisionIntervals(), revision.subjectId, today), today, { revisionId: revision.id });
   revision.history.push({ date: today, stage: revision.stage, result, note: cycleText(note).slice(0, 500) });
   revision.history = revision.history.slice(-30);
   revision.stage = step.stage;
@@ -729,7 +816,7 @@ function retestErrorEntry(id, rawResult) {
   const result = errorRetestResult(rawResult);
   const today = cycleToday();
   const intervals = state.cycleSettings.errorIntervals;
-  const step = cycleReviewStep(entry.stage, result, intervals);
+  const step = cycleLeveledStep(cycleScheduledStep(entry.stage, result, intervals, getEntrySubjectId(entry), today), today, { errorId: entry.id });
   entry.attempts += 1;
   entry.lastReviewed = today;
   entry.lastResult = ERROR_RETEST_RESULTS[result];
@@ -744,6 +831,63 @@ function retestErrorEntry(id, rawResult) {
   }
   entry.updatedAt = new Date().toISOString();
   return { ...step, result, leech: errorIsLeech(entry) };
+}
+
+/** Texto do enunciado sem acento, pontuação e maiúsculas, para reconhecer o mesmo erro cadastrado duas vezes. */
+function errorStatementKey(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+/** Erro já cadastrado com o mesmo enunciado (enunciados curtos demais não são comparados). */
+function errorFindDuplicate(entries, candidate, ignoreId = "") {
+  const key = errorStatementKey(candidate?.statement);
+  if (key.length < 25) return null;
+  return (entries || []).find((entry) => entry.id !== ignoreId && errorStatementKey(entry.statement) === key) || null;
+}
+
+/**
+ * Errou de novo o que já estava no caderno: soma um erro no registro que existe (em vez de criar outro),
+ * reabre se estava dominado, desce etapas como qualquer esquecimento e junta o que o novo registro trouxe.
+ * `data` é o formulário já normalizado (prints incluídos). Devolve { entry, droppedImages }.
+ */
+function errorRegisterRepeat(entry, data, today = cycleToday()) {
+  const step = cycleLeveledStep(cycleScheduledStep(entry.stage, "forgot", state.cycleSettings.errorIntervals, getEntrySubjectId(entry), today), today, { errorId: entry.id });
+  entry.lapses += 1;
+  entry.attempts += 1;
+  entry.lastResult = "wrong";
+  entry.lastReviewed = today;
+  entry.stage = step.stage;
+  entry.mastered = false;
+  entry.dueDate = cycleAddDays(today, step.gap);
+  const fill = (key) => {
+    if (!String(entry[key] || "").trim() && String(data[key] || "").trim()) entry[key] = data[key];
+  };
+  ["myAnswer", "correctAnswer", "foundation", "rule", "source", "reason"].forEach(fill);
+  if (!entry.topicId && data.topicId) entry.topicId = data.topicId;
+  // prints do novo registro entram no existente, respeitando o limite por campo; o que passar do limite é descartado
+  const droppedImages = [];
+  const merge = (current, incoming) => {
+    const known = new Set((current || []).map((image) => image.id));
+    const room = Math.max(0, ERRO_IMG.maxPerSlot - (current || []).length);
+    const fresh = (incoming || []).filter((image) => image && !known.has(image.id));
+    droppedImages.push(...fresh.slice(room));
+    return [...(current || []), ...fresh.slice(0, room)];
+  };
+  entry.images = merge(entry.images, data.images);
+  entry.answerImages = merge(entry.answerImages, data.answerImages);
+  const incomingNotes = String(data.notes || "").trim();
+  if (incomingNotes && erroNotesText(incomingNotes) !== erroNotesText(entry.notes)) {
+    entry.notes = entry.notes ? erroNotesSanitize(`${entry.notes}<hr>${incomingNotes}`) : incomingNotes;
+  }
+  entry.tags = [...new Set([...(entry.tags || []), ...(Array.isArray(data.tags) ? data.tags : [])])];
+  entry.updatedAt = new Date().toISOString();
+  return { entry, droppedImages };
 }
 
 /** Fila de refação: os reincidentes primeiro, depois os mais antigos. */
@@ -791,6 +935,7 @@ function getCycleSummary() {
     revDue: dueRevisions.length,
     revOverdue: dueRevisions.filter((revision) => revision.dueDate < today).length,
     errorsDue: dueErrors.length,
+    errOverdue: dueErrors.filter((entry) => entry.dueDate < today).length,
     errorsOpen: state.errorNotebook.filter((entry) => !entry.mastered).length,
     laws,
     lawToday,
@@ -921,6 +1066,8 @@ function renderRevisions() {
   cycleSetValueIfIdle("#cycleErrorIntervals", state.cycleSettings.errorIntervals.join(", "));
   $("#cycleAutoStudy").checked = state.cycleSettings.autoFromStudy;
   $("#cycleAutoWeak").checked = state.cycleSettings.autoWeak;
+  $("#cycleExamAdapt").checked = state.cycleSettings.examAdapt;
+  $("#cycleLevelLoad").checked = state.cycleSettings.levelLoad;
   cycleSetValueIfIdle("#cycleWeakAccuracy", state.cycleSettings.weakAccuracy);
   cycleSetValueIfIdle("#cycleWeakMin", state.cycleSettings.weakMinQuestions);
 
@@ -959,7 +1106,7 @@ function renderRevisions() {
         .join("")
     : `<div class="empty-state">Nenhuma revisão pendente para hoje. Registre estudo no Pomodoro ou agende uma revisão manual.</div>`;
 
-  const overdueCount = due.filter((revision) => revision.dueDate < today).length;
+  const overdueCount = due.filter((revision) => revision.dueDate < today).length + getDueErrors(today).filter((entry) => entry.dueDate < today).length;
   if (overdueCount > 0) {
     $("#revisionQueue").insertAdjacentHTML(
       "beforeend",
@@ -1042,7 +1189,7 @@ function renderRevisionSession(due) {
     }
     const intervals = revisionIntervals();
     const hint = (result) => {
-      const step = cycleReviewStep(revision.stage, result, intervals);
+      const step = cycleLeveledStep(cycleScheduledStep(revision.stage, result, intervals, revision.subjectId), cycleToday(), { revisionId: revision.id });
       return step.done ? "encerra" : `volta em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}`;
     };
     body += `
@@ -1233,6 +1380,12 @@ function renderErrors() {
   const dueCount = getDueErrors(today).length;
   const reasonCounts = Object.keys(ERROR_REASONS).map((key) => ({ key, count: all.filter((entry) => entry.reason === key).length })).sort((a, b) => b.count - a.count);
   const topReason = reasonCounts[0]?.count ? reasonCounts[0] : null;
+  const errOverdue = getDueErrors(today).filter((entry) => entry.dueDate < today).length;
+  const redistribute = $("#errorRedistribute");
+  if (redistribute) {
+    redistribute.classList.toggle("hidden", !errOverdue);
+    redistribute.innerHTML = errOverdue ? `<button class="button secondary" data-cycle-action="redistributeOverdue" type="button">Redistribuir ${cyclePlural(errOverdue, "erro atrasado", "erros atrasados")} (até ${state.cycleSettings.dailyLimit} por dia)</button>` : "";
+  }
   $("#errorStats").innerHTML = [
     cycleStat("Para refazer hoje", String(dueCount), dueCount ? "venceram na revisão" : "nada vencido"),
     cycleStat("Não dominados", String(open.length), `${all.filter((entry) => errorStatus(entry) === "review").length} em revisão`),
@@ -1683,8 +1836,8 @@ function handleCycleAction(button) {
       step.done
         ? "Revisão concluída: assunto fixado."
         : next
-          ? `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}. Segue a próxima da fila.`
-          : `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}. Fila de hoje concluída.`
+          ? `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}${step.examDate ? " (encurtado pela data da prova)" : ""}${step.leveled ? " (ajustado para um dia mais leve)" : ""}. Segue a próxima da fila.`
+          : `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}${step.examDate ? " (encurtado pela data da prova)" : ""}${step.leveled ? " (ajustado para um dia mais leve)" : ""}. Fila de hoje concluída.`
     );
     if (typeof todayAfterAction === "function") todayAfterAction("rev");
     return undefined;
@@ -1780,11 +1933,12 @@ function handleCycleAction(button) {
     cycleRefresh();
     if (step) {
       const days = `${step.gap} ${step.gap === 1 ? "dia" : "dias"}`;
-      if (step.result === "forgot") showToast(step.leech ? `Errou de novo (${CYCLE_LEECH_LAPSES}× ou mais). Veja as sugestões para este erro reincidente.` : "Sem problema: volta amanhã para refazer.");
+      const exam = `${step.examDate ? " (encurtado pela data da prova)" : ""}${step.leveled ? " (ajustado para um dia mais leve)" : ""}`;
+      if (step.result === "forgot") showToast(step.leech ? `Errou de novo (${CYCLE_LEECH_LAPSES}× ou mais). Veja as sugestões para este erro reincidente.` : `Sem problema: volta em ${days}${exam}.`);
       else if (step.done) showToast("Erro dominado!");
-      else if (step.result === "hard") showToast(`Acertou com dúvida. Volta em ${days} para firmar.`);
-      else if (step.result === "easy") showToast(`Fácil! Volta em ${days}.`);
-      else showToast(`Acertou. Volta em ${days}.`);
+      else if (step.result === "hard") showToast(`Acertou com dúvida. Volta em ${days} para firmar${exam}.`);
+      else if (step.result === "easy") showToast(`Fácil! Volta em ${days}${exam}.`);
+      else showToast(`Acertou. Volta em ${days}${exam}.`);
     }
     if (typeof todayAfterAction === "function") todayAfterAction("err");
     return undefined;
@@ -1984,6 +2138,8 @@ function bindCycleEvents() {
     state.cycleSettings.errorIntervals = normalizeCycleIntervals($("#cycleErrorIntervals").value, CYCLE_DEFAULT_ERROR_INTERVALS);
     state.cycleSettings.autoFromStudy = $("#cycleAutoStudy").checked;
     state.cycleSettings.autoWeak = $("#cycleAutoWeak").checked;
+    state.cycleSettings.examAdapt = $("#cycleExamAdapt").checked;
+    state.cycleSettings.levelLoad = $("#cycleLevelLoad").checked;
     state.cycleSettings.weakAccuracy = cycleInt($("#cycleWeakAccuracy").value, 30, 95, 70);
     state.cycleSettings.weakMinQuestions = cycleInt($("#cycleWeakMin").value, 5, 100, 10);
     $("#cycleIntervals").value = state.cycleSettings.intervals.join(", ");
@@ -2014,6 +2170,7 @@ function bindCycleEvents() {
       const shots = await erroDraftCommit();
       const topicId = $("#errorTopic").value;
       const existing = state.errorNotebook.find((entry) => entry.id === cycleUI.errorEditId);
+      let repeated = null;
       const data = {
         subjectId: getTopic(topicId)?.subjectId || subjectId,
         topicId,
@@ -2037,7 +2194,19 @@ function bindCycleEvents() {
         Object.assign(existing, updated);
       } else {
         const firstGap = state.cycleSettings.errorIntervals[0];
-        state.errorNotebook.push(normalizeErrorEntry({ ...data, dueDate: cycleAddDays(data.date, firstGap), createdAt: new Date().toISOString() }));
+        const duplicate = errorFindDuplicate(state.errorNotebook, data);
+        const sumUp =
+          duplicate &&
+          window.confirm(
+            `Este erro parece já estar no caderno (cadastrado em ${duplicate.date.split("-").reverse().join("/")}${duplicate.lapses ? `, errado ${duplicate.lapses}× depois` : ""}).\n\nOK: somar mais um erro nele, sem duplicar.\nCancelar: salvar como um registro novo mesmo assim.`
+          );
+        if (sumUp) {
+          const { entry: merged, droppedImages } = errorRegisterRepeat(duplicate, normalizeErrorEntry({ ...data, createdAt: new Date().toISOString() }));
+          droppedImages.forEach((image) => erroImgDelete(image.id));
+          repeated = merged;
+        } else {
+          state.errorNotebook.push(normalizeErrorEntry({ ...data, dueDate: cycleAddDays(data.date, firstGap), createdAt: new Date().toISOString() }));
+        }
       }
       resetErrorForm({ keepContext: !existing }); // erro novo: segue aberto, na mesma matéria, para o próximo
       if (existing) errorFormSet(false);
@@ -2048,7 +2217,9 @@ function bindCycleEvents() {
           ? "Erro salvo, mas o navegador não guardou os prints de forma permanente. Eles somem ao fechar a aba."
           : existing
             ? "Erro atualizado."
-            : "Erro salvo. Ele volta para você refazer amanhã."
+            : repeated
+              ? `Erro repetido: somei mais um nele (agora ${repeated.lapses}×). Ele volta em ${Math.max(1, Math.round((cycleDate(repeated.dueDate) - cycleDate(cycleToday())) / 86400000))} ${Math.round((cycleDate(repeated.dueDate) - cycleDate(cycleToday())) / 86400000) <= 1 ? "dia" : "dias"} para refazer.`
+              : "Erro salvo. Ele volta para você refazer amanhã."
       );
       if (!existing) $("#errorStatement")?.focus();
     } finally {
@@ -2151,25 +2322,28 @@ const CYCLE_NOTIFY_KEY_PREFIX = "ymEstudos.cycleNotify.";
 const CYCLE_ICS_DAYS = 90;
 
 /**
- * Redistribui revisões atrasadas respeitando um máximo por dia.
- * Mais antigas primeiro; não mexe no que já vence hoje ou depois.
+ * Redistribui revisões (e, se passados, os erros do caderno) atrasadas respeitando um máximo por dia,
+ * somando o que já vence em cada dia. Mais antigas primeiro; não mexe no que já vence hoje ou depois.
+ * Itens de erro voltam com kind: "error".
  */
-function cycleRedistributeOverdue(revisions, today, limit) {
+function cycleRedistributeOverdue(revisions, today, limit, errors = []) {
   const perDay = {};
-  revisions
-    .filter((revision) => revision.status === "pending" && revision.dueDate >= today)
-    .forEach((revision) => {
-      perDay[revision.dueDate] = (perDay[revision.dueDate] || 0) + 1;
-    });
-  const overdue = revisions
-    .filter((revision) => revision.status === "pending" && revision.dueDate < today)
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const count = (date) => {
+    perDay[date] = (perDay[date] || 0) + 1;
+  };
+  revisions.filter((revision) => revision.status === "pending" && revision.dueDate >= today).forEach((revision) => count(revision.dueDate));
+  const openErrors = (errors || []).filter((entry) => !entry.mastered && entry.dueDate);
+  openErrors.filter((entry) => entry.dueDate >= today).forEach((entry) => count(entry.dueDate));
+  const overdue = [
+    ...revisions.filter((revision) => revision.status === "pending" && revision.dueDate < today).map((revision) => ({ id: revision.id, dueDate: revision.dueDate, error: false })),
+    ...openErrors.filter((entry) => entry.dueDate < today).map((entry) => ({ id: entry.id, dueDate: entry.dueDate, error: true })),
+  ].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || Number(a.error) - Number(b.error));
   const changes = [];
   let day = today;
-  overdue.forEach((revision) => {
+  overdue.forEach((item) => {
     for (let guard = 0; (perDay[day] || 0) >= limit && guard < 400; guard += 1) day = cycleAddDays(day, 1);
-    perDay[day] = (perDay[day] || 0) + 1;
-    changes.push({ id: revision.id, dueDate: day });
+    count(day);
+    changes.push(item.error ? { id: item.id, dueDate: day, kind: "error" } : { id: item.id, dueDate: day });
   });
   return changes;
 }
@@ -2559,23 +2733,27 @@ function cycleRegisterServiceWorker() {
 function cycleRedistributeAction() {
   const today = cycleToday();
   const limit = state.cycleSettings.dailyLimit;
-  const changes = cycleRedistributeOverdue(state.revisions, today, limit);
+  const changes = cycleRedistributeOverdue(state.revisions, today, limit, state.errorNotebook);
   if (!changes.length) {
-    showToast("Não há revisões atrasadas.");
+    showToast("Não há revisões nem erros atrasados.");
     return;
   }
+  const errorChanges = changes.filter((change) => change.kind === "error");
+  const revisionChanges = changes.filter((change) => change.kind !== "error");
+  const what = [revisionChanges.length ? cyclePlural(revisionChanges.length, "revisão atrasada", "revisões atrasadas") : "", errorChanges.length ? cyclePlural(errorChanges.length, "erro atrasado", "erros atrasados") : ""].filter(Boolean).join(" e ");
   const lastDay = changes.reduce((max, change) => (change.dueDate > max ? change.dueDate : max), today);
   const spanDays = daysBetween(today, lastDay) + 1;
-  if (!window.confirm(`Redistribuir ${cyclePlural(changes.length, "revisão atrasada", "revisões atrasadas")} em ${cyclePlural(spanDays, "dia", "dias")}, com no máximo ${limit} por dia? As mais antigas vêm primeiro.`)) return;
+  if (!window.confirm(`Redistribuir ${what} em ${cyclePlural(spanDays, "dia", "dias")}, com no máximo ${limit} por dia (revisões e erros juntos)? Os mais antigos vêm primeiro.`)) return;
+  const now = new Date().toISOString();
   changes.forEach((change) => {
-    const revision = state.revisions.find((item) => item.id === change.id);
-    if (revision) {
-      revision.dueDate = change.dueDate;
-      revision.updatedAt = new Date().toISOString();
+    const item = (change.kind === "error" ? state.errorNotebook : state.revisions).find((entry) => entry.id === change.id);
+    if (item) {
+      item.dueDate = change.dueDate;
+      item.updatedAt = now;
     }
   });
   cycleRefresh();
-  showToast(`${cyclePlural(changes.length, "revisão redistribuída", "revisões redistribuídas")} até ${formatShortDate(lastDay)}.`);
+  showToast(`${cyclePlural(changes.length, "item redistribuído", "itens redistribuídos")} até ${formatShortDate(lastDay)}.`);
 }
 
 function renderReviewBanner(summary) {
@@ -2597,7 +2775,7 @@ function renderReviewBanner(summary) {
     <div class="inline-actions">
       ${summary.revDue ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : ""}
       ${summary.errorsDue ? `<button class="button secondary" data-view="erros" type="button">Refazer erros</button>` : ""}
-      ${summary.revOverdue > state.cycleSettings.dailyLimit ? `<button class="button ghost" data-cycle-action="redistributeOverdue" type="button">Redistribuir atrasadas</button>` : ""}
+      ${summary.revOverdue + summary.errOverdue > state.cycleSettings.dailyLimit ? `<button class="button ghost" data-cycle-action="redistributeOverdue" type="button">Redistribuir atrasadas</button>` : ""}
       <button class="mini-button" data-cycle-action="dismissBanner" type="button">Depois</button>
     </div>`;
 }
@@ -2696,6 +2874,16 @@ if (typeof module !== "undefined" && module.exports) {
     cycleRedistributeOverdue,
     cycleConsolidatePlan,
     errorRetestResult,
+    errorStatementKey,
+    errorFindDuplicate,
+    errorRegisterRepeat,
+    cycleNextExamDate,
+    cycleCapGapForExam,
+    cycleScheduledStep,
+    cycleLoadByDate,
+    cycleLevelRadius,
+    cycleLevelGap,
+    cycleLeveledStep,
     errorIsLeech,
     errorDueCompare,
     cycleOpenStudyChain,

@@ -365,12 +365,14 @@ function getTodayInsights(data) {
     });
   }
   const tomorrow = cycleAddDays(data.today, 1);
-  const tomorrowCount = state.revisions.filter((revision) => revision.status === "pending" && revision.dueDate === tomorrow).length;
+  const tomorrowRevisions = state.revisions.filter((revision) => revision.status === "pending" && revision.dueDate === tomorrow).length;
+  const tomorrowErrors = state.errorNotebook.filter((entry) => !entry.mastered && entry.dueDate === tomorrow).length;
+  const tomorrowCount = tomorrowRevisions + tomorrowErrors;
   if (tomorrowCount) {
     const heavy = tomorrowCount > settings.dailyLimit;
     insights.push({
       tone: heavy ? "warn" : "good",
-      title: `Amanhã: ${cyclePlural(tomorrowCount, "revisão", "revisões")}`,
+      title: `Amanhã: ${[tomorrowRevisions ? cyclePlural(tomorrowRevisions, "revisão", "revisões") : "", tomorrowErrors ? cyclePlural(tomorrowErrors, "erro para refazer", "erros para refazer") : ""].filter(Boolean).join(" e ")}`,
       text: heavy ? `Acima do seu limite de ${settings.dailyLimit} por dia. Reserve mais tempo ou ajuste o limite na aba Revisão.` : "Carga tranquila para amanhã.",
       actions: [],
     });

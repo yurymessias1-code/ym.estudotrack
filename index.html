@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261126-historico" />
+    <link rel="stylesheet" href="styles.css?v=20261128-carga" />
   </head>
   <body>
     <div class="app-shell">
@@ -753,6 +753,7 @@
                 </div>
               </div>
               <div id="errorCrumb"></div>
+              <div class="inline-actions hidden" id="errorRedistribute"></div>
               <div class="error-filters">
                 <label class="sr-only" for="errorSearch">Buscar no caderno</label>
                 <input id="errorSearch" type="search" autocomplete="off" placeholder="Buscar no caderno..." />
@@ -950,6 +951,14 @@
             <label class="checkbox-line">
               <input id="cycleAutoStudy" type="checkbox" />
               Agendar revisões automaticamente quando eu registrar estudo (a partir de 10 minutos por assunto no dia)
+            </label>
+            <label class="checkbox-line">
+              <input id="cycleLevelLoad" type="checkbox" />
+              Distribuir revisões e erros nos dias mais leves (a próxima data pode andar 1 dia, ou 2 nos intervalos longos, para o dia com menos itens)
+            </label>
+            <label class="checkbox-line">
+              <input id="cycleExamAdapt" type="checkbox" />
+              Encurtar os intervalos conforme a prova se aproxima (a próxima revisão cai, no máximo, na metade do tempo que falta; nada fica marcado depois da prova)
             </label>
             <label class="checkbox-line">
               <input id="cycleAutoWeak" type="checkbox" />
@@ -2293,14 +2302,14 @@
 
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
-    <script src="merge.js?v=20261126-historico"></script>
-    <script src="caderno.js?v=20261125-nuvem"></script>
-    <script src="ciclo.js?v=20261126-historico"></script>
-    <script src="hoje.js?v=20261126-historico"></script>
+    <script src="merge.js?v=20261128-carga"></script>
+    <script src="caderno.js?v=20261128-carga"></script>
+    <script src="ciclo.js?v=20261128-carga"></script>
+    <script src="hoje.js?v=20261128-carga"></script>
     <script src="push.js?v=20261117-sync"></script>
-    <script src="sessao.js?v=20261126-historico"></script>
-    <script src="mesclar.js?v=20261126-historico"></script>
+    <script src="sessao.js?v=20261128-carga"></script>
+    <script src="mesclar.js?v=20261128-carga"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="app.js?v=20261126-historico"></script>
+    <script src="app.js?v=20261128-carga"></script>
   </body>
 </html>

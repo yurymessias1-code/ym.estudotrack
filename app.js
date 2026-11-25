@@ -6032,6 +6032,12 @@ function sanitizeNoteHTML(html) {
       }
     });
   });
+  // Imagens guardadas à parte (IndexedDB/Storage): fica só o id; o src é preenchido ao exibir.
+  wrapper.querySelectorAll("img[data-img-id]").forEach((img) => {
+    const id = typeof erroSafeId === "function" ? erroSafeId(img.getAttribute("data-img-id")) : "";
+    if (id) img.setAttribute("data-img-id", id);
+    else img.removeAttribute("data-img-id");
+  });
   return wrapper.innerHTML;
 }
 
@@ -6396,6 +6402,27 @@ function getLegalMaterial(id) {
   return state.legalMaterials.find((item) => item.id === id);
 }
 
+/** Id da imagem guardada à parte (content = "ymimg:ID"), ou "". */
+function getLegalImageId(item) {
+  const match = /^ymimg:([\w-]+)$/.exec(String(item?.content || "").trim());
+  return match ? match[1] : "";
+}
+
+/** <img> de um arquivo colado/escolhido: guardado à parte (IndexedDB e nuvem); se o navegador não guardar, vai embutido. */
+async function documentImageHTML(file) {
+  const alt = escapeHTML(file.name || "Imagem");
+  try {
+    const stored = await docImgStoreFile(file);
+    if (stored.stored) return `<img data-img-id="${stored.id}" alt="${alt}" />`;
+    const embedded = await erroBlobToDataURL(stored.blob);
+    if (embedded) return `<img src="${escapeHTML(embedded)}" alt="${alt}" />`;
+  } catch {
+    // cai no jeito antigo abaixo (que também avisa se a imagem for grande demais)
+  }
+  const dataUrl = await readImageFileAsDataURL(file);
+  return `<img src="${escapeHTML(dataUrl)}" alt="${alt}" />`;
+}
+
 function getLegalImageSource(item) {
   const content = String(item?.content || "").trim();
   if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(content)) return content;
@@ -6438,13 +6465,14 @@ function readImageFileAsDataURL(file) {
 
 async function setLegalMaterialImageFromFile(file) {
   try {
-    const dataUrl = await readImageFileAsDataURL(file);
+    const html = await documentImageHTML(file);
+    const id = /data-img-id="([\w-]+)"/.exec(html)?.[1] || "";
     $("#legalMaterialType").value = "image";
     if (!$("#legalMaterialTitle").value.trim()) {
       $("#legalMaterialTitle").value = file.name?.replace(/\.[^.]+$/, "") || "Imagem";
     }
-    $("#legalMaterialContent").value = dataUrl;
-    $("#legalMaterialContentEditor").innerHTML = `<img src="${dataUrl}" alt="${escapeHTML(file.name || "Imagem")}" />`;
+    $("#legalMaterialContent").value = id ? `ymimg:${id}` : /src="([^"]+)"/.exec(html)?.[1].replace(/&amp;/g, "&") || "";
+    $("#legalMaterialContentEditor").innerHTML = html;
     showToast("Imagem carregada. Salve o material para guardar.");
   } catch (error) {
     showToast(error.message || "Não foi possível carregar a imagem.");
@@ -6455,6 +6483,8 @@ function legalMaterialContentForEditor(content, type) {
   const raw = String(content || "").trim();
   if (!raw) return "";
   if (type === "image") {
+    const imageId = getLegalImageId({ content: raw });
+    if (imageId) return `<img data-img-id="${imageId}" alt="Imagem" />`;
     const src = getLegalImageSource({ content: raw });
     return src ? `<img src="${escapeHTML(src)}" alt="Imagem" />` : "";
   }
@@ -6467,7 +6497,10 @@ function legalMaterialContentForEditor(content, type) {
 function getLegalMaterialFormContent(type) {
   const editor = $("#legalMaterialContentEditor");
   if (type === "image") {
-    const imageSource = editor?.querySelector("img")?.getAttribute("src") || $("#legalMaterialContent").value.trim();
+    const image = editor?.querySelector("img");
+    const imageId = erroSafeId(image?.getAttribute("data-img-id"));
+    if (imageId) return `ymimg:${imageId}`;
+    const imageSource = image?.getAttribute("src") || $("#legalMaterialContent").value.trim();
     return imageSource.trim();
   }
   const html = sanitizeNoteHTML(editor?.innerHTML.trim() || "");
@@ -6529,8 +6562,7 @@ async function handleRichDocumentPaste(event, options = {}) {
       return;
     }
     try {
-      const dataUrl = await readImageFileAsDataURL(file);
-      insertHTMLIntoEditor(editor, `<img src="${escapeHTML(dataUrl)}" alt="${escapeHTML(file.name || "Imagem")}" />`);
+      insertHTMLIntoEditor(editor, await documentImageHTML(file));
       showToast("Imagem colada no documento.");
     } catch (error) {
       showToast(error.message || "Não foi possível colar a imagem.");
@@ -6863,7 +6895,12 @@ async function copyLegalMaterial(id, mode = "rich") {
     }
 
     if (item.type === "image") {
-      const src = getLegalImageSource(item);
+      const imageId = getLegalImageId(item);
+      let src = getLegalImageSource(item);
+      if (imageId) {
+        const blob = await erroImgGet(imageId);
+        src = blob ? await erroBlobToDataURL(blob) : "";
+      }
       if (!src) {
         showToast("Imagem sem arquivo válido.");
         return;
@@ -6881,7 +6918,7 @@ async function copyLegalMaterial(id, mode = "rich") {
   }
 }
 
-function downloadLegalMaterial(id) {
+async function downloadLegalMaterial(id) {
   const item = getLegalMaterial(id);
   if (!item) return;
   const baseName = slugifyFileName(item.title, "material");
@@ -6894,6 +6931,18 @@ function downloadLegalMaterial(id) {
   }
 
   if (item.type === "image") {
+    const imageId = getLegalImageId(item);
+    if (imageId) {
+      const blob = await erroImgGet(imageId);
+      if (!blob) {
+        showToast("Imagem indisponível agora (precisa de internet e de login).");
+        return;
+      }
+      const extension = /jpe?g/.test(blob.type) ? "jpg" : /png/.test(blob.type) ? "png" : "webp";
+      downloadBlobFile(blob, `${baseName}.${extension}`);
+      showToast("Imagem baixada.");
+      return;
+    }
     const src = getLegalImageSource(item);
     if (!src) {
       showToast("Imagem sem arquivo válido.");
@@ -7056,11 +7105,12 @@ function renderLegalMaterialTable(content) {
 }
 
 function renderLegalMaterialImage(item) {
-  const src = getLegalImageSource(item);
-  if (!src) return `<p class="legal-material-content">Imagem sem arquivo válido.</p>`;
+  const imageId = getLegalImageId(item);
+  const src = imageId ? "" : getLegalImageSource(item);
+  if (!imageId && !src) return `<p class="legal-material-content">Imagem sem arquivo válido.</p>`;
   return `
     <figure class="legal-material-image">
-      <img src="${escapeHTML(src)}" alt="${escapeHTML(item.title || "Imagem")}" loading="lazy" />
+      <img ${imageId ? `data-img-id="${imageId}"` : `src="${escapeHTML(src)}"`} alt="${escapeHTML(item.title || "Imagem")}" loading="lazy" />
       ${item.reference ? `<figcaption>${escapeHTML(item.reference)}</figcaption>` : ""}
     </figure>
   `;
@@ -8730,6 +8780,7 @@ function attachEvents() {
     const { subjectId, topicId } = resolveSubjectTopic("#legalMaterialSubject", "#legalMaterialTopic");
     const materialType = $("#legalMaterialType").value;
     const existing = state.legalMaterials.find((item) => item.id === state.ui.activeLegalMaterialEditId);
+    const releasedImages = existing ? docImgIdsOf(existing) : [];
     const material = normalizeLegalMaterial({
       id: existing?.id || uid(),
       type: materialType,
@@ -8748,6 +8799,7 @@ function attachEvents() {
       state.legalMaterials.push(material);
     }
     saveState();
+    if (releasedImages.length) docImgRelease(releasedImages); // imagem trocada ou tirada do documento
     clearFormDraft("legalMaterial");
     resetLegalMaterialForm();
     render();
@@ -9581,11 +9633,13 @@ function handleAction(action) {
 
   if (type === "deleteCase") {
     const court = action.dataset.court;
+    const releasedImages = docImgIdsOf((state.cases[court] || []).find((item) => item.id === id));
     state.cases[court] = state.cases[court].filter((item) => item.id !== id);
     if (state.ui.activeCaseEditId === id && (!state.ui.activeCaseEditCourt || state.ui.activeCaseEditCourt === court)) {
       resetCaseForm();
     }
     saveState();
+    docImgRelease(releasedImages);
     renderCases();
     showToast("Jurisprudência removida.");
     return;
@@ -9621,9 +9675,11 @@ function handleAction(action) {
 
   if (type === "deleteLegalMaterial") {
     if (!window.confirm("Excluir este material?")) return;
+    const releasedImages = docImgIdsOf(state.legalMaterials.find((item) => item.id === id));
     state.legalMaterials = state.legalMaterials.filter((item) => item.id !== id);
     if (state.ui.activeLegalMaterialEditId === id) resetLegalMaterialForm();
     saveState();
+    docImgRelease(releasedImages);
     renderCases();
     showToast("Material removido.");
     return;

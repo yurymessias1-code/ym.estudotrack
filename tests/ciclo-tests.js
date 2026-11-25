@@ -5,6 +5,7 @@ const vm = require("vm");
 
 const code = fs.readFileSync(path.resolve(__dirname, "..", "ciclo.js"), "utf8");
 const ctx = vm.createContext({ console, TextEncoder });
+vm.runInContext(fs.readFileSync(path.resolve(__dirname, "..", "caderno.js"), "utf8"), ctx); // o ciclo usa as constantes e funções do caderno
 vm.runInContext(code, ctx);
 
 const {
@@ -60,10 +61,14 @@ test("revisão: 'hard' repete a etapa com metade do intervalo (mínimo 1 dia)", 
   assert.strictEqual(cycleReviewStep(0, "hard", [1, 7]).gap, 1);
 });
 
-test("revisão: 'forgot' volta para a primeira etapa", () => {
-  const step = cycleReviewStep(3, "forgot", [1, 7, 30, 60]);
-  assert.strictEqual(step.stage, 0);
-  assert.strictEqual(step.gap, 1);
+test("revisão: 'forgot' desce duas etapas, sem apagar todo o progresso", () => {
+  const show = (stage, intervals = [1, 7, 30, 60]) => JSON.stringify(cycleReviewStep(stage, "forgot", intervals));
+  assert.strictEqual(show(3), JSON.stringify({ done: false, stage: 1, gap: 7 }), "item de 60 dias volta para 7, não para 1");
+  assert.strictEqual(show(2), JSON.stringify({ done: false, stage: 0, gap: 1 }));
+  assert.strictEqual(show(1), JSON.stringify({ done: false, stage: 0, gap: 1 }));
+  assert.strictEqual(show(0), JSON.stringify({ done: false, stage: 0, gap: 1 }));
+  assert.strictEqual(show(4, [1, 3, 7, 15, 30]), JSON.stringify({ done: false, stage: 2, gap: 7 }));
+  assert.strictEqual(show(9, [1, 7]), JSON.stringify({ done: false, stage: 0, gap: 1 }), "etapa fora da lista não quebra");
 });
 
 test("revisão: passar da última etapa encerra a cadeia", () => {
@@ -444,7 +449,8 @@ test("caderno de erros: prints normalizados (só metadados, ids seguros, no máx
 vm.runInContext(
   `function getTopic(id) { return (state.topics || []).find((t) => t.id === id); }
    function getSubject(id) { return (state.subjects || []).find((s) => s.id === id); }
-   function getEntrySubjectId(entry) { return entry.subjectId || (getTopic(entry.topicId) || {}).subjectId || ""; }`,
+   function getEntrySubjectId(entry) { return entry.subjectId || (getTopic(entry.topicId) || {}).subjectId || ""; }
+   function normalizeHashtags(value) { return String(value || "").split(/\\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean); }`,
   ctx
 );
 
@@ -602,6 +608,249 @@ test("caderno de erros: reforço do assunto não duplica e exige matéria", () =
   assert.strictEqual(st.revisions.length, 1);
   const orphan = normalizeErrorEntry({ id: "e2", statement: "q" });
   assert.ok(ctx.errorCreateReinforcement(orphan).error);
+});
+
+
+/* ---------- prova (item 3), desce etapas (item 2) e erro repetido (item 4) ---------- */
+
+test("prova: o intervalo encurta para no máximo metade do tempo que falta", () => {
+  const cap = ctx.cycleCapGapForExam;
+  assert.strictEqual(cap(30, "2026-11-01", "2026-12-01"), 15, "30 dias para a prova: no máximo 15");
+  assert.strictEqual(cap(7, "2026-11-01", "2026-12-31"), 7, "prova longe: não muda");
+  assert.strictEqual(cap(60, "2026-11-01", "2026-11-03"), 1, "2 dias: revisão na véspera");
+  assert.strictEqual(cap(60, "2026-11-01", "2026-11-02"), 1, "prova amanhã: o mínimo é 1 dia");
+  assert.strictEqual(cap(30, "2026-11-01", "2026-11-01"), 30, "prova hoje ou passada: sem ajuste");
+  assert.strictEqual(cap(30, "2026-11-10", "2026-11-01"), 30);
+  assert.strictEqual(cap(30, "2026-11-01", ""), 30, "sem prova: sem ajuste");
+  // aplicando em sequência, as revisões ficam cada vez mais juntas: passa pela véspera e nada fica depois da prova
+  let today = "2026-11-01";
+  const exam = "2026-12-01";
+  const days = [];
+  while (today < exam) {
+    today = cycleAddDays(today, cap(60, today, exam));
+    days.push(today);
+  }
+  assert.ok(days.includes(cycleAddDays(exam, -1)), "tem revisão na véspera: " + days.join(","));
+  assert.ok(days.every((day) => day <= exam), "nenhuma revisão depois da prova: " + days.join(","));
+  assert.ok(days.length >= 5 && days.length <= 8, "poucas revisões, cada vez mais próximas: " + days.join(","));
+});
+
+test("prova: usa a prova mais próxima que vale para a matéria", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  st.competitions = [
+    { id: "c1", date: ctx.cycleAddDays(today, 40), subjectIds: ["s1"] },
+    { id: "c2", date: ctx.cycleAddDays(today, 10), subjectIds: ["s2"] },
+    { id: "c3", date: ctx.cycleAddDays(today, 90), subjectIds: [] }, // sem matérias marcadas: vale para todas
+    { id: "c4", date: ctx.cycleAddDays(today, -3), subjectIds: ["s1"] }, // já passou
+    { id: "c5", date: "", subjectIds: ["s1"] },
+  ];
+  assert.strictEqual(ctx.cycleNextExamDate("s1", today), ctx.cycleAddDays(today, 40));
+  assert.strictEqual(ctx.cycleNextExamDate("s2", today), ctx.cycleAddDays(today, 10));
+  assert.strictEqual(ctx.cycleNextExamDate("zzz", today), ctx.cycleAddDays(today, 90), "matéria fora das provas: só a que vale para todas");
+  assert.strictEqual(ctx.cycleNextExamDate("", today), ctx.cycleAddDays(today, 10), "sem matéria: a mais próxima de todas");
+  st.competitions = [];
+  assert.strictEqual(ctx.cycleNextExamDate("s1", today), "");
+});
+
+test("prova: revisão e erro usam o intervalo ajustado, e dá para desligar", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  st.cycleSettings.levelLoad = false; // aqui só a prova está em teste
+  st.competitions = [{ id: "c1", date: ctx.cycleAddDays(today, 20), subjectIds: ["s1"] }];
+  st.revisions = [normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 2, dueDate: today })];
+  const step = ctx.completeRevision("r1", "ok", "");
+  assert.strictEqual(step.gap, 10, "próximo intervalo seria 60; faltam 20 dias para a prova");
+  assert.strictEqual(st.revisions[0].dueDate, ctx.cycleAddDays(today, 10));
+  assert.strictEqual(step.examDate, ctx.cycleAddDays(today, 20));
+
+  st.errorNotebook = [normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q", stage: 3, dueDate: today })];
+  const errStep = ctx.retestErrorEntry("e1", "ok"); // intervalo da etapa 4 seria 30
+  assert.strictEqual(errStep.gap, 10);
+  assert.strictEqual(st.errorNotebook[0].dueDate, ctx.cycleAddDays(today, 10));
+
+  st.cycleSettings.examAdapt = false;
+  st.revisions = [normalizeRevision({ id: "r2", kind: "study", subjectId: "s1", topicId: "t1", stage: 2, dueDate: today })];
+  assert.strictEqual(ctx.completeRevision("r2", "ok", "").gap, 60, "com a opção desligada, nada muda");
+  assert.strictEqual(normalizeCycleSettings({}).examAdapt, true, "ligada por padrão");
+  assert.strictEqual(normalizeCycleSettings({ examAdapt: false }).examAdapt, false);
+});
+
+test("errar de novo desce etapas na revisão e no caderno", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  st.cycleSettings.levelLoad = false; // aqui só a descida de etapas está em teste
+  st.revisions = [normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 3, dueDate: today })];
+  const step = ctx.completeRevision("r1", "forgot", "");
+  assert.strictEqual(st.revisions[0].stage, 1);
+  assert.strictEqual(step.gap, 7);
+  assert.strictEqual(st.revisions[0].dueDate, ctx.cycleAddDays(today, 7));
+  st.errorNotebook = [normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q", stage: 4, dueDate: today })];
+  ctx.retestErrorEntry("e1", "forgot");
+  assert.strictEqual(st.errorNotebook[0].stage, 2, "erro no estágio 4 desce para o 2, não para o 0");
+  assert.strictEqual(st.errorNotebook[0].dueDate, ctx.cycleAddDays(today, 7));
+  assert.strictEqual(st.errorNotebook[0].lapses, 1);
+});
+
+test("erro repetido: reconhece o mesmo enunciado ignorando acento, pontuação e maiúsculas", () => {
+  const key = ctx.errorStatementKey;
+  assert.strictEqual(key("  A Súmula 568 do STJ,  permite…  decisão monocrática?! "), key("a sumula 568 do stj permite decisao monocratica"));
+  const entries = [
+    normalizeErrorEntry({ id: "a", subjectId: "s1", statement: "A súmula 568 do STJ permite decisão monocrática do relator." }),
+    normalizeErrorEntry({ id: "b", subjectId: "s1", statement: "curto" }),
+  ];
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "A SUMULA 568 do STJ permite decisao monocratica do relator" }).id, "a");
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "A súmula 568 do STJ permite decisão monocrática do relator." }, "a"), null, "ignora o próprio registro");
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "curto" }), null, "enunciado curto demais não é comparado");
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "" }), null);
+  assert.strictEqual(ctx.errorFindDuplicate(entries, { statement: "Outro enunciado bem diferente, com bastante texto." }), null);
+});
+
+test("erro repetido: soma na contagem, reabre o dominado e junta o que veio no novo registro", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  const existing = normalizeErrorEntry({
+    id: "a",
+    subjectId: "s1",
+    statement: "A súmula 568 do STJ permite decisão monocrática do relator.",
+    mastered: true,
+    stage: 4,
+    lapses: 1,
+    attempts: 3,
+    rule: "",
+    correctAnswer: "",
+    images: [{ id: "i1" }, { id: "i2" }, { id: "i3" }, { id: "i4" }, { id: "i5" }],
+    notes: "<p>nota velha</p>",
+    tags: "#stj",
+  });
+  st.errorNotebook = [existing];
+  const incoming = normalizeErrorEntry({
+    statement: "a sumula 568 do STJ permite decisao monocratica do relator",
+    rule: "Súmula 568: pode, quando houver entendimento dominante.",
+    correctAnswer: "Certo",
+    images: [{ id: "i5" }, { id: "n1" }, { id: "n2" }],
+    notes: "<p>nota nova</p>",
+    tags: "#penal #stj",
+  });
+  const { entry, droppedImages } = ctx.errorRegisterRepeat(existing, incoming, today);
+  assert.strictEqual(st.errorNotebook.length, 1, "não duplicou");
+  assert.strictEqual(entry.lapses, 2);
+  assert.strictEqual(entry.attempts, 4);
+  assert.strictEqual(entry.mastered, false, "voltou para a fila");
+  assert.strictEqual(entry.stage, 2, "desceu duas etapas");
+  assert.strictEqual(entry.lastResult, "wrong");
+  assert.strictEqual(entry.dueDate, ctx.cycleAddDays(today, 7));
+  assert.strictEqual(entry.rule, incoming.rule, "campo vazio recebe o novo");
+  assert.strictEqual(entry.correctAnswer, "Certo");
+  assert.strictEqual(JSON.stringify(entry.images.map((image) => image.id)), JSON.stringify(["i1", "i2", "i3", "i4", "i5", "n1"]), "print repetido não entra de novo; respeita o limite de 6");
+  assert.strictEqual(JSON.stringify(droppedImages.map((image) => image.id)), JSON.stringify(["n2"]), "o que não coube é devolvido para ser apagado");
+  assert.ok(/nota velha/.test(entry.notes) && /nota nova/.test(entry.notes), "anotações juntas: " + entry.notes);
+  assert.strictEqual(JSON.stringify([...entry.tags].sort()), JSON.stringify(["penal", "stj"]));
+  // quem já tinha regra mantém a sua
+  const kept = ctx.errorRegisterRepeat(normalizeErrorEntry({ id: "z", subjectId: "s1", statement: "x".repeat(30), rule: "minha regra" }), normalizeErrorEntry({ statement: "x".repeat(30), rule: "outra" }), today).entry;
+  assert.strictEqual(kept.rule, "minha regra");
+});
+
+
+/* ---------- carga do dia (item 5): nivelar ao agendar e redistribuir erros ---------- */
+
+test("carga do dia: o dia mais vazio perto do previsto ganha, e só se for realmente mais vazio", () => {
+  const today = "2026-11-10";
+  const day = (n) => cycleAddDays(today, n);
+  const level = (gap, loads, options) => ctx.cycleLevelGap(gap, Object.fromEntries(Object.entries(loads).map(([n, count]) => [day(Number(n)), count])), today, options);
+  assert.strictEqual(level(1, { 1: 9, 2: 0 }), 1, "intervalo de 1 dia nunca anda");
+  assert.strictEqual(level(2, { 2: 9, 3: 0, 1: 0 }), 2, "nem o de 2 dias");
+  assert.strictEqual(level(7, { 6: 3, 7: 3, 8: 1 }), 8, "o dia seguinte está mais leve");
+  assert.strictEqual(level(7, { 6: 2, 7: 2, 8: 2 }), 7, "empate: fica o previsto");
+  assert.strictEqual(level(7, { 6: 1, 7: 3, 8: 1 }), 6, "empate entre vizinhos: o mais cedo");
+  assert.strictEqual(level(7, { 6: 5, 7: 1, 8: 5 }), 7, "o previsto já é o mais leve");
+  assert.strictEqual(level(7, { 5: 0, 6: 4, 7: 4, 8: 4, 9: 0 }), 7, "até 14 dias só anda 1 dia: os dias 5 e 9 vazios não valem");
+  assert.strictEqual(level(30, { 28: 0, 29: 5, 30: 5, 31: 5, 32: 2 }), 28, "intervalos longos andam até 2 dias");
+  assert.strictEqual(level(10, { 9: 2, 10: 4, 11: 0 }, { maxGap: 10 }), 9, "com limite (prova), não passa dele");
+  assert.strictEqual(level(3, {}), 3, "sem carga nenhuma, nada muda");
+  assert.strictEqual(ctx.cycleLevelRadius(2), 0);
+  assert.strictEqual(ctx.cycleLevelRadius(3), 1);
+  assert.strictEqual(ctx.cycleLevelRadius(14), 1);
+  assert.strictEqual(ctx.cycleLevelRadius(15), 2);
+});
+
+test("carga do dia: conta revisões abertas e erros não dominados, de hoje em diante", () => {
+  const today = "2026-11-10";
+  const revisions = [
+    normalizeRevision({ id: "a", kind: "study", subjectId: "s1", dueDate: "2026-11-12" }),
+    normalizeRevision({ id: "b", kind: "study", subjectId: "s1", dueDate: "2026-11-12" }),
+    normalizeRevision({ id: "c", kind: "study", subjectId: "s1", dueDate: "2026-11-12", status: "done" }),
+    normalizeRevision({ id: "d", kind: "study", subjectId: "s1", dueDate: "2026-11-01" }),
+  ];
+  const errors = [
+    normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q", dueDate: "2026-11-12" }),
+    normalizeErrorEntry({ id: "e2", subjectId: "s1", statement: "q", dueDate: "2026-11-12", mastered: true }),
+    normalizeErrorEntry({ id: "e3", subjectId: "s1", statement: "q", dueDate: "2026-11-13" }),
+  ];
+  assert.strictEqual(JSON.stringify(ctx.cycleLoadByDate(revisions, errors, today)), JSON.stringify({ "2026-11-12": 3, "2026-11-13": 1 }));
+  assert.strictEqual(ctx.cycleLoadByDate(revisions, errors, today, { revisionId: "a", errorId: "e1" })["2026-11-12"], 1, "o item reagendado não conta contra si mesmo");
+});
+
+test("carga do dia: revisão e erro são agendados no dia mais leve; dá para desligar", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  const due = (n) => ctx.cycleAddDays(today, n);
+  // dia 7 já tem 2 revisões e 1 erro; o dia 6 tem 1; o dia 8 está vazio
+  st.revisions = [
+    normalizeRevision({ id: "x1", kind: "study", subjectId: "s2", topicId: "t2", dueDate: due(7) }),
+    normalizeRevision({ id: "x2", kind: "study", subjectId: "s2", topicId: "t2", dueDate: due(7) }),
+    normalizeRevision({ id: "x3", kind: "manual", subjectId: "s2", dueDate: due(6) }),
+    normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 0, dueDate: today }),
+  ];
+  st.errorNotebook = [
+    normalizeErrorEntry({ id: "ex", subjectId: "s2", statement: "outro", dueDate: due(7) }),
+    normalizeErrorEntry({ id: "e1", subjectId: "s1", statement: "q", stage: 1, dueDate: today }),
+  ];
+  const step = ctx.completeRevision("r1", "ok", ""); // etapa 1: intervalo de 7 dias
+  assert.strictEqual(step.leveled, true);
+  assert.strictEqual(step.gap, 8, "o dia 8 estava vazio");
+  assert.strictEqual(st.revisions[3].dueDate, due(8));
+
+  const errStep = ctx.retestErrorEntry("e1", "ok"); // etapa 2: intervalo de 7 dias; agora o dia 8 tem 1 item (a revisão)
+  assert.strictEqual(st.errorNotebook[1].dueDate, due(errStep.gap));
+  assert.ok(errStep.gap === 6 || errStep.gap === 8, "foi para um vizinho");
+  assert.ok([due(6), due(8)].includes(st.errorNotebook[1].dueDate));
+
+  st.cycleSettings.levelLoad = false;
+  st.revisions[3] = normalizeRevision({ id: "r2", kind: "study", subjectId: "s1", topicId: "t1", stage: 0, dueDate: today });
+  assert.strictEqual(ctx.completeRevision("r2", "ok", "").gap, 7, "desligado: sempre o dia previsto");
+  assert.strictEqual(normalizeCycleSettings({}).levelLoad, true, "ligada por padrão");
+  assert.strictEqual(normalizeCycleSettings({ levelLoad: false }).levelLoad, false);
+});
+
+test("carga do dia: a prova manda mais que o nivelamento (não passa do dia limite)", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  st.competitions = [{ id: "c1", date: ctx.cycleAddDays(today, 20), subjectIds: ["s1"] }];
+  st.revisions = [normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 2, dueDate: today })];
+  // o dia limite (10) está cheio e o 11 vazio: não pode ir para o 11
+  st.errorNotebook = Array.from({ length: 4 }, (_, i) => normalizeErrorEntry({ id: `c${i}`, subjectId: "s2", statement: "q", dueDate: ctx.cycleAddDays(today, 10) }));
+  const step = ctx.completeRevision("r1", "ok", "");
+  assert.ok(step.gap <= 10, "limite da prova: " + step.gap);
+});
+
+test("redistribuir atrasados: erros entram na conta e no limite por dia", () => {
+  const today = "2026-11-12";
+  const rev = (id, dueDate, status = "pending") => normalizeRevision({ id, kind: "study", subjectId: "s1", dueDate, status });
+  const err = (id, dueDate, extra = {}) => normalizeErrorEntry({ id, subjectId: "s1", statement: "enunciado " + id, dueDate, ...extra });
+  const revisions = [rev("futura", "2026-11-12"), rev("velha", "2026-11-01")];
+  const errors = [err("e1", "2026-11-02"), err("e2", "2026-11-03"), err("dom", "2026-11-04", { mastered: true }), err("hoje", "2026-11-12")];
+  const changes = ctx.cycleRedistributeOverdue(revisions, today, 2, errors);
+  assert.strictEqual(
+    JSON.stringify(changes),
+    JSON.stringify([
+      { id: "velha", dueDate: "2026-11-13" }, // dia 12 já tem 2 (a revisão e o erro de hoje)
+      { id: "e1", dueDate: "2026-11-13", kind: "error" },
+      { id: "e2", dueDate: "2026-11-14", kind: "error" },
+    ]),
+    "mais antigos primeiro, revisões e erros dividem o mesmo limite, dominado não entra"
+  );
+  assert.strictEqual(JSON.stringify(ctx.cycleRedistributeOverdue(revisions, today, 2)), JSON.stringify([{ id: "velha", dueDate: "2026-11-12" }]), "sem a lista de erros, funciona como antes (só a revisão futura ocupa o dia 12)");
 });
 
 console.log(`ciclo-tests: ${passed} testes passaram.`);

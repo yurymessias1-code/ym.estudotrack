@@ -100,3 +100,21 @@ Esse teste confere a sintaxe do `app.js`, telas principais, acoes de conta, sele
 - **Site:** aba Conta, **Versões na nuvem** → "Ver versões salvas" → "Voltar a esta versão". Antes de trocar, o app guarda uma cópia do que está aberto no cofre do navegador e no histórico da nuvem. A volta é de verdade: o que a versão não tem sai também dos outros aparelhos (vira exclusão lembrada) e o que ela tem e já tinha sido excluído volta (`mergeCarryForwardForRestore` em `merge.js`). Importar um backup em arquivo continua se juntando ao que há na nuvem.
 - **Excluir meus dados** também apaga o histórico da conta.
 - **Testes:** `merge-tests` (22) e o roteiro `tests/e2e/historico.e2e.js` (dois aparelhos contra o Supabase falso com a tabela de histórico).
+
+## Imagens fora do estado, intervalos mais justos, prova e erro repetido (novembro/2026)
+
+- **Imagens dos documentos (jurisprudências, leis/tabelas, fontes, anotações, flashcards):** não ficam mais em base64 dentro do estado. O arquivo (reduzido para no máximo 1600 px, webp/jpeg) vai para o IndexedDB e para o bucket `erro-prints` (o mesmo dos prints do caderno) e o texto guarda só `<img data-img-id="ID">`; o material de lei/tabela do tipo imagem guarda `ymimg:ID`. A tela carrega as imagens sozinha (`docImgObserve`). Backup em arquivo, "excluir meus dados" e sincronização já enxergam essas imagens (`erroAllPrintIds`).
+- **Imagens antigas:** com a conta online, o app move sozinho as imagens em base64 que já estão no estado (`docImgMigrateState`, a cada rodada de sincronização). A troca só acontece depois de o envio ser confirmado; se o Storage falhar, a imagem continua onde estava. O id vem do conteúdo (SHA-256), então dois aparelhos chegam ao mesmo id e a mesma imagem usada em dois lugares vale um arquivo só.
+- **Excluir ou trocar** um material de lei/tabela ou uma jurisprudência solta as imagens que ninguém mais usa (aparelho e nuvem). Imagens de anotações, fontes e flashcards não são apagadas da nuvem quando o item é excluído (ficam órfãs, ocupando pouco espaço).
+- **Errar não zera tudo:** "esqueci" (revisões) e "errei de novo" (caderno) descem 2 etapas (`CYCLE_LAPSE_DROP`) em vez de voltar à primeira. Um item de 60 dias volta para 7 dias, não para 1.
+- **Data da prova:** com a opção "Encurtar os intervalos conforme a prova se aproxima" (ligada por padrão, em Revisão → Intervalos do ciclo), a próxima revisão ou refação cai, no máximo, na metade do tempo que falta para a prova mais próxima que vale para a matéria (concursos sem matérias marcadas valem para todas). Com 1 dia sobrando, cai no dia da prova; nada é marcado depois dela. Os botões e avisos já mostram o intervalo ajustado.
+- **Erro repetido:** ao salvar um erro cujo enunciado (sem acento, pontuação e maiúsculas, mínimo de 25 caracteres) já existe, o app pergunta se soma mais um erro no registro existente (reabre se estava dominado, desce 2 etapas, junta prints até o limite de 6, anotações e tags e preenche campos vazios) ou se salva como novo.
+- **Testes:** `ciclo-tests` (53), `caderno-tests` (imagens de documentos) e os roteiros `tests/e2e/imagens.e2e.js` e `tests/e2e/protecao.e2e.js` (agora também erro repetido e data da prova).
+
+## Carga do dia (novembro/2026)
+
+- **Nivelar ao agendar:** ao marcar a próxima revisão ou refação, o app olha os dias perto do previsto (nada nos intervalos de 1 e 2 dias, 1 dia a mais ou a menos até 14 dias, 2 dias nos mais longos) e escolhe o que tem menos itens. A carga do dia conta revisões abertas e erros não dominados. Só troca se o outro dia for realmente mais vazio; em empate fica o previsto e, entre vizinhos iguais, o mais cedo. A data da prova continua mandando: o nivelamento nunca passa do dia limite. Os botões e avisos já mostram o dia nivelado ("ajustado para um dia mais leve").
+- **Opção:** Revisão → Intervalos do ciclo → "Distribuir revisões e erros nos dias mais leves" (ligada por padrão).
+- **Redistribuir atrasados** agora inclui os erros do caderno: revisões e erros dividem o mesmo limite por dia, os mais antigos primeiro. Há botão também na tela do Caderno de erros, e o aviso do topo conta os dois.
+- **Aba Hoje:** "Amanhã" passou a somar os erros que vencem amanhã às revisões.
+- **Testes:** `ciclo-tests` (58) e `tests/e2e/protecao.e2e.js`.

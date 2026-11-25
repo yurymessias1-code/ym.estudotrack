@@ -167,6 +167,77 @@ const auxRecords = (page) =>
   assert.ok(!(await page.isVisible('[data-cycle-action="consolidateRevisions"]')), "botão some depois");
   assert.strictEqual(await page.evaluate(() => { syncAutoRevisions(); return state.revisions.filter((r) => r.kind === "study").length; }), 1, "e não volta a criar repetidas");
 
+  // 9) erro repetido: pergunta e soma na contagem em vez de duplicar
+  await page.evaluate(() => { state.errorNotebook = []; saveState(); setView("erros"); errorFormSet(true); });
+  const submitError = async (statement) => {
+    await page.evaluate((text) => {
+      document.querySelector("#errorSubject").value = "s1";
+      document.querySelector("#errorStatement").value = text;
+      document.querySelector("#errorForm").requestSubmit();
+    }, statement);
+    await page.waitForTimeout(400);
+  };
+  await submitError("A súmula 568 do STJ permite decisão monocrática do relator.");
+  assert.strictEqual(await page.evaluate(() => state.errorNotebook.length), 1);
+  const dialogsBefore = dialogs.length;
+  answer = true;
+  await submitError("a SUMULA 568 do stj permite decisao monocratica do relator");
+  assert.strictEqual(await page.evaluate(() => state.errorNotebook.length), 1, "mesmo enunciado: não duplica");
+  assert.strictEqual(await page.evaluate(() => state.errorNotebook[0].lapses), 1, "e soma um erro");
+  assert.ok(/já estar no caderno/.test(dialogs[dialogsBefore] || ""), "pergunta antes: " + dialogs[dialogsBefore]);
+  answer = false;
+  await submitError("A súmula 568 do STJ permite decisão monocrática do relator!");
+  assert.strictEqual(await page.evaluate(() => state.errorNotebook.length), 2, "recusando a soma, salva como registro novo");
+  answer = true;
+
+  // 10) data da prova: a opção encurta o intervalo e pode ser desligada na tela
+  await page.evaluate(() => {
+    const day = new Date();
+    day.setDate(day.getDate() + 20);
+    state.competitions = [{ id: "cp1", name: "Prova teste", date: day.toLocaleDateString("sv"), subjectIds: ["s1"] }];
+    saveState();
+    renderCycle();
+  });
+  assert.strictEqual(await page.evaluate(() => cycleScheduledStep(2, "ok", [1, 7, 30, 60], "s1").gap), 10, "faltam 20 dias: o intervalo de 60 vira 10");
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleExamAdapt").checked), true, "opção ligada por padrão");
+  await page.evaluate(() => {
+    document.querySelector("#cycleExamAdapt").checked = false;
+    document.querySelector("#cycleSettingsForm").requestSubmit();
+  });
+  assert.strictEqual(await page.evaluate(() => state.cycleSettings.examAdapt), false);
+  assert.strictEqual(await page.evaluate(() => cycleScheduledStep(2, "ok", [1, 7, 30, 60], "s1").gap), 60, "desligada: o intervalo volta ao normal");
+
+  // 11) carga do dia: erros atrasados entram na redistribuição e no limite por dia
+  await page.evaluate(() => {
+    const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString("sv"); };
+    state.cycleSettings.dailyLimit = 2;
+    state.revisions = [];
+    state.errorNotebook = [1, 2, 3].map((i) => normalizeErrorEntry({ id: `od${i}`, subjectId: "s1", statement: `Enunciado atrasado número ${i} com texto suficiente`, dueDate: day(-i) }));
+    saveState();
+    setView("erros");
+  });
+  await page.waitForTimeout(250);
+  assert.ok(await page.isVisible("#errorRedistribute button"), "botão de redistribuir aparece na tela de erros");
+  assert.ok(/3 erros atrasados/.test(await page.textContent("#errorRedistribute")));
+  await page.click("#errorRedistribute button");
+  await page.waitForTimeout(250);
+  const spread = await page.evaluate(() => {
+    const today = cycleToday();
+    const perDay = {};
+    state.errorNotebook.forEach((entry) => (perDay[entry.dueDate] = (perDay[entry.dueDate] || 0) + 1));
+    return { overdue: state.errorNotebook.filter((entry) => entry.dueDate < today).length, max: Math.max(...Object.values(perDay)), oldestFirst: state.errorNotebook.find((entry) => entry.id === "od3").dueDate === today };
+  });
+  assert.strictEqual(spread.overdue, 0, "nenhum erro continua atrasado");
+  assert.ok(spread.max <= 2, "no máximo 2 por dia (o limite)");
+  assert.ok(spread.oldestFirst, "o mais antigo vem primeiro");
+  assert.ok(!(await page.isVisible("#errorRedistribute button")), "botão some depois");
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleLevelLoad").checked), true, "nivelar a carga: ligado por padrão");
+  await page.evaluate(() => {
+    document.querySelector("#cycleLevelLoad").checked = false;
+    document.querySelector("#cycleSettingsForm").requestSubmit();
+  });
+  assert.strictEqual(await page.evaluate(() => state.cycleSettings.levelLoad), false, "a opção é salva");
+
   assert.strictEqual(errors.length, 0, "erros de JS: " + errors.join(" | "));
   console.log("ERROS JS: nenhum");
   console.log("E2E PROTECAO OK");

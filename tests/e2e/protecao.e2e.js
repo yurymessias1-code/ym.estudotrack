@@ -295,6 +295,123 @@ const auxRecords = (page) =>
   assert.strictEqual(dialogs.length, dialogsBeforeMerge, "sem pergunta extra: o clique já foi a confirmação");
   assert.ok(!(await page.isVisible("#errorDuplicateWarning")), "formulário limpo, aviso some");
 
+  // 14) acertos no chute e nota da revisão pelas questões
+  await page.evaluate(() => {
+    state.questionLogs = [];
+    state.revisions = [];
+    state.errorNotebook = [];
+    state.studyLogs = [];
+    saveState();
+    setView("questoes");
+  });
+  await page.waitForTimeout(250);
+  const launch = (correct, wrong, guessed) =>
+    page.evaluate(({ correct, wrong, guessed }) => {
+      document.querySelector("#questionSubject").value = "s1";
+      document.querySelector("#questionSubject").dispatchEvent(new Event("change"));
+      document.querySelector("#questionTopic").value = "t1";
+      document.querySelector("#questionCorrect").value = correct;
+      document.querySelector("#questionWrong").value = wrong;
+      document.querySelector("#questionGuessed").value = guessed;
+      document.querySelector("#questionForm").requestSubmit();
+    }, { correct, wrong, guessed });
+  await launch(10, 0, 7);
+  await launch(4, 1, 99);
+  const logs = await page.evaluate(() => state.questionLogs.map((log) => ({ c: log.correct, w: log.wrong, g: log.guessed })));
+  assert.strictEqual(JSON.stringify(logs), JSON.stringify([{ c: 10, w: 0, g: 7 }, { c: 4, w: 1, g: 4 }]), "chutes ficam salvos e nunca passam dos acertos");
+  assert.ok(/\(7 no chute\)/.test(await page.textContent("#questionHistory")), "a tabela mostra os acertos no chute");
+  await page.evaluate(() => handleAction({ dataset: { action: "quickQuestion", result: "guess", id: "t1" } }));
+  assert.strictEqual(await page.evaluate(() => { const log = state.questionLogs[state.questionLogs.length - 1]; return `${log.correct}/${log.wrong}/${log.guessed}`; }), "1/0/1", "botão '+ chute' registra um acerto no chute");
+  await page.evaluate(() => setView("dashboard"));
+  await page.waitForTimeout(200);
+  assert.ok(/sem os chutes/.test(await page.textContent("#statGrid")), "a precisão mostra também o valor sem chutes");
+
+  // 15 acertos, 12 no chute: 'Bom' sugerido pela precisão simples, mas só 20% é domínio
+  await page.evaluate(() => {
+    state.revisions = [normalizeRevision({ id: "rv1", kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: cycleToday(), originKey: "rv1" })];
+    state.cycleSettings.gradeFromQuestions = true;
+    state.cycleSettings.capQueue = true;
+    saveState();
+    setView("revisao");
+    cycleUI.sessionId = "rv1";
+    cycleUI.revealed = true;
+    renderCycle();
+  });
+  await page.waitForTimeout(250);
+  const sessionText = await page.textContent("#revisionSession");
+  assert.ok(/O que as suas questões sugerem/.test(sessionText) && /Esqueci/.test(sessionText), "a sessão mostra a nota sugerida pelas questões: " + sessionText.replace(/\s+/g, " ").slice(0, 300));
+  assert.ok(await page.isVisible("#revisionSession .rating-forgot.suggested"), "e destaca o botão sugerido");
+  await page.click('#revisionSession [data-cycle-action="rateRevision"][data-result="easy"]');
+  await page.waitForTimeout(250);
+  const rated = await page.evaluate(() => ({ entry: state.revisions[0].history[0], toast: document.querySelector("#toast").textContent }));
+  assert.strictEqual(rated.entry.result, "hard", "marcou 'Fácil', mas as questões só sustentam 'Difícil': registrou 'Difícil'");
+  assert.strictEqual(rated.entry.self, "easy", "e guardou o que a pessoa marcou");
+  assert.ok(/registrei "Difícil"/.test(rated.toast), "e avisou: " + rated.toast);
+
+  // sem questões suficientes, a sessão pede mais questões e a nota fica livre
+  await page.evaluate(() => {
+    state.questionLogs = [];
+    state.revisions = [normalizeRevision({ id: "rv2", kind: "study", subjectId: "s1", topicId: "t1", stage: 0, dueDate: cycleToday(), originKey: "rv2" })];
+    saveState();
+    cycleUI.sessionId = "rv2";
+    cycleUI.revealed = true;
+    renderCycle();
+  });
+  await page.waitForTimeout(250);
+  assert.ok(/Lance pelo menos 5/.test(await page.textContent("#revisionSession")), "pede questões para ter nota objetiva");
+  await page.click('#revisionSession [data-cycle-action="rateRevision"][data-result="easy"]');
+  await page.waitForTimeout(250);
+  assert.strictEqual(await page.evaluate(() => state.revisions[0].history[0].result), "easy", "sem questões, vale a nota marcada");
+
+  assert.strictEqual(await page.evaluate(() => document.querySelector("#cycleGradeFromQuestions").checked), true, "opção ligada por padrão");
+  await page.evaluate(() => {
+    document.querySelector("#cycleGradeFromQuestions").checked = false;
+    document.querySelector("#cycleSettingsForm").requestSubmit();
+  });
+  assert.strictEqual(await page.evaluate(() => state.cycleSettings.gradeFromQuestions), false, "a opção é salva");
+
+  // 16) botão "Já revisei" na aba Revisão e no cartão da aba Hoje
+  await page.evaluate(() => {
+    state.questionLogs = [];
+    state.errorNotebook = [];
+    state.studyLogs = [];
+    state.cycleSettings.capQueue = true;
+    state.cycleSettings.dailyLimit = 12;
+    state.revisions = ["rv1", "rv2", "rv3"].map((id, i) => normalizeRevision({ id, kind: "manual", subjectId: "s1", topicId: "t1", stage: i, dueDate: cycleToday(), originKey: id }));
+    saveState();
+    setView("revisao");
+  });
+  await page.waitForTimeout(250);
+  assert.strictEqual(await page.locator('#revisionQueue [data-cycle-action="quickReview"]').count(), 3, "cada item da fila tem o botão");
+  await page.click('#revisionQueue [data-cycle-action="quickReview"][data-id="rv1"]');
+  await page.waitForTimeout(250);
+  const quick = await page.evaluate(() => {
+    const r = state.revisions.find((item) => item.id === "rv1");
+    return { stage: r.stage, due: r.dueDate, today: cycleToday(), result: r.history[0] && r.history[0].result, toast: document.querySelector("#toast").textContent };
+  });
+  assert.strictEqual(quick.stage, 1, "avançou uma etapa pela regra de sempre");
+  assert.ok(quick.due > quick.today, "próxima data no futuro: " + quick.due);
+  assert.strictEqual(quick.result, "ok");
+  assert.ok(/Próxima revisão em/.test(quick.toast), "avisa a próxima data: " + quick.toast);
+  assert.strictEqual(await page.locator('#revisionQueue [data-cycle-action="quickReview"]').count(), 2, "o item sai da fila de hoje");
+  assert.ok(await page.isVisible('#revisionQueue [data-cycle-action="undoQuickReview"]'), "linha para desfazer");
+  await page.click('#revisionQueue [data-cycle-action="undoQuickReview"]');
+  await page.waitForTimeout(250);
+  const undone = await page.evaluate(() => { const r = state.revisions.find((item) => item.id === "rv1"); return { stage: r.stage, history: r.history.length, due: r.dueDate === cycleToday() }; });
+  assert.strictEqual(JSON.stringify(undone), JSON.stringify({ stage: 0, history: 0, due: true }), "desfazer devolve a revisão à fila");
+  assert.strictEqual(await page.locator('#revisionQueue [data-cycle-action="quickReview"]').count(), 3);
+
+  await page.evaluate(() => setView("hoje"));
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.locator('#todayTasks [data-cycle-action="quickReview"]').count(), 3, "o cartão Revisões da aba Hoje também tem o botão");
+  await page.click('#todayTasks [data-cycle-action="quickReview"][data-id="rv2"]');
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.evaluate(() => state.revisions.find((item) => item.id === "rv2").stage), 2);
+  assert.ok(await page.isVisible('#todayTasks [data-cycle-action="undoQuickReview"]'), "a aba Hoje também mostra o desfazer");
+  await page.click('#todayTasks [data-cycle-action="undoQuickReview"]');
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.evaluate(() => state.revisions.find((item) => item.id === "rv2").stage), 1);
+
   assert.strictEqual(errors.length, 0, "erros de JS: " + errors.join(" | "));
   console.log("ERROS JS: nenhum");
   console.log("E2E PROTECAO OK");

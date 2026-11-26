@@ -134,8 +134,9 @@ function cycleTopicAccuracy(logs, today, windowDays = CYCLE_WEAK_WINDOW_DAYS) {
     const group = byTopic.get(log.topicId) || { topicId: log.topicId, subjectId: log.subjectId || "", total: 0, correct: 0 };
     const correct = Number(log.correct) || 0;
     const wrong = Number(log.wrong) || 0;
+    const guessed = Math.min(correct, Math.max(0, Number(log.guessed) || 0));
     group.total += correct + wrong;
-    group.correct += correct;
+    group.correct += correct - guessed; // acerto no chute não conta como domínio
     if (!group.subjectId && log.subjectId) group.subjectId = log.subjectId;
     byTopic.set(log.topicId, group);
   });
@@ -503,14 +504,14 @@ function renderToday(data) {
       done: data.rev.done,
       total: data.rev.done + data.rev.pending,
       muted: !data.rev.done && !data.rev.pending,
-      body: revItems.length
+      body: cycleQuickUndoNote() + (revItems.length
         ? `<ul class="today-list">${revItems
             .map((revision) => {
               const late = cycleDiffDays(revision.dueDate, data.today);
-              return `<li>${escapeHTML(revisionLabel(revision))} <small>${revisionStageLabel(revision)}${late > 0 ? ` · atrasada ${late}d` : ""}</small></li>`;
+              return `<li><span>${escapeHTML(revisionLabel(revision))} <small>${revisionStageLabel(revision)}${late > 0 ? ` · atrasada ${late}d` : ""}</small></span><button class="mini-button" data-cycle-action="quickReview" data-id="${revision.id}" type="button" title="Registra como revisada (nota Bom) e agenda a próxima">Já revisei</button></li>`;
             })
             .join("")}${data.rev.items.length > 4 ? `<li class="more">+ ${data.rev.items.length - 4} outras</li>` : ""}</ul>${waitNote(data.rev.waiting)}`
-        : `${waitNote(data.rev.waiting)}<p class="muted-note">${data.rev.done ? "Revisões de hoje concluídas." : `Nenhuma revisão para hoje. Estude um assunto por ${state.cycleSettings.minAutoMinutes} minutos ou mais e a trilha começa sozinha.`}</p>`,
+        : `${waitNote(data.rev.waiting)}<p class="muted-note">${data.rev.done ? "Revisões de hoje concluídas." : `Nenhuma revisão para hoje. Estude um assunto por ${state.cycleSettings.minAutoMinutes} minutos ou mais e a trilha começa sozinha.`}</p>`),
       actions: data.rev.pending ? `<button class="button primary" data-cycle-action="reviewNow" type="button">Revisar agora</button>` : `<button class="mini-button" data-view="revisao" type="button">Abrir Revisão</button>`,
     })
   );

@@ -1876,12 +1876,15 @@ function getTopicStats(topicId, questionLogs = state.questionLogs) {
   const logs = questionLogs.filter((log) => log.topicId === topicId);
   const correct = logs.reduce((sum, log) => sum + Number(log.correct || 0), 0);
   const wrong = logs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
+  const guessed = logs.reduce((sum, log) => sum + Math.min(Number(log.correct || 0), Number(log.guessed || 0)), 0);
   const total = correct + wrong;
   return {
     correct,
     wrong,
+    guessed,
     total,
     accuracy: total ? (correct / total) * 100 : 0,
+    solidAccuracy: total ? ((correct - guessed) / total) * 100 : 0, // acertos sem contar os de chute
   };
 }
 
@@ -3405,6 +3408,8 @@ function renderDashboard() {
   const wrong = state.questionLogs.reduce((sum, log) => sum + Number(log.wrong || 0), 0);
   const totalQuestions = correct + wrong;
   const accuracy = totalQuestions ? (correct / totalQuestions) * 100 : 0;
+  const guessedTotal = state.questionLogs.reduce((sum, log) => sum + Math.min(Number(log.correct || 0), Number(log.guessed || 0)), 0);
+  const solidAccuracy = totalQuestions ? ((correct - guessedTotal) / totalQuestions) * 100 : 0;
   const rankedWithQuestions = getRankedTopics().filter((item) => item.total > 0);
   const weak = rankedWithQuestions[rankedWithQuestions.length - 1];
 
@@ -3415,7 +3420,7 @@ function renderDashboard() {
     statCard("Hoje", formatMinutes(todayMinutes), "tempo registrado"),
     statCard("Semana", formatMinutes(weekMinutes), `${formatMinutes(monthMinutes)} no mês`),
     statCard("Questões", String(totalQuestions), `${correct} acertos e ${wrong} erros`),
-    statCard("Precisão", percent(accuracy), weak ? `Reforçar ${weak.name}` : "sem ponto fraco ainda"),
+    statCard("Precisão", percent(accuracy), guessedTotal ? `${percent(solidAccuracy)} sem os chutes` : weak ? `Reforçar ${weak.name}` : "sem ponto fraco ainda"),
   ].join("");
 
   renderWeekChart();
@@ -4222,6 +4227,7 @@ function renderTopicItem(topic, color) {
       </div>
       <div class="inline-actions">
         <button class="mini-button good" data-action="quickQuestion" data-result="correct" data-id="${topic.id}" type="button">+ acerto</button>
+        <button class="mini-button" data-action="quickQuestion" data-result="guess" data-id="${topic.id}" type="button" title="Acertei, mas no chute ou com dúvida">+ chute</button>
         <button class="mini-button bad" data-action="quickQuestion" data-result="wrong" data-id="${topic.id}" type="button">+ erro</button>
         <button class="mini-button" data-action="quickStudy" data-id="${topic.id}" type="button">+ 25 min</button>
         <button class="mini-button" data-cycle-action="mergeTopic" data-id="${topic.id}" type="button">Mesclar</button>
@@ -4951,11 +4957,12 @@ function renderQuestions() {
         .map((log) => {
           const total = Number(log.correct || 0) + Number(log.wrong || 0);
           const accuracy = total ? (Number(log.correct || 0) / total) * 100 : 0;
+          const guessedCount = Math.min(Number(log.correct || 0), Number(log.guessed || 0));
           return `
             <tr>
               <td>${formatDate(log.date)}</td>
               <td>${escapeHTML(getEntryScopeLabel(log))}</td>
-              <td>${Number(log.correct || 0)}</td>
+              <td>${Number(log.correct || 0)}${guessedCount ? ` <small title="acertos no chute ou com dúvida">(${guessedCount} no chute)</small>` : ""}</td>
               <td>${Number(log.wrong || 0)}</td>
               <td>${percent(accuracy)}</td>
               <td>
@@ -5097,6 +5104,7 @@ function resetQuestionForm() {
   syncScopedTopicSelect("#questionSubject", "#questionTopic", { includeEmpty: false });
   $("#questionCorrect").value = 0;
   $("#questionWrong").value = 0;
+  $("#questionGuessed").value = 0;
   $("#questionDate").value = todayISO();
   updateQuestionFormMode();
 }
@@ -5109,6 +5117,7 @@ function fillQuestionForm(log) {
   $("#questionTopic").value = log.topicId || "";
   $("#questionCorrect").value = Number(log.correct || 0);
   $("#questionWrong").value = Number(log.wrong || 0);
+  $("#questionGuessed").value = Number(log.guessed || 0);
   $("#questionDate").value = log.date || todayISO();
   $("#questionNotes").value = log.notes || "";
   updateQuestionFormMode();
@@ -8707,6 +8716,7 @@ function attachEvents() {
       showToast("Informe ao menos uma questão.");
       return;
     }
+    const guessed = Math.min(correct, Math.max(0, Math.round(Number($("#questionGuessed").value) || 0))); // acertos no chute não passam dos acertos
     const existing = state.questionLogs.find((log) => log.id === state.ui.activeQuestionEditId);
     const payload = {
       id: existing?.id || uid(),
@@ -8714,6 +8724,7 @@ function attachEvents() {
       topicId,
       correct,
       wrong,
+      guessed,
       date: $("#questionDate").value || todayISO(),
       notes: $("#questionNotes").value.trim(),
       updatedAt: new Date().toISOString(),
@@ -9221,18 +9232,20 @@ function handleAction(action) {
   }
 
   if (type === "quickQuestion") {
-    const isCorrect = action.dataset.result === "correct";
+    const isGuess = action.dataset.result === "guess"; // acertou, mas no chute ou com dúvida
+    const isCorrect = action.dataset.result === "correct" || isGuess;
     state.questionLogs.push({
       id: uid(),
       topicId: id,
       correct: isCorrect ? 1 : 0,
       wrong: isCorrect ? 0 : 1,
+      guessed: isGuess ? 1 : 0,
       date: todayISO(),
       notes: "Lançamento rápido",
     });
     saveState();
     render();
-    showToast(isCorrect ? "Acerto registrado." : "Erro registrado.");
+    showToast(isGuess ? "Acerto no chute registrado (conta como acerto, mas não como domínio)." : isCorrect ? "Acerto registrado." : "Erro registrado.");
     return;
   }
 

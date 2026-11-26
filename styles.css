@@ -5222,3 +5222,8 @@ body.modal-open {
 .duplicate-warning small {
   color: var(--muted);
 }
+
+.rating-row .button.suggested {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}

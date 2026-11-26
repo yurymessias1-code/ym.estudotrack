@@ -144,3 +144,18 @@ Por que acumulava: cada assunto estudado volta 4 vezes (1, 7, 30 e 60 dias) e ca
 - **Reconhece enunciados parecidos, não só idênticos:** compara as palavras do enunciado (sem acento e pontuação, ignorando palavras de 1 ou 2 letras e usando o começo das palavras longas, então "contrário" e "contrária" valem o mesmo). Considera o mesmo erro a partir de 70% de palavras em comum, ou quando um enunciado está quase todo dentro do outro. Textos com menos de 6 palavras só são comparados se forem idênticos.
 - **Na hora de salvar** a pergunta continua (OK soma, Cancelar salva como novo), agora também para enunciados parecidos.
 - **Testes:** `ciclo-tests` (65) e `tests/e2e/protecao.e2e.js` (passo 13).
+
+## Retenção: acertos no chute e nota da revisão pelas questões (novembro/2026)
+
+- **Acertos no chute:** o lançamento de questões tem o campo "Desses acertos, quantos foram no chute ou com dúvida" (opcional, nunca passa dos acertos) e o botão rápido "+ chute" por assunto. A tabela mostra "(N no chute)", e a Precisão da Visão geral mostra também o valor sem os chutes. A detecção de assuntos fracos (reforço automático e avisos) passa a contar só os acertos que não foram no chute, então um assunto que parece forte, mas só no chute, vira ponto fraco. Lançamentos antigos, sem a marcação, continuam valendo como estão.
+- **Nota objetiva da revisão (`cycleObjectiveGrade`):** usa as questões do assunto nos últimos 30 dias, sem os acertos no chute. Com pelo menos 5 questões, a sessão de revisão mostra "O que as suas questões sugerem" (sem chutes: 90% ou mais com 8+ questões = Fácil; 70% ou mais = Bom; 50% ou mais = Difícil; abaixo disso = Esqueci) e destaca o botão sugerido. Com menos, pede para lançar pelo menos 5 questões do assunto.
+- **Contra o excesso de confiança (`cycleAdjustResult`):** se você marcar uma nota melhor do que as questões sustentam, o app registra a nota que elas sustentam e avisa. Só rebaixa (nunca sobe a nota) e nunca chega sozinho a "Esqueci". O histórico da revisão guarda a nota marcada (`self`) quando o app registra outra. Opção em Revisão → Intervalos do ciclo: "Usar meu acerto em questões para ajustar a nota da revisão" (ligada por padrão).
+- **Testes:** `ciclo-tests` (69), `hoje-tests` (19) e `tests/e2e/protecao.e2e.js` (passo 14).
+
+## Botão "Já revisei" (novembro/2026)
+
+- **Onde:** em cada item da fila de revisão do dia, na aba Revisão e no cartão Revisões da aba Hoje.
+- **O que faz (`quickReviewRevision`):** registra a revisão como "Bom", sem sessão guiada, e agenda a próxima pela mesma regra da sessão: avança uma etapa, respeita a data da prova, escolhe o dia mais leve (limite por dia) e aplica a nota das questões, que só rebaixa (se o seu acerto sem chutes no assunto for baixo, registra "Difícil" e avisa). O histórico guarda a nota "Bom" que veio do botão (`self`) quando o app registra outra, e a observação "Marcado como revisado, sem sessão guiada". Na última etapa, encerra a cadeia. Conta no que foi feito hoje (consome o limite do dia) e avança o "dia guiado" como qualquer revisão.
+- **Desfazer:** depois de "Já revisei" aparece "X marcada como revisada (próxima em dd/mm). Desfazer". Só vale para a última revisão rápida e só se a revisão não mudou desde então; devolve a etapa, a data, o status e o histórico de antes.
+- **Quando usar a sessão em vez do botão:** se você quer marcar "Difícil", "Fácil" ou "Esqueci", use "Revisar".
+- **Testes:** `ciclo-tests` (73) e `tests/e2e/protecao.e2e.js` (passo 16).

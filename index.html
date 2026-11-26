@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261201-duplicado" />
+    <link rel="stylesheet" href="styles.css?v=20261203-jarevisei" />
   </head>
   <body>
     <div class="app-shell">
@@ -444,6 +444,10 @@
                   <input id="questionWrong" type="number" min="0" value="0" required />
                 </label>
               </div>
+              <label>
+                Desses acertos, quantos foram no chute ou com dúvida (opcional)
+                <input id="questionGuessed" type="number" min="0" value="0" />
+              </label>
               <label>
                 Data
                 <input id="questionDate" type="date" required />
@@ -952,6 +956,10 @@
             <label class="checkbox-line">
               <input id="cycleAutoStudy" type="checkbox" />
               Agendar revisões automaticamente quando eu registrar estudo (a partir de 10 minutos por assunto no dia)
+            </label>
+            <label class="checkbox-line">
+              <input id="cycleGradeFromQuestions" type="checkbox" />
+              Usar meu acerto em questões para ajustar a nota da revisão (se você marcar "Bom" ou "Fácil" mas seu acerto sem chutes no assunto for baixo, o app registra uma nota mais cautelosa)
             </label>
             <label class="checkbox-line">
               <input id="cycleCapQueue" type="checkbox" />
@@ -2311,14 +2319,14 @@
 
     <script src="supabase-config.js?v=20261117-sync"></script>
     <script src="modal.js?v=20261117-sync"></script>
-    <script src="merge.js?v=20261201-duplicado"></script>
-    <script src="caderno.js?v=20261201-duplicado"></script>
-    <script src="ciclo.js?v=20261201-duplicado"></script>
-    <script src="hoje.js?v=20261201-duplicado"></script>
+    <script src="merge.js?v=20261203-jarevisei"></script>
+    <script src="caderno.js?v=20261203-jarevisei"></script>
+    <script src="ciclo.js?v=20261203-jarevisei"></script>
+    <script src="hoje.js?v=20261203-jarevisei"></script>
     <script src="push.js?v=20261117-sync"></script>
-    <script src="sessao.js?v=20261201-duplicado"></script>
-    <script src="mesclar.js?v=20261201-duplicado"></script>
+    <script src="sessao.js?v=20261203-jarevisei"></script>
+    <script src="mesclar.js?v=20261203-jarevisei"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="app.js?v=20261201-duplicado"></script>
+    <script src="app.js?v=20261203-jarevisei"></script>
   </body>
 </html>

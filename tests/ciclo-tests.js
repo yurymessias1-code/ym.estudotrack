@@ -450,6 +450,8 @@ vm.runInContext(
   `function getTopic(id) { return (state.topics || []).find((t) => t.id === id); }
    function getSubject(id) { return (state.subjects || []).find((s) => s.id === id); }
    function getEntrySubjectId(entry) { return entry.subjectId || (getTopic(entry.topicId) || {}).subjectId || ""; }
+   function formatShortDate(value) { return String(value).split("-").reverse().join("/"); }
+   function escapeHTML(value) { return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
    function getTopicLabel(id) { const t = getTopic(id); return t ? ((getSubject(t.subjectId) || {}).name || "") + ": " + t.name : ""; }
    function normalizeHashtags(value) { return String(value || "").split(/\\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean); }`,
   ctx
@@ -1004,6 +1006,175 @@ test("erro repetido: reconhece enunciados parecidos, não só idênticos", () =>
   const longer = shortBase + " salvo contrario penal codigo artigo";
   assert.ok(sim(shortBase, longer) >= 0.7, "contido: " + sim(shortBase, longer));
   assert.ok(sim(shortBase, shortBase + " um dois tres quatro cinco seis sete oito nove dez") < 0.7, "contido, mas o outro é bem maior: não conta");
+});
+
+
+/* ---------- nota da revisão pelas questões (item 1) e acertos no chute (item 4) ---------- */
+
+test("nota objetiva: soma as questões do assunto na janela e separa os acertos no chute", () => {
+  const today = "2026-11-20";
+  const logs = [
+    { topicId: "t1", date: "2026-11-19", correct: 6, wrong: 2, guessed: 2 },
+    { topicId: "t1", date: "2026-11-01", correct: 3, wrong: 1, guessed: 99 }, // guessed acima dos acertos: limita a 3
+    { topicId: "t1", date: "2026-09-01", correct: 50, wrong: 0 }, // fora da janela de 30 dias
+    { topicId: "t1", date: "2026-11-25", correct: 9, wrong: 0 }, // futuro: ignora
+    { topicId: "t2", date: "2026-11-19", correct: 9, wrong: 0 },
+    { date: "2026-11-19", correct: 9, wrong: 0 }, // sem assunto
+  ];
+  const grade = ctx.cycleObjectiveGrade(logs, "t1", today);
+  assert.strictEqual(grade.total, 12);
+  assert.strictEqual(grade.correct, 9);
+  assert.strictEqual(grade.guessed, 5);
+  assert.strictEqual(Math.round(grade.accuracy), 75);
+  assert.strictEqual(Math.round(grade.solidAccuracy), 33, "(9 - 5) / 12");
+  assert.strictEqual(ctx.cycleObjectiveGrade(logs, "nada", today), null);
+  assert.strictEqual(ctx.cycleObjectiveGrade(logs, "", today), null);
+});
+
+test("nota objetiva: o que as questões sugerem", () => {
+  const g = (total, solid) => ({ total, solidAccuracy: solid });
+  assert.strictEqual(ctx.cycleSuggestResult(null), "");
+  assert.strictEqual(ctx.cycleSuggestResult(g(4, 100)), "", "menos de 5 questões: sem sugestão");
+  assert.strictEqual(ctx.cycleSuggestResult(g(5, 100)), "ok", "5 a 7 questões não bastam para 'Fácil'");
+  assert.strictEqual(ctx.cycleSuggestResult(g(8, 90)), "easy");
+  assert.strictEqual(ctx.cycleSuggestResult(g(8, 89)), "ok");
+  assert.strictEqual(ctx.cycleSuggestResult(g(10, 70)), "ok");
+  assert.strictEqual(ctx.cycleSuggestResult(g(10, 69)), "hard");
+  assert.strictEqual(ctx.cycleSuggestResult(g(10, 50)), "hard");
+  assert.strictEqual(ctx.cycleSuggestResult(g(10, 49)), "forgot");
+});
+
+test("nota objetiva: só rebaixa a nota que a pessoa marcou, nunca sobe nem chega sozinho a 'Esqueci'", () => {
+  const on = { gradeFromQuestions: true };
+  const adjust = (self, total, solid, settings = on) => ctx.cycleAdjustResult(self, { total, solidAccuracy: solid }, settings);
+  assert.strictEqual(JSON.stringify(adjust("easy", 10, 60)), JSON.stringify({ result: "hard", adjusted: true, suggested: "hard" }));
+  assert.strictEqual(adjust("ok", 10, 60).result, "hard");
+  assert.strictEqual(adjust("easy", 10, 80).result, "ok", "80% sustenta 'Bom', não 'Fácil'");
+  assert.strictEqual(adjust("easy", 6, 100).result, "ok", "poucas questões: não aceita 'Fácil'");
+  assert.strictEqual(adjust("ok", 10, 20).result, "hard", "mesmo com 20%, o app não escolhe 'Esqueci' por você");
+  assert.strictEqual(adjust("ok", 10, 20).adjusted, true);
+  assert.strictEqual(adjust("forgot", 10, 95).result, "forgot", "nunca sobe a nota");
+  assert.strictEqual(adjust("hard", 10, 95).result, "hard");
+  assert.strictEqual(adjust("ok", 10, 75).adjusted, false, "nota compatível: nada muda");
+  assert.strictEqual(adjust("easy", 9, 95).adjusted, false);
+  assert.strictEqual(adjust("easy", 4, 10).result, "easy", "menos de 5 questões: não ajusta");
+  assert.strictEqual(adjust("easy", 10, 10, { gradeFromQuestions: false }).result, "easy", "opção desligada");
+  assert.strictEqual(ctx.cycleAdjustResult("easy", null, on).result, "easy", "sem questões: nada muda");
+  assert.strictEqual(normalizeCycleSettings({}).gradeFromQuestions, true, "ligada por padrão");
+  assert.strictEqual(normalizeCycleSettings({ gradeFromQuestions: false }).gradeFromQuestions, false);
+});
+
+test("revisão: guarda a nota que a pessoa marcou quando o app registra outra", () => {
+  const st = freshState();
+  st.revisions = [normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: ctx.cycleToday() })];
+  ctx.completeRevision("r1", "hard", "", "easy");
+  const entry = st.revisions[0].history[0];
+  assert.strictEqual(entry.result, "hard");
+  assert.strictEqual(entry.self, "easy");
+  ctx.completeRevision("r1", "ok", "", "ok");
+  assert.strictEqual(st.revisions[0].history[1].self, undefined, "sem ajuste, nada extra no histórico");
+  const reloaded = normalizeRevision(JSON.parse(JSON.stringify(st.revisions[0])));
+  assert.strictEqual(reloaded.history[0].self, "easy", "sobrevive ao salvar e carregar");
+  assert.strictEqual(normalizeRevision({ history: [{ date: "2026-11-01", result: "ok", self: "lixo" }] }).history[0].self, undefined);
+});
+
+
+/* ---------- "Já revisei": registro rápido com a mesma regra da sessão ---------- */
+
+test("já revisei: registra como 'Bom' e agenda a próxima exatamente como a sessão faria", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  const make = (id) => normalizeRevision({ id, kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: today, originKey: id });
+  st.revisions = [make("rapida"), make("sessao")];
+  const quick = ctx.quickReviewRevision("rapida");
+  ctx.completeRevision("sessao", "ok", "");
+  const a = st.revisions[0];
+  const b = st.revisions[1];
+  assert.strictEqual(a.stage, 2, "avançou uma etapa");
+  assert.strictEqual(a.stage, b.stage);
+  assert.ok(a.dueDate > today, "próxima data no futuro");
+  assert.strictEqual(quick.result, "ok");
+  assert.strictEqual(quick.chosen, "ok");
+  assert.strictEqual(quick.adjustment.adjusted, false);
+  assert.strictEqual(a.history.length, 1);
+  assert.strictEqual(a.history[0].result, "ok");
+  assert.strictEqual(a.history[0].date, today);
+  assert.ok(/sem sessão guiada/.test(a.history[0].note));
+  assert.strictEqual(a.history[0].self, undefined, "sem ajuste, sem nota extra");
+  assert.strictEqual(cycleDaysBetweenForTest(today, a.dueDate) > 0, true);
+  assert.ok(/Bom\. Próxima revisão em \d+ dias?/.test(ctx.cycleRatedMessage({ ...quick })));
+});
+
+function cycleDaysBetweenForTest(a, b) {
+  return ctx.cycleDaysBetween(a, b);
+}
+
+test("já revisei: segue as mesmas regras de prova, dia mais leve e nota das questões", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  // prova em 20 dias: o intervalo de 30 dias da etapa 2 encurta
+  st.competitions = [{ id: "c1", date: ctx.cycleAddDays(today, 20), subjectIds: ["s1"] }];
+  st.cycleSettings.levelLoad = false;
+  st.revisions = [normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: today })];
+  const withExam = ctx.quickReviewRevision("r1");
+  assert.strictEqual(withExam.step.gap, 10, "metade do tempo até a prova");
+  assert.ok(/encurtado pela data da prova/.test(ctx.cycleRatedMessage({ ...withExam })));
+  // questões fracas no assunto: 'Bom' vira 'Difícil', com aviso, e o histórico guarda o que foi marcado
+  st.competitions = [];
+  st.revisions = [normalizeRevision({ id: "r2", kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: today })];
+  st.questionLogs = [{ id: "q1", topicId: "t1", date: today, correct: 4, wrong: 6 }];
+  const weak = ctx.quickReviewRevision("r2");
+  assert.strictEqual(weak.result, "hard");
+  assert.strictEqual(weak.adjustment.adjusted, true);
+  assert.strictEqual(st.revisions[0].history[0].result, "hard");
+  assert.strictEqual(st.revisions[0].history[0].self, "ok", "guarda o 'Bom' que veio do botão");
+  assert.strictEqual(st.revisions[0].stage, 1, "difícil não avança de etapa");
+  assert.ok(/registrei "Difícil"/.test(ctx.cycleRatedMessage({ ...weak })));
+  // última etapa: encerra a cadeia
+  st.questionLogs = [];
+  st.revisions = [normalizeRevision({ id: "r3", kind: "study", subjectId: "s1", topicId: "t1", stage: 3, dueDate: today })];
+  const last = ctx.quickReviewRevision("r3");
+  assert.strictEqual(last.step.done, true);
+  assert.strictEqual(st.revisions[0].status, "done");
+  assert.strictEqual(ctx.cycleRatedMessage({ ...last }), "Revisão concluída: assunto fixado.");
+});
+
+test("já revisei: desfazer devolve a revisão ao estado de antes, mas só se nada mudou depois", () => {
+  const today = ctx.cycleToday();
+  const st = freshState();
+  const original = () => normalizeRevision({ id: "r1", kind: "study", subjectId: "s1", topicId: "t1", stage: 1, dueDate: today, originKey: "r1" });
+  st.revisions = [original()];
+  ctx.quickReviewRevision("r1");
+  assert.ok(ctx.cycleQuickUndoNote().includes("Desfazer"), "mostra a linha para desfazer");
+  assert.strictEqual(ctx.cycleUndoQuickReview(), true);
+  const back = st.revisions[0];
+  assert.strictEqual(back.stage, 1);
+  assert.strictEqual(back.dueDate, today);
+  assert.strictEqual(back.status, "pending");
+  assert.strictEqual(back.history.length, 0);
+  assert.strictEqual(ctx.cycleQuickUndoNote(), "", "depois de desfazer, a linha some");
+  assert.strictEqual(ctx.cycleUndoQuickReview(), false, "não desfaz duas vezes");
+  // outra avaliação no meio: não desfaz por cima
+  ctx.quickReviewRevision("r1");
+  ctx.completeRevision("r1", "ok", "");
+  assert.strictEqual(ctx.cycleQuickUndoNote(), "");
+  assert.strictEqual(ctx.cycleUndoQuickReview(), false);
+  assert.strictEqual(st.revisions[0].history.length, 2, "as duas avaliações continuam registradas");
+  // última etapa também volta
+  st.revisions = [normalizeRevision({ id: "r9", kind: "study", subjectId: "s1", topicId: "t1", stage: 3, dueDate: today })];
+  ctx.quickReviewRevision("r9");
+  assert.strictEqual(st.revisions[0].status, "done");
+  assert.strictEqual(ctx.cycleUndoQuickReview(), true);
+  assert.strictEqual(st.revisions[0].status, "pending");
+  assert.strictEqual(st.revisions[0].stage, 3);
+});
+
+test("já revisei: ignora revisão inexistente ou já concluída", () => {
+  const st = freshState();
+  st.revisions = [normalizeRevision({ id: "ok", kind: "study", subjectId: "s1", topicId: "t1", status: "done" })];
+  assert.strictEqual(ctx.quickReviewRevision("ok"), null);
+  assert.strictEqual(ctx.quickReviewRevision("nao-existe"), null);
+  assert.strictEqual(ctx.cycleQuickUndoNote(), "");
 });
 
 console.log(`ciclo-tests: ${passed} testes passaram.`);

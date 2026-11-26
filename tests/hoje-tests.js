@@ -257,4 +257,15 @@ test("lembrete: backup entra na mensagem e muda o título quando é o único mot
   assert.strictEqual(cycleReminderMessage({ backupDue: false }), null);
 });
 
+test("acerto por assunto: acertos no chute não contam como domínio", () => {
+  const logs = [{ ...q("t1", "2026-11-10", 10, 2), guessed: 6 }, { ...q("t1", "2026-11-09", 5, 0), guessed: 99 }]; // guessed passa dos acertos: limita
+  const [stats] = cycleTopicAccuracy(logs, WED);
+  assert.strictEqual(stats.total, 17);
+  assert.strictEqual(stats.correct, 4, "10-6 e 5-5: só 4 acertos sólidos");
+  assert.strictEqual(Math.round(stats.accuracy), 24);
+  assert.strictEqual(json(cycleWeakTopics(logs, WED, opts).map((t) => t.topicId)), json(["t1"]), "assunto que parece forte, mas só no chute, vira ponto fraco");
+  const plain = cycleTopicAccuracy([q("t1", "2026-11-10", 10, 2)], WED)[0];
+  assert.strictEqual(plain.correct, 10, "sem a marcação de chute, nada muda");
+});
+
 console.log(`hoje-tests: ${passed} testes passaram.`);

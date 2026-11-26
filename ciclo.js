@@ -10,6 +10,10 @@ const CYCLE_LAPSE_DROP = 2; // errar/esquecer faz descer só esta quantidade de 
 const CYCLE_LEECH_LAPSES = 3; // errou de novo tantas vezes: vira reincidente
 const CYCLE_MIN_AUTO_MINUTES = 20; // padrão: estudo mais curto que isso não abre cadeia de revisões (ajustável)
 const CYCLE_STEADY_WINDOW_DAYS = 14;
+const CYCLE_OBJECTIVE_DAYS = 30; // janela das questões que servem de nota objetiva
+const CYCLE_OBJECTIVE_MIN = 5; // questões mínimas para sugerir ou ajustar a nota
+const CYCLE_OBJECTIVE_EASY_MIN = 8; // e para aceitar "Fácil"
+const CYCLE_RESULT_ORDER = ["forgot", "hard", "ok", "easy"];
 const CYCLE_DUP_MIN_WORDS = 6; // enunciados com menos palavras não são comparados por semelhança
 const CYCLE_DUP_SIMILARITY = 0.7; // palavras em comum sobre o total para considerar o mesmo enunciado
 const CYCLE_REDISTRIBUTE_MIN = 3; // só oferece "redistribuir atrasados" a partir de tantos atrasados
@@ -37,6 +41,7 @@ const cycleUI = {
   errorEditId: "",
   errorPrefill: null,
   errorForceMerge: "",
+  quickUndo: null,
   errorRetest: { id: "", open: false },
   errorFilters: { search: "", subject: "", topic: "", reason: "", status: "all" },
   errorFormOpen: false,
@@ -158,6 +163,7 @@ function normalizeCycleSettings(raw = {}) {
     examAdapt: source.examAdapt !== false,
     levelLoad: source.levelLoad !== false,
     capQueue: source.capQueue !== false,
+    gradeFromQuestions: source.gradeFromQuestions !== false,
     minAutoMinutes: cycleInt(source.minAutoMinutes, 5, 120, CYCLE_MIN_AUTO_MINUTES),
     autoWeak: source.autoWeak !== false,
     weakAccuracy: cycleInt(source.weakAccuracy, 30, 95, 70),
@@ -192,6 +198,7 @@ function normalizeRevision(item = {}) {
       stage: cycleInt(entry?.stage, 0, 20, 0),
       result: validResults.includes(entry?.result) ? entry.result : "ok",
       note: cycleText(entry?.note).slice(0, 500),
+      ...(validResults.includes(entry?.self) ? { self: entry.self } : {}), // nota que a pessoa marcou, quando o app registrou outra
     })),
     createdAt: item.createdAt || new Date().toISOString(),
     updatedAt: item.updatedAt || "",
@@ -867,12 +874,110 @@ function cycleSustainabilityNote(today = cycleToday()) {
   };
 }
 
-function completeRevision(id, result, note = "") {
+/**
+ * Nota objetiva de um assunto: acerto nas questões dos últimos dias, com e sem os acertos no chute.
+ * Devolve null se não houver nenhuma questão do assunto na janela.
+ */
+function cycleObjectiveGrade(logs, topicId, today = cycleToday(), days = CYCLE_OBJECTIVE_DAYS) {
+  if (!topicId) return null;
+  const since = cycleAddDays(today, -days);
+  let correct = 0;
+  let wrong = 0;
+  let guessed = 0;
+  (logs || []).forEach((log) => {
+    if (log.topicId !== topicId || !cycleIsISO(log.date) || log.date < since || log.date > today) return;
+    const right = Math.max(0, Number(log.correct) || 0);
+    correct += right;
+    wrong += Math.max(0, Number(log.wrong) || 0);
+    guessed += Math.min(right, Math.max(0, Number(log.guessed) || 0));
+  });
+  const total = correct + wrong;
+  if (!total) return null;
+  return { total, correct, wrong, guessed, days, accuracy: (correct / total) * 100, solidAccuracy: ((correct - guessed) / total) * 100 };
+}
+
+/** Nota que as questões sugerem ("" se há poucas questões): conta só os acertos que não foram no chute. */
+function cycleSuggestResult(objective) {
+  if (!objective || objective.total < CYCLE_OBJECTIVE_MIN) return "";
+  if (objective.solidAccuracy >= 90 && objective.total >= CYCLE_OBJECTIVE_EASY_MIN) return "easy";
+  if (objective.solidAccuracy >= 70) return "ok";
+  if (objective.solidAccuracy >= 50) return "hard";
+  return "forgot";
+}
+
+/**
+ * Evita o excesso de confiança: se a pessoa marcou uma nota melhor do que as questões sustentam, o app registra
+ * a nota que elas sustentam. Só rebaixa (nunca sobe a nota) e nunca chega a "Esqueci" sozinho.
+ * Devolve { result, adjusted, suggested }.
+ */
+function cycleAdjustResult(selfResult, objective, settings = state.cycleSettings) {
+  const suggested = cycleSuggestResult(objective);
+  if (settings.gradeFromQuestions === false || !suggested) return { result: selfResult, adjusted: false, suggested };
+  const cap = suggested === "forgot" ? "hard" : suggested;
+  if (CYCLE_RESULT_ORDER.indexOf(selfResult) <= CYCLE_RESULT_ORDER.indexOf(cap)) return { result: selfResult, adjusted: false, suggested };
+  return { result: cap, adjusted: true, suggested };
+}
+
+/**
+ * Texto do aviso depois de avaliar uma revisão. `tail` entra depois da data da próxima (ex.: "Segue a próxima da fila.").
+ * Se o app registrou uma nota mais cautelosa do que a marcada, explica por quê.
+ */
+function cycleRatedMessage({ step, result, chosen, adjustment, objective, tail = "" }) {
+  const calibration = adjustment && adjustment.adjusted
+    ? ` Você marcou "${CYCLE_RESULT_LABELS[chosen]}", mas seu acerto sem chutes neste assunto é ${Math.round(objective.solidAccuracy)}% em ${objective.total} questões (${objective.days} dias): registrei "${CYCLE_RESULT_LABELS[result]}".`
+    : "";
+  if (step.done) return calibration ? `Revisão concluída.${calibration}` : "Revisão concluída: assunto fixado.";
+  const days = `${step.gap} ${step.gap === 1 ? "dia" : "dias"}`;
+  const exam = step.examDate ? " (encurtado pela data da prova)" : "";
+  const leveled = step.leveled ? " (ajustado para um dia mais leve)" : "";
+  return `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${days}${exam}${leveled}.${tail ? ` ${tail}` : ""}${calibration}`;
+}
+
+/**
+ * "Já revisei": registra a revisão sem sessão guiada, com a nota "Bom", e agenda a próxima pela mesma regra de sempre
+ * (avanço de etapa, data da prova, dia mais leve e a nota das questões, que só rebaixa).
+ * Guarda uma cópia de antes para o "Desfazer". Devolve null se a revisão não existe ou já terminou.
+ */
+function quickReviewRevision(id, self = "ok") {
+  const revision = state.revisions.find((item) => item.id === id);
+  if (!revision || revision.status === "done") return null;
+  const objective = revision.topicId ? cycleObjectiveGrade(state.questionLogs, revision.topicId) : null;
+  const adjustment = cycleAdjustResult(self, objective);
+  const before = JSON.parse(JSON.stringify(revision));
+  const label = revisionLabel(revision);
+  const step = completeRevision(id, adjustment.result, "Marcado como revisado, sem sessão guiada", self);
+  if (!step) return null;
+  cycleUI.quickUndo = { id, before, label };
+  return { step, result: adjustment.result, chosen: self, adjustment, objective };
+}
+
+/** Desfaz o último "Já revisei", se a revisão não mudou desde então. */
+function cycleUndoQuickReview() {
+  const undo = cycleUI.quickUndo;
+  cycleUI.quickUndo = null;
+  if (!undo) return false;
+  const revision = state.revisions.find((item) => item.id === undo.id);
+  if (!revision || revision.history.length !== undo.before.history.length + 1) return false;
+  Object.assign(revision, JSON.parse(JSON.stringify(undo.before)), { updatedAt: new Date().toISOString() });
+  return true;
+}
+
+/** Linha "X marcada como revisada. Desfazer" (ou ""): aparece na aba Revisão e no cartão da aba Hoje. */
+function cycleQuickUndoNote() {
+  const undo = cycleUI.quickUndo;
+  if (!undo) return "";
+  const revision = state.revisions.find((item) => item.id === undo.id);
+  if (!revision || revision.history.length !== undo.before.history.length + 1) return "";
+  const next = revision.status === "done" ? "assunto concluído" : `próxima em ${formatShortDate(revision.dueDate)}`;
+  return `<p class="muted-note">${escapeHTML(undo.label)} marcada como revisada (${next}). <button class="mini-button" data-cycle-action="undoQuickReview" type="button">Desfazer</button></p>`;
+}
+
+function completeRevision(id, result, note = "", self = "") {
   const revision = state.revisions.find((item) => item.id === id);
   if (!revision || revision.status === "done") return null;
   const today = cycleToday();
   const step = cycleLeveledStep(cycleScheduledStep(revision.stage, result, revisionIntervals(), revision.subjectId, today), today, { revisionId: revision.id });
-  revision.history.push({ date: today, stage: revision.stage, result, note: cycleText(note).slice(0, 500) });
+  revision.history.push({ date: today, stage: revision.stage, result, note: cycleText(note).slice(0, 500), ...(self && self !== result ? { self } : {}) });
   revision.history = revision.history.slice(-30);
   revision.stage = step.stage;
   if (step.done) {
@@ -1293,6 +1398,7 @@ function renderRevisions() {
   $("#cycleExamAdapt").checked = state.cycleSettings.examAdapt;
   $("#cycleLevelLoad").checked = state.cycleSettings.levelLoad;
   $("#cycleCapQueue").checked = state.cycleSettings.capQueue;
+  $("#cycleGradeFromQuestions").checked = state.cycleSettings.gradeFromQuestions;
   cycleSetValueIfIdle("#cycleMinAuto", state.cycleSettings.minAutoMinutes);
   cycleSetValueIfIdle("#cycleWeakAccuracy", state.cycleSettings.weakAccuracy);
   cycleSetValueIfIdle("#cycleWeakMin", state.cycleSettings.weakMinQuestions);
@@ -1325,6 +1431,7 @@ function renderRevisions() {
               </div>
               <div class="inline-actions">
                 <button class="mini-button success" data-cycle-action="openRevision" data-id="${revision.id}" type="button">Revisar</button>
+                <button class="mini-button" data-cycle-action="quickReview" data-id="${revision.id}" type="button" title="Registra como revisada (nota Bom) e agenda a próxima pela regra de sempre">Já revisei</button>
                 <button class="mini-button" data-cycle-action="finishRevision" data-id="${revision.id}" type="button">Encerrar</button>
                 <button class="mini-button bad" data-cycle-action="deleteRevision" data-id="${revision.id}" type="button">Excluir</button>
               </div>
@@ -1341,6 +1448,8 @@ function renderRevisions() {
     );
   }
 
+  const undoNote = cycleQuickUndoNote();
+  if (undoNote) $("#revisionQueue").insertAdjacentHTML("afterbegin", undoNote);
   const note = cycleSustainabilityNote(today);
   const queueInfo = queue.waitingRevisions || queue.waitingErrors || queue.totalDue
     ? `<p class="muted-note">Fila de hoje: ${queue.revisions.length + queue.errors.length} de ${queue.totalDue} que vencem (limite de ${queue.limit} por dia, revisões e erros juntos${queue.doneToday ? `; ${queue.doneToday} já feitos hoje` : ""}). ${queue.waitingRevisions + queue.waitingErrors ? "O resto aguarda e entra nos próximos dias, os mais urgentes primeiro." : ""}</p>`
@@ -1385,6 +1494,7 @@ function renderRevisionSession(due) {
     ? "Sem abrir a lei, recite o que lembra deste trecho: regra geral, prazos, exceções e palavras-chave."
     : "Sem olhar nada, explique em voz alta ou por escrito o que você lembra deste assunto: conceito, regras, exceções e pegadinhas.";
   const position = getQueueRevisions().findIndex((item) => item.id === revision.id) + 1;
+  let suggestedResult = "";
 
   let body = `
     <div class="recall-box">
@@ -1399,8 +1509,18 @@ function renderRevisionSession(due) {
   } else {
     const materials = getRevisionMaterials(revision);
     const sections = [];
+    const objective = revision.topicId ? cycleObjectiveGrade(state.questionLogs, revision.topicId) : null;
+    suggestedResult = cycleSuggestResult(objective);
     if (materials.stats) {
-      sections.push(`<div class="session-block"><span class="field-title">Desempenho em questões</span><p>${percent(materials.stats.accuracy)} de acerto em ${materials.stats.total} ${materials.stats.total === 1 ? "questão" : "questões"}.</p></div>`);
+      const solid = materials.stats.guessed ? ` (${percent(materials.stats.solidAccuracy)} sem os acertos no chute)` : "";
+      sections.push(`<div class="session-block"><span class="field-title">Desempenho em questões</span><p>${percent(materials.stats.accuracy)} de acerto em ${materials.stats.total} ${materials.stats.total === 1 ? "questão" : "questões"}${solid}.</p></div>`);
+    }
+    if (revision.topicId && revision.kind !== "law") {
+      sections.push(
+        suggestedResult
+          ? `<div class="session-block"><span class="field-title">O que as suas questões sugerem</span><p>${percent(objective.solidAccuracy)} de acerto sem chutes em ${objective.total} questões dos últimos ${objective.days} dias: <strong>${CYCLE_RESULT_LABELS[suggestedResult]}</strong>. Marque a sua nota abaixo; se ela for melhor do que as questões sustentam, o app registra a mais cautelosa.</p></div>`
+          : `<div class="session-block"><span class="field-title">Nota objetiva</span><p>${objective ? `Só ${objective.total} ${objective.total === 1 ? "questão" : "questões"} deste assunto nos últimos ${objective.days} dias.` : "Nenhuma questão deste assunto nos últimos dias."} Lance pelo menos ${CYCLE_OBJECTIVE_MIN} para a revisão ter uma nota objetiva. <button class="mini-button" data-view="questoes" type="button">Lançar questões</button></p></div>`
+      );
     }
     if (materials.errors.length) {
       sections.push(`<div class="session-block"><span class="field-title">Erros ainda abertos neste tema</span>${materials.errors
@@ -1437,8 +1557,8 @@ function renderRevisionSession(due) {
         <div class="rating-row">
           ${["forgot", "hard", "ok", "easy"]
             .map(
-              (result) => `<button class="button rating-${result}" data-cycle-action="rateRevision" data-result="${result}" data-id="${revision.id}" type="button">
-                <strong>${CYCLE_RESULT_LABELS[result]}</strong><small>${hint(result)}</small></button>`
+              (result) => `<button class="button rating-${result}${result === suggestedResult ? " suggested" : ""}" data-cycle-action="rateRevision" data-result="${result}" data-id="${revision.id}" type="button">
+                <strong>${CYCLE_RESULT_LABELS[result]}</strong><small>${hint(result)}${result === suggestedResult ? " · sugerido pelas questões" : ""}</small></button>`
             )
             .join("")}
         </div>
@@ -2086,22 +2206,40 @@ function handleCycleAction(button) {
     return undefined;
   }
   if (type === "rateRevision") {
-    const result = button.dataset.result;
-    const step = completeRevision(id, result, cycleUI.recall);
+    const chosen = button.dataset.result;
+    const target = state.revisions.find((item) => item.id === id);
+    const objective = target ? cycleObjectiveGrade(state.questionLogs, target.topicId) : null;
+    const adjustment = cycleAdjustResult(chosen, objective);
+    const result = adjustment.result;
+    const step = completeRevision(id, result, cycleUI.recall, chosen);
     if (!step) return undefined;
     const next = cycleNextDue(id);
     cycleUI.sessionId = next ? next.id : "";
     cycleUI.revealed = false;
     cycleUI.recall = "";
     cycleRefresh();
-    showToast(
-      step.done
-        ? "Revisão concluída: assunto fixado."
-        : next
-          ? `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}${step.examDate ? " (encurtado pela data da prova)" : ""}${step.leveled ? " (ajustado para um dia mais leve)" : ""}. Segue a próxima da fila.`
-          : `${CYCLE_RESULT_LABELS[result]}. Próxima revisão em ${step.gap} ${step.gap === 1 ? "dia" : "dias"}${step.examDate ? " (encurtado pela data da prova)" : ""}${step.leveled ? " (ajustado para um dia mais leve)" : ""}. Fila de hoje concluída.`
-    );
+    showToast(cycleRatedMessage({ step, result, chosen, adjustment, objective, tail: next ? "Segue a próxima da fila." : "Fila de hoje concluída." }));
     if (typeof todayAfterAction === "function") todayAfterAction("rev");
+    return undefined;
+  }
+  if (type === "quickReview") {
+    const done = quickReviewRevision(id);
+    if (!done) return undefined;
+    if (cycleUI.sessionId === id) {
+      const next = cycleNextDue(id);
+      cycleUI.sessionId = next ? next.id : "";
+      cycleUI.revealed = false;
+      cycleUI.recall = "";
+    }
+    cycleRefresh();
+    showToast(cycleRatedMessage({ ...done }));
+    if (typeof todayAfterAction === "function") todayAfterAction("rev");
+    return undefined;
+  }
+  if (type === "undoQuickReview") {
+    const restored = cycleUndoQuickReview();
+    cycleRefresh();
+    showToast(restored ? "Revisão desfeita: voltou para a fila." : "Não deu para desfazer: a revisão mudou desde então.");
     return undefined;
   }
   if (type === "finishRevision") {
@@ -2407,6 +2545,7 @@ function bindCycleEvents() {
     state.cycleSettings.examAdapt = $("#cycleExamAdapt").checked;
     state.cycleSettings.levelLoad = $("#cycleLevelLoad").checked;
     state.cycleSettings.capQueue = $("#cycleCapQueue").checked;
+    state.cycleSettings.gradeFromQuestions = $("#cycleGradeFromQuestions").checked;
     state.cycleSettings.minAutoMinutes = cycleInt($("#cycleMinAuto").value, 5, 120, CYCLE_MIN_AUTO_MINUTES);
     state.cycleSettings.weakAccuracy = cycleInt($("#cycleWeakAccuracy").value, 30, 95, 70);
     state.cycleSettings.weakMinQuestions = cycleInt($("#cycleWeakMin").value, 5, 100, 10);
@@ -3161,6 +3300,13 @@ if (typeof module !== "undefined" && module.exports) {
     cycleCapacitySlack,
     cyclePriority,
     cycleTodayQueue,
+    cycleObjectiveGrade,
+    quickReviewRevision,
+    cycleUndoQuickReview,
+    cycleQuickUndoNote,
+    cycleRatedMessage,
+    cycleSuggestResult,
+    cycleAdjustResult,
     cycleSteadyLoad,
     cycleSustainabilityNote,
     cycleCapacityDueDate,

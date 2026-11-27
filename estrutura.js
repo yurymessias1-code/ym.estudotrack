@@ -160,8 +160,8 @@ function estruturaNavHTML(area, nav, filters, { emptyText = "O menu aparece quan
     const isOpen = open[subject.id] ?? filters.subject === subject.id;
     const hasTopics = subject.topics.length > 0;
     const topics = [
+      hasTopics && subject.noTopic.total ? item("is-topic is-muted", filters.subject === subject.id && filters.topic === "none", subject.id, "none", "Direto na matéria", subject.noTopic) : "",
       ...subject.topics.map((topic) => item("is-topic", filters.subject === subject.id && filters.topic === topic.id, subject.id, topic.id, topic.name, topic)),
-      hasTopics && subject.noTopic.total ? item("is-topic is-muted", filters.subject === subject.id && filters.topic === "none", subject.id, "none", "Sem assunto específico", subject.noTopic) : "",
     ].join("");
     return `
       <div class="error-nav-group ${isOpen ? "is-open" : ""}">
@@ -180,7 +180,7 @@ function estruturaNavHTML(area, nav, filters, { emptyText = "O menu aparece quan
 function estruturaCrumbHTML(area, filters, maps, rootLabel = "Todas") {
   if (!filters.subject) return "";
   const subject = filters.subject === "none" ? "Sem matéria" : maps.subjectById.get(filters.subject)?.name || "";
-  const topic = filters.topic ? (filters.topic === "none" ? "Sem assunto específico" : maps.topicById.get(filters.topic)?.name || "") : "";
+  const topic = filters.topic ? (filters.topic === "none" ? "Direto na matéria" : maps.topicById.get(filters.topic)?.name || "") : "";
   const link = (subjectId, label) => `<button class="crumb-link" type="button" data-estrutura="nav" data-area="${area}" data-subject="${subjectId}" data-topic="">${escapeHTML(label)}</button>`;
   return `<nav class="error-crumb" aria-label="Local atual">${link("", rootLabel)}<span aria-hidden="true">›</span>${topic ? `${link(filters.subject, subject)}<span aria-hidden="true">›</span><strong>${escapeHTML(topic)}</strong>` : `<strong>${escapeHTML(subject)}</strong>`}</nav>`;
 }
@@ -188,7 +188,13 @@ function estruturaCrumbHTML(area, filters, maps, rootLabel = "Todas") {
 /** Blocos "Matéria" / "Assunto" com o cabeçalho de contagem, igual ao Caderno de erros. */
 function estruturaGroupsHTML(items, filters, subjects, topics, renderItem, nounOne, nounMany) {
   const plural = (n) => `${n} ${n === 1 ? nounOne : nounMany}`;
-  return groupErrorsByScope(items, subjects, topics, filters)
+  const groups = groupErrorsByScope(items, subjects, topics, filters);
+  // Com uma matéria aberta: o que está ligado direto à matéria vem primeiro; os assuntos viram tópicos abaixo.
+  const direct = groups.findIndex((group) => group.key === "t:none");
+  if (filters.subject && !filters.topic && direct > 0) groups.unshift(groups.splice(direct, 1)[0]);
+  if (filters.subject && !filters.topic && direct !== -1 && groups.length > 1) groups[0].title = "Direto na matéria (sem assunto)";
+  else if (direct !== -1 && groups.length === 1 && groups[0].key === "t:none") groups[0].title = "";
+  return groups
     .map(
       (group) => `
         <section class="error-group">

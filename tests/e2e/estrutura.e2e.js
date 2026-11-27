@@ -138,6 +138,13 @@ const typeInEditor = async (page, selector, text) => {
   assert.deepStrictEqual(linked.find(([title]) => title.startsWith("Julgado antigo")), ["Julgado antigo sobre improbidade", "Direito Administrativo", "Improbidade"]);
   assert.deepStrictEqual(linked.find(([title]) => title === "Sem pista nenhuma"), ["Sem pista nenhuma", "Direito Constitucional", ""]);
   assert((await page.locator("#caseList .error-group-title").allTextContents()).join("|").includes("Sem matéria") === false, "nada mais sem matéria");
+  // Matéria aberta: o que está direto nela vem primeiro; assuntos viram tópicos depois
+  await page.click('#jurisNav .is-subject[data-subject]:has-text("Direito Constitucional")');
+  const titles = await page.locator("#caseList .error-group-title").allTextContents();
+  assert(titles[0].startsWith("Direto na matéria"), "primeiro grupo: sem assunto. Veio: " + titles.join("|"));
+  assert(titles.length > 1, "assuntos aparecem depois, como tópicos");
+  assert((await page.locator("#caseList .error-group").first().textContent()).includes("Sem pista nenhuma"));
+  await page.click('#jurisNav .is-all');
   await page.click('[data-case-tab="STJ"]');
 
   // ---------------- Leis e tabelas ----------------

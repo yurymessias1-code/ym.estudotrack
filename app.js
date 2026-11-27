@@ -2186,6 +2186,7 @@ function openGlobalSearchResult(button) {
   }
 
   if (type === "case") {
+    estruturaUI.jurisSection = "cases";
     state.ui.caseCourt = button.dataset.court || state.ui.caseCourt || "STJ";
     state.ui.caseSearchScope = "current";
     state.ui.caseSearch = "";
@@ -2194,6 +2195,8 @@ function openGlobalSearchResult(button) {
   }
 
   if (type === "legalMaterial") {
+    estruturaUI.jurisSection = "material";
+    estruturaUI.materialType = "all";
     const item = state.legalMaterials.find((material) => material.id === id);
     state.ui.legalMaterialSearch = item?.title || "";
     state.ui.legalMaterialSubjectFilter = button.dataset.subjectId || "";
@@ -2307,77 +2310,14 @@ function populateFlashcardReviewSelectors() {
 }
 
 function populateCaseFilterSelectors() {
-  const subjectSelect = $("#caseSubjectFilter");
-  const topicSelect = $("#caseTopicFilter");
+  // O menu "Matérias e assuntos" (estrutura.js) substituiu os seletores: aqui só a caixa de busca da aba.
   const searchInput = $("#caseSearch");
-  if (!subjectSelect || !topicSelect || !searchInput) return;
-
-  if (!state.subjects.some((subject) => subject.id === state.ui.caseSubjectFilter)) state.ui.caseSubjectFilter = "";
-  if (!state.topics.some((topic) => topic.id === state.ui.caseTopicFilter)) state.ui.caseTopicFilter = "";
-  const selectedTopic = getTopic(state.ui.caseTopicFilter);
-  if (state.ui.caseSubjectFilter && selectedTopic && selectedTopic.subjectId !== state.ui.caseSubjectFilter) {
-    state.ui.caseTopicFilter = "";
-  }
-
-  const subjectOptions = state.subjects
-    .map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`)
-    .join("");
-  const topicOptions = state.topics
-    .filter((topic) => !state.ui.caseSubjectFilter || topic.subjectId === state.ui.caseSubjectFilter)
-    .map((topic) => {
-      const subject = getSubject(topic.subjectId);
-      return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
-    })
-    .join("");
-
-  if (document.activeElement !== searchInput) searchInput.value = state.ui.caseSearch || "";
-  subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
-  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
-  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${state.topics
-    .filter((topic) => !state.ui.caseSubjectFilter || topic.subjectId === state.ui.caseSubjectFilter)
-    .map((topic) => renderTopicOption(topic, { includeSubject: !state.ui.caseSubjectFilter, maxLength: state.ui.caseSubjectFilter ? 34 : 52 }))
-    .join("")}`;
-  subjectSelect.value = state.ui.caseSubjectFilter || "";
-  topicSelect.value = state.ui.caseTopicFilter || "";
-  subjectSelect.disabled = state.subjects.length === 0;
-  topicSelect.disabled = state.topics.length === 0;
+  if (searchInput && document.activeElement !== searchInput) searchInput.value = state.ui.caseSearch || "";
 }
 
 function populateLegalMaterialFilterSelectors() {
-  const subjectSelect = $("#legalMaterialSubjectFilter");
-  const topicSelect = $("#legalMaterialTopicFilter");
   const searchInput = $("#legalMaterialSearch");
-  if (!subjectSelect || !topicSelect || !searchInput) return;
-
-  if (!state.subjects.some((subject) => subject.id === state.ui.legalMaterialSubjectFilter)) state.ui.legalMaterialSubjectFilter = "";
-  if (!state.topics.some((topic) => topic.id === state.ui.legalMaterialTopicFilter)) state.ui.legalMaterialTopicFilter = "";
-  const selectedTopic = getTopic(state.ui.legalMaterialTopicFilter);
-  if (state.ui.legalMaterialSubjectFilter && selectedTopic && selectedTopic.subjectId !== state.ui.legalMaterialSubjectFilter) {
-    state.ui.legalMaterialTopicFilter = "";
-  }
-
-  const subjectOptions = state.subjects
-    .map((subject) => `<option value="${subject.id}">${escapeHTML(subject.name)}</option>`)
-    .join("");
-  const topicOptions = state.topics
-    .filter((topic) => !state.ui.legalMaterialSubjectFilter || topic.subjectId === state.ui.legalMaterialSubjectFilter)
-    .map((topic) => {
-      const subject = getSubject(topic.subjectId);
-      return `<option value="${topic.id}">${escapeHTML(subject?.name || "Sem matéria")} - ${escapeHTML(topic.name)}</option>`;
-    })
-    .join("");
-
-  if (document.activeElement !== searchInput) searchInput.value = state.ui.legalMaterialSearch || "";
-  subjectSelect.innerHTML = `<option value="">Todas as matérias</option>${subjectOptions}`;
-  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${topicOptions}`;
-  topicSelect.innerHTML = `<option value="">Todos os assuntos</option>${state.topics
-    .filter((topic) => !state.ui.legalMaterialSubjectFilter || topic.subjectId === state.ui.legalMaterialSubjectFilter)
-    .map((topic) => renderTopicOption(topic, { includeSubject: !state.ui.legalMaterialSubjectFilter, maxLength: state.ui.legalMaterialSubjectFilter ? 34 : 52 }))
-    .join("")}`;
-  subjectSelect.value = state.ui.legalMaterialSubjectFilter || "";
-  topicSelect.value = state.ui.legalMaterialTopicFilter || "";
-  subjectSelect.disabled = state.subjects.length === 0;
-  topicSelect.disabled = state.topics.length === 0;
+  if (searchInput && document.activeElement !== searchInput) searchInput.value = state.ui.legalMaterialSearch || "";
 }
 
 function ensureFormDefaults() {
@@ -5147,7 +5087,7 @@ function renderFlashcards() {
 
   if (!state.flashcards.length) {
     $("#flashcardReview").innerHTML = `<div class="empty-state">Cadastre flashcards para iniciar suas revisões.</div>`;
-    $("#flashcardLibrary").innerHTML = `<div class="empty-state">Sua biblioteca de flashcards aparecerá aqui.</div>`;
+    renderFlashcardLibrary();
     return;
   }
 
@@ -5260,6 +5200,7 @@ function updateFlashcardFormMode() {
   const cancel = $("#flashcardCancelEditBtn");
   if (submit) submit.textContent = editing ? "Salvar alterações" : "Salvar flashcard";
   if (cancel) cancel.classList.toggle("hidden", !editing);
+  if ($("#flashcardModalTitle")) $("#flashcardModalTitle").textContent = editing ? "Editar flashcard" : "Cadastrar flashcard";
 }
 
 function resetFlashcardForm() {
@@ -5339,14 +5280,9 @@ function renderFlashcardReview(card, dueCount, scopeCount = 0) {
   `;
 }
 
-function renderFlashcardLibrary() {
-  const counter = Number(state.flashcardSettings.reviewCounter || 0);
-  const sorted = [...state.flashcards].sort(flashcardRuleSort);
-  $("#flashcardLibrary").innerHTML = sorted.length
-    ? sorted
-        .map((card) => {
-          const isDue = Number(card.nextDueReviewNumber || 0) <= counter;
-          return `
+function renderFlashcardCard(card, counter = Number(state.flashcardSettings.reviewCounter || 0)) {
+  const isDue = Number(card.nextDueReviewNumber || 0) <= counter;
+  return `
         <article class="flashcard-library-card">
           <div class="flashcard-card-top">
             <div>
@@ -5371,9 +5307,10 @@ function renderFlashcardLibrary() {
           </div>
         </article>
       `;
-        })
-        .join("")
-    : `<div class="empty-state">Sua biblioteca de flashcards aparecerá aqui.</div>`;
+}
+
+function renderFlashcardLibrary() {
+  estruturaRenderFlashLibrary();
 }
 
 function updateFlashcardReviewSettings({ silent = false } = {}) {
@@ -6070,6 +6007,7 @@ function renderCases() {
   const scope = state.ui.caseSearchScope === "all" ? "all" : "current";
   state.ui.caseCourt = court;
   state.ui.caseSearchScope = scope;
+  estruturaSanitizeJuris();
 
   $$(".segment[data-case-tab]").forEach((button) => {
     const active = button.dataset.caseTab === court;
@@ -6091,23 +6029,18 @@ function renderCases() {
     scope === "all"
       ? ["STJ", "STF"].flatMap((courtName) => (state.cases[courtName] || []).map((item) => ({ item, court: courtName })))
       : (state.cases[court] || []).map((item) => ({ item, court }));
-  const items = allItems
-    .filter(({ item, court: itemCourt }) => caseMatchesFilters(item, itemCourt))
+  // A busca vale para o menu (contagens) e para a lista; matéria/assunto só para a lista.
+  const searched = allItems.filter(({ item, court: itemCourt }) => caseMatchesSearch(item, itemCourt));
+  estruturaUI.casesSearched = searched.map(({ item }) => item);
+  const items = searched
+    .filter(({ item }) => estruturaScopeOk(item, state.ui.caseSubjectFilter, state.ui.caseTopicFilter, state.subjects, state.topics))
     .sort((a, b) => String(b.item.date || "").localeCompare(String(a.item.date || "")));
   const summary = $("#caseFilterSummary");
   if (summary) {
     summary.textContent = caseFilterSummary(items.length, allItems.length, scope === "all" ? "STJ + STF" : court);
   }
   updateCaseFormMode();
-  $("#caseList").innerHTML = items.length
-    ? items.map(({ item, court: itemCourt }) => renderCaseCard(item, itemCourt)).join("")
-    : `<div class="empty-state">${
-        allItems.length
-          ? "Nenhuma jurisprudência encontrada com esses filtros."
-          : scope === "all"
-            ? "Nenhuma jurisprudência cadastrada em STJ ou STF."
-            : "Nenhuma jurisprudência cadastrada nesta aba."
-      }</div>`;
+  $("#caseList").innerHTML = estruturaCaseListHTML(items, allItems.length);
   renderLegalMaterials();
 }
 
@@ -6119,16 +6052,11 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-function caseMatchesFilters(item, court = state.ui.caseCourt) {
+/** Busca de texto da aba (não olha matéria/assunto: isso é o menu). */
+function caseMatchesSearch(item, court = state.ui.caseCourt) {
   const topic = getTopic(item.topicId);
-  const subjectId = getEntrySubjectId(item);
-  const subject = getSubject(subjectId);
-  const subjectFilter = state.ui.caseSubjectFilter || "";
-  const topicFilter = state.ui.caseTopicFilter || "";
+  const subject = getSubject(getEntrySubjectId(item));
   const search = normalizeSearchText(state.ui.caseSearch);
-
-  if (subjectFilter && subjectId !== subjectFilter) return false;
-  if (topicFilter && item.topicId !== topicFilter) return false;
   if (!search) return true;
 
   const haystack = normalizeSearchText(
@@ -6145,6 +6073,10 @@ function caseMatchesFilters(item, court = state.ui.caseCourt) {
     ].join(" ")
   );
   return haystack.includes(search);
+}
+
+function caseMatchesFilters(item, court = state.ui.caseCourt) {
+  return caseMatchesSearch(item, court) && estruturaScopeOk(item, state.ui.caseSubjectFilter, state.ui.caseTopicFilter, state.subjects, state.topics);
 }
 
 function caseFilterSummary(resultCount, totalCount, court) {
@@ -6170,6 +6102,7 @@ function updateCaseFormMode() {
   const cancel = $("#caseCancelEditBtn");
   if (submit) submit.textContent = editing ? "Salvar alterações" : "Salvar jurisprudência";
   if (cancel) cancel.classList.toggle("hidden", !editing);
+  if ($("#caseModalTitle")) $("#caseModalTitle").textContent = editing ? "Editar jurisprudência" : "Nova jurisprudência";
 }
 
 function resetCaseForm(options = {}) {
@@ -6535,6 +6468,7 @@ function updateLegalMaterialFormMode() {
   const cancelButton = $("#legalMaterialCancelEditBtn");
   if (submitButton) submitButton.textContent = isEditing ? "Salvar edição" : "Salvar material";
   if (cancelButton) cancelButton.classList.toggle("hidden", !isEditing);
+  if ($("#legalMaterialModalTitle")) $("#legalMaterialModalTitle").textContent = isEditing ? "Editar material" : "Adicionar lei, tabela, anotação ou imagem";
 }
 
 function fillLegalMaterialForm(item) {
@@ -6981,16 +6915,11 @@ async function downloadLegalMaterial(id) {
   showToast("Texto exportado.");
 }
 
-function legalMaterialMatchesFilters(item) {
+/** Busca de texto de leis e tabelas (não olha matéria/assunto/tipo: isso é o menu e os botões de tipo). */
+function legalMaterialMatchesSearch(item) {
   const topic = getTopic(item.topicId);
-  const subjectId = getEntrySubjectId(item);
-  const subject = getSubject(subjectId);
-  const subjectFilter = state.ui.legalMaterialSubjectFilter || "";
-  const topicFilter = state.ui.legalMaterialTopicFilter || "";
+  const subject = getSubject(getEntrySubjectId(item));
   const search = normalizeSearchText(state.ui.legalMaterialSearch);
-
-  if (subjectFilter && subjectId !== subjectFilter) return false;
-  if (topicFilter && item.topicId !== topicFilter) return false;
   if (!search) return true;
 
   const haystack = normalizeSearchText(
@@ -7008,6 +6937,14 @@ function legalMaterialMatchesFilters(item) {
   return haystack.includes(search);
 }
 
+function legalMaterialMatchesFilters(item) {
+  return (
+    legalMaterialMatchesSearch(item) &&
+    estruturaMaterialTypeOk(item) &&
+    estruturaScopeOk(item, state.ui.legalMaterialSubjectFilter, state.ui.legalMaterialTopicFilter, state.subjects, state.topics)
+  );
+}
+
 function renderLegalMaterials() {
   const list = $("#legalMaterialList");
   if (!list) return;
@@ -7015,25 +6952,25 @@ function renderLegalMaterials() {
   updateLegalMaterialFormMode();
 
   const allItems = Array.isArray(state.legalMaterials) ? [...state.legalMaterials] : [];
+  const searched = allItems.filter(legalMaterialMatchesSearch);
+  estruturaUI.materialsSearched = searched;
   const items = allItems
     .filter(legalMaterialMatchesFilters)
     .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  const filters = [
+    state.ui.legalMaterialSearch ? "texto" : "",
+    state.ui.legalMaterialSubjectFilter ? "matéria" : "",
+    state.ui.legalMaterialTopicFilter ? "assunto" : "",
+    estruturaUI.materialType !== "all" ? "tipo" : "",
+  ].filter(Boolean);
+  const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
   const summary = $("#legalMaterialSummary");
-  if (summary) {
-    const filters = [
-      state.ui.legalMaterialSearch ? "texto" : "",
-      state.ui.legalMaterialSubjectFilter ? "matéria" : "",
-      state.ui.legalMaterialTopicFilter ? "assunto" : "",
-    ].filter(Boolean);
-    const suffix = filters.length ? ` com filtro por ${filters.join(", ")}` : "";
-    summary.textContent = `${items.length} de ${allItems.length} materiais${suffix}.`;
-    const filterSummary = $("#legalMaterialFilterSummary");
-    if (filterSummary) filterSummary.textContent = `${items.length} de ${allItems.length} leis, tabelas, anotações e imagens${suffix}.`;
-  }
+  if (summary) summary.textContent = `${items.length} de ${allItems.length} materiais${suffix}.`;
+  const filterSummary = $("#legalMaterialFilterSummary");
+  if (filterSummary) filterSummary.textContent = `${items.length} de ${allItems.length} leis, tabelas, anotações e imagens${suffix}.`;
 
-  list.innerHTML = items.length
-    ? renderLegalMaterialGroups(items)
-    : `<div class="empty-state">${allItems.length ? "Nenhum material encontrado com esses filtros." : "Nenhuma lei, tabela ou anotação cadastrada."}</div>`;
+  list.innerHTML = estruturaMaterialListHTML(items, allItems.length);
+  estruturaRenderJuris();
 }
 
 function renderLegalMaterialGroups(items) {
@@ -8353,13 +8290,6 @@ function attachEvents() {
     saveUnsavedFormDrafts();
   });
 
-  $("#caseSubjectFilter").addEventListener("change", (event) => {
-    state.ui.caseSubjectFilter = event.target.value;
-    state.ui.caseTopicFilter = "";
-    saveState();
-    renderCases();
-  });
-
   $$("[data-report-group]").forEach((input) => {
     input.addEventListener("change", (event) => {
       state.ui.reportGroup = event.target.value === "topics" ? "topics" : "subjects";
@@ -8387,20 +8317,6 @@ function attachEvents() {
     showToast("Período personalizado aplicado.");
   });
 
-  $("#caseTopicFilter").addEventListener("change", (event) => {
-    state.ui.caseTopicFilter = event.target.value;
-    saveState();
-    renderCases();
-  });
-
-  $("#clearCaseFiltersBtn").addEventListener("click", () => {
-    state.ui.caseSearch = "";
-    state.ui.caseSubjectFilter = "";
-    state.ui.caseTopicFilter = "";
-    saveState();
-    renderCases();
-  });
-
   $("#legalMaterialFilterForm").addEventListener("submit", (event) => {
     event.preventDefault();
     renderLegalMaterials();
@@ -8412,32 +8328,12 @@ function attachEvents() {
     renderLegalMaterials();
   });
 
-  $("#legalMaterialSubjectFilter").addEventListener("change", (event) => {
-    state.ui.legalMaterialSubjectFilter = event.target.value;
-    state.ui.legalMaterialTopicFilter = "";
-    saveState();
-    renderLegalMaterials();
-  });
-
-  $("#legalMaterialTopicFilter").addEventListener("change", (event) => {
-    state.ui.legalMaterialTopicFilter = event.target.value;
-    saveState();
-    renderLegalMaterials();
-  });
-
-  $("#clearLegalMaterialFiltersBtn").addEventListener("click", () => {
-    state.ui.legalMaterialSearch = "";
-    state.ui.legalMaterialSubjectFilter = "";
-    state.ui.legalMaterialTopicFilter = "";
-    saveState();
-    renderLegalMaterials();
-  });
-
   $("#caseCancelEditBtn").addEventListener("click", () => {
     clearFormDraft("case");
     resetCaseForm();
     saveState();
     renderCases();
+    estruturaCloseModal("case");
     showToast("Edição da jurisprudência cancelada.");
   });
 
@@ -8787,6 +8683,7 @@ function attachEvents() {
     clearFormDraft("case");
     resetCaseForm({ preserveCourt: true });
     render();
+    estruturaCloseModal("case");
     showToast(existing ? "Jurisprudência atualizada." : `Jurisprudência do ${court} salva.`);
   });
 
@@ -8818,6 +8715,7 @@ function attachEvents() {
     clearFormDraft("legalMaterial");
     resetLegalMaterialForm();
     render();
+    estruturaCloseModal("material");
     showToast(existing ? `${legalMaterialTypeLabel(material.type)} atualizada.` : `${legalMaterialTypeLabel(material.type)} salva.`);
   });
 
@@ -8831,6 +8729,7 @@ function attachEvents() {
     clearFormDraft("legalMaterial");
     resetLegalMaterialForm();
     saveState();
+    estruturaCloseModal("material");
     showToast("Edição do material cancelada.");
   });
 
@@ -8968,6 +8867,7 @@ function attachEvents() {
     clearFormDraft("flashcard");
     resetFlashcardForm();
     render();
+    estruturaCloseModal("flash");
     showToast(existing ? "Flashcard atualizado." : "Flashcard salvo.");
   });
 
@@ -8991,6 +8891,7 @@ function attachEvents() {
     resetFlashcardForm();
     saveState();
     renderFlashcards();
+    estruturaCloseModal("flash");
     showToast("Edição do flashcard cancelada.");
   });
 
@@ -9321,7 +9222,7 @@ function handleAction(action) {
     render();
     fillFlashcardForm(card);
     saveState();
-    $("#flashcardForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    estruturaOpenModal("flash", { returnFocus: action });
     showToast("Flashcard carregado para edição.");
     return;
   }
@@ -9643,7 +9544,7 @@ function handleAction(action) {
     render();
     fillCaseForm(item, court);
     saveState();
-    $("#caseForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    estruturaOpenModal("case", { returnFocus: action });
     showToast("Jurisprudência carregada para edição.");
     return;
   }
@@ -9685,7 +9586,8 @@ function handleAction(action) {
     render();
     fillLegalMaterialForm(item);
     saveState();
-    $("#legalMaterialForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    estruturaUI.jurisSection = "material";
+    estruturaOpenModal("material", { returnFocus: action });
     showToast(`${legalMaterialTypeLabel(item.type)} carregada para edição.`);
     return;
   }
@@ -9816,6 +9718,7 @@ function importData(event) {
 
 attachEvents();
 bindCycleEvents();
+bindEstruturaEvents();
 resetTimer();
 render();
 initializeSupabaseAuth();

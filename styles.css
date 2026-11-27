@@ -5227,3 +5227,128 @@ body.modal-open {
   outline: 2px solid var(--teal);
   outline-offset: 2px;
 }
+
+/* ---------- Jurisprudências e Flashcards: menu por matéria/assunto e janelas de cadastro ---------- */
+
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.juris-sections {
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 16px;
+}
+
+.juris-workspace .case-list,
+.juris-workspace .legal-material-list {
+  display: grid;
+  gap: 22px;
+  max-height: none;
+  overflow: visible;
+}
+
+.juris-workspace .error-group,
+.flash-workspace .error-group {
+  gap: 14px;
+}
+
+.juris-workspace .case-filter-form {
+  margin-bottom: 16px;
+}
+
+.juris-types {
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.juris-types .segment small {
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.flash-workspace {
+  margin-top: 18px;
+}
+
+.flash-filters {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.flash-workspace .flashcard-library {
+  display: grid;
+  gap: 22px;
+}
+
+/* Janela de cadastro (julgado, lei/tabela, flashcard): larga, com rolagem própria */
+.estrutura-backdrop {
+  align-items: start;
+  overflow-y: auto;
+}
+
+.estrutura-card {
+  position: relative;
+  width: min(900px, 100%);
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.estrutura-card .note-editor {
+  max-height: min(42vh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.estrutura-card .panel-header {
+  padding-right: 40px;
+}
+
+.estrutura-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.estrutura-close:hover {
+  background: var(--panel-soft);
+}
+
+@media (max-width: 760px) {
+  .heading-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .heading-actions .button {
+    flex: 1 1 auto;
+  }
+
+  .estrutura-backdrop {
+    padding: 8px;
+  }
+
+  .estrutura-card {
+    max-height: calc(100vh - 16px);
+    padding: 16px;
+  }
+}

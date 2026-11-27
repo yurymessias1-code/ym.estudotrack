@@ -285,9 +285,9 @@ assert(fs.existsSync(path.join(__dirname, "e2e", "sessao.e2e.js")), "tests/e2e/s
 assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("sessao.e2e.js"), "run-all.js nao inclui o roteiro da sessao.");
 
 // Sincronizacao segura entre aparelhos, mesclagem, relatorios e janela acessivel
-["merge-tests.js", "mesclar-tests.js", "retencao-tests.js"].forEach((file) => execFileSync(process.execPath, [path.join(__dirname, file)], { stdio: "inherit" }));
-["modal.js", "merge.js", "mesclar.js", "retencao.js"].forEach((file) => execFileSync(process.execPath, ["--check", path.join(root, file)], { stdio: "inherit" }));
-const order = ["modal.js", "merge.js", "ciclo.js", "hoje.js", "push.js", "sessao.js", "mesclar.js", "retencao.js", "app.js"].map((file) => html.indexOf(`src="${file}`));
+["merge-tests.js", "mesclar-tests.js", "retencao-tests.js", "estrutura-tests.js"].forEach((file) => execFileSync(process.execPath, [path.join(__dirname, file)], { stdio: "inherit" }));
+["modal.js", "merge.js", "mesclar.js", "retencao.js", "estrutura.js"].forEach((file) => execFileSync(process.execPath, ["--check", path.join(root, file)], { stdio: "inherit" }));
+const order = ["modal.js", "merge.js", "ciclo.js", "hoje.js", "push.js", "sessao.js", "mesclar.js", "retencao.js", "estrutura.js", "app.js"].map((file) => html.indexOf(`src="${file}`));
 assert(order.every((position, index) => position > 0 && (index === 0 || position > order[index - 1])), "Ordem de carga dos scripts incorreta: " + order.join(","));
 const modalJs = fs.readFileSync(path.join(root, "modal.js"), "utf8");
 assert(modalJs.includes('"inert"') && modalJs.includes("focusin") && modalJs.includes('"Tab"'), "modal.js deve prender o foco e tornar o fundo inerte.");
@@ -310,3 +310,7 @@ const runAll = fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8"
 ["sync.e2e.js", "mesclar.e2e.js", "relatorios.e2e.js"].forEach((file) => assert(runAll.includes(file), `run-all.js nao inclui ${file}.`));
 
 console.log("Smoke tests OK: estrutura principal validada.");
+
+// Jurisprudências e Flashcards: menu por matéria/assunto, janelas de cadastro e busca da própria aba
+["jurisNav", "jurisAddBtn", "caseModal", "legalMaterialModal", "flashcardModal", "flashNav", "flashcardSearch", "caseSearch", "legalMaterialSearch"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
+assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("estrutura.e2e.js"), "run-all.js nao inclui o roteiro da estrutura.");

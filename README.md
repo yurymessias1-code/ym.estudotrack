@@ -37,6 +37,7 @@ Aplicativo web estático para controle de estudos para concursos, com:
 - **reforço automático** quando o acerto em um assunto fica baixo;
 - **lembrete semanal de backup**;
 - **menu agrupado** e, no celular, **barra inferior** com o painel **Mais**.
+- **Jurisprudências e Flashcards** com o mesmo menu **Matérias e assuntos** do Caderno de erros, busca própria de cada aba e janelas de cadastro (botões **Adicionar jurisprudência**, **Adicionar material** e **Novo flashcard**).
 
 ## Como publicar no GitHub
 

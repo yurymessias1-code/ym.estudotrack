@@ -1509,7 +1509,7 @@ function normalizeState(candidate, fallbackProfileId = "") {
         theme: candidate.ui?.theme === "dark" ? "dark" : "light",
         caseCourt: ["STJ", "STF"].includes(candidate.ui?.caseCourt) ? candidate.ui.caseCourt : "STJ",
         caseFormCourt: ["STJ", "STF"].includes(candidate.ui?.caseFormCourt) ? candidate.ui.caseFormCourt : ["STJ", "STF"].includes(candidate.ui?.caseCourt) ? candidate.ui.caseCourt : "STJ",
-        caseSearchScope: ["current", "all"].includes(candidate.ui?.caseSearchScope) ? candidate.ui.caseSearchScope : "current",
+        caseSearchScope: ["current", "all"].includes(candidate.ui?.caseSearchScope) ? candidate.ui.caseSearchScope : "all",
         caseSearch: typeof candidate.ui?.caseSearch === "string" ? candidate.ui.caseSearch : "",
         caseSubjectFilter: typeof candidate.ui?.caseSubjectFilter === "string" ? candidate.ui.caseSubjectFilter : "",
         caseTopicFilter: typeof candidate.ui?.caseTopicFilter === "string" ? candidate.ui.caseTopicFilter : "",
@@ -1589,7 +1589,7 @@ function createEmptyState(profile = {}) {
         theme: "light",
         caseCourt: "STJ",
         caseFormCourt: "STJ",
-        caseSearchScope: "current",
+        caseSearchScope: "all",
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
@@ -1739,7 +1739,7 @@ function createSeedState() {
         theme: state?.ui?.theme === "dark" ? "dark" : "light",
         caseCourt: "STJ",
         caseFormCourt: "STJ",
-        caseSearchScope: "current",
+        caseSearchScope: "all",
         caseSearch: "",
         caseSubjectFilter: "",
         caseTopicFilter: "",
@@ -6010,7 +6010,7 @@ function renderCases() {
   estruturaSanitizeJuris();
 
   $$(".segment[data-case-tab]").forEach((button) => {
-    const active = button.dataset.caseTab === court;
+    const active = scope === "current" && button.dataset.caseTab === court;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
   });
@@ -6021,7 +6021,7 @@ function renderCases() {
   });
 
   updateCaseCourtFormLabel();
-  $("#caseListScopeLabel").textContent = scope === "all" ? "Pesquisa geral" : "Aba atual";
+  $("#caseListScopeLabel").textContent = scope === "all" ? "Todos os tribunais" : "Só este tribunal";
   $("#caseListTitle").textContent = scope === "all" ? "STJ + STF" : court;
   populateCaseFilterSelectors();
 
@@ -6037,7 +6037,11 @@ function renderCases() {
     .sort((a, b) => String(b.item.date || "").localeCompare(String(a.item.date || "")));
   const summary = $("#caseFilterSummary");
   if (summary) {
-    summary.textContent = caseFilterSummary(items.length, allItems.length, scope === "all" ? "STJ + STF" : court);
+    const otherCourt = court === "STJ" ? "STF" : "STJ";
+    const otherCount = scope === "all" ? 0 : (state.cases[otherCourt] || []).length;
+    summary.textContent =
+      caseFilterSummary(items.length, allItems.length, scope === "all" ? "STJ + STF" : court) +
+      (otherCount ? ` Há mais ${otherCount} no ${otherCourt}: use "Todos".` : "");
   }
   updateCaseFormMode();
   $("#caseList").innerHTML = estruturaCaseListHTML(items, allItems.length);

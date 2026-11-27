@@ -1,7 +1,7 @@
 // Menu "Matérias e assuntos" (estrutura.js): contagens, filtros e limpeza de seleção.
 const assert = require("assert");
 const path = require("path");
-const { estruturaBuildNav, estruturaScopeOk, estruturaCleanFilters } = require(path.resolve(__dirname, "..", "estrutura.js"));
+const { estruturaBuildNav, estruturaScopeOk, estruturaCleanFilters, estruturaSuggest, estruturaOrganizeCandidates } = require(path.resolve(__dirname, "..", "estrutura.js"));
 
 const subjects = [{ id: "s1", name: "Constitucional", color: "#0f766e" }, { id: "s2", name: "Administrativo" }];
 const topics = [{ id: "t1", subjectId: "s1", name: "Direitos" }, { id: "t2", subjectId: "s1", name: "Poderes" }, { id: "t3", subjectId: "s2", name: "Improbidade" }];
@@ -54,6 +54,35 @@ test("limpa seleção que aponta para o que foi apagado", () => {
   assert.deepStrictEqual(estruturaCleanFilters({ subject: "s1", topic: "t3" }, subjects, topics), { subject: "s1", topic: "" });
   assert.deepStrictEqual(estruturaCleanFilters({ subject: "none", topic: "none" }, subjects, topics), { subject: "none", topic: "" });
   assert.deepStrictEqual(estruturaCleanFilters({ subject: "s1", topic: "t2" }, subjects, topics), { subject: "s1", topic: "t2" });
+});
+
+test("sugestão pelo texto: assunto, matéria e palavra inteira", () => {
+  assert.deepStrictEqual(
+    { ...estruturaSuggest("Tema 1199 STJ sobre Improbidade e dolo", subjects, topics), reason: "" },
+    { subjectId: "s2", topicId: "t3", reason: "" }
+  );
+  const dir = estruturaSuggest("Limites dos DIREITOS fundamentais", subjects, topics);
+  assert.deepStrictEqual([dir.subjectId, dir.topicId], ["s1", "t1"], "ignora maiúsculas e acentos");
+});
+
+test("sugestão pelo nome da matéria, sem o prefixo Direito", () => {
+  const s = estruturaSuggest("Controle de constitucionalidade e norma constitucional", subjects, topics);
+  assert.deepStrictEqual([s.subjectId, s.topicId], ["s1", ""]);
+  assert.strictEqual(estruturaSuggest("texto sem pista", subjects, topics), null);
+  assert.strictEqual(estruturaSuggest("improbidadeadministrativa", subjects, topics), null, "só palavra inteira");
+});
+
+test("quem já tem matéria só recebe assunto dessa matéria", () => {
+  assert.strictEqual(estruturaSuggest("fala de improbidade", subjects, topics, "s1"), null, "improbidade é assunto de outra matéria");
+  const keep = estruturaSuggest("sobre poderes e poder legislativo", subjects, topics, "s1");
+  assert.strictEqual(keep.topicId, "t2");
+});
+
+test("candidatos a organizar: sem matéria primeiro, e matéria sem assunto", () => {
+  const list = estruturaOrganizeCandidates(items, subjects, topics).map((item) => item.id);
+  assert.deepStrictEqual(list.slice(0, 2).sort(), ["e", "f"], "sem vínculo e vínculos apagados primeiro");
+  assert(list.includes("d"), "matéria que tem assuntos, mas o item não tem assunto");
+  assert(!list.includes("a") && !list.includes("c"), "já vinculados ficam de fora");
 });
 
 console.log(`estrutura-tests: ${count} testes passaram.`);

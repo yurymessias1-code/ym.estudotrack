@@ -172,6 +172,7 @@ O card do concurso mostra o total de horas por matéria, usando a cor da matéri
 A aba **Jurisprudências** separa julgados de STJ e STF.
 Os julgados cadastrados pelo usuário podem ser pesquisados por texto livre, matéria e assunto vinculado.
 O filtro funciona sobre título, tema, tese/resumo, fonte, matéria e assunto.
+O seletor **Todos | STJ | STF** mostra a contagem de cada tribunal. Julgados e materiais antigos, sem matéria ou assunto, aparecem no grupo **Sem matéria**, e o botão **Organizar por matéria e assunto** abre uma janela para vinculá-los em lote, com sugestões tiradas do texto (título, tema, hashtags e ementa).
 Cada julgado pode receber hashtags, como `#tema1199` ou `#improbidade`, e essas tags também entram na pesquisa.
 Os julgados podem ser editados depois de salvos, mantendo o texto formatado com cores rápidas, marca-texto, alinhamento, parágrafos, tabelas coladas do Word/Excel e imagens.
 Ao cadastrar jurisprudência, lei ou tabela, é possível escolher apenas a matéria e deixar o assunto em branco.

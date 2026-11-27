@@ -32,6 +32,7 @@ const ESTRUTURA_MODAIS = {
   case: { modal: "#caseModal", focus: "#caseTitle" },
   material: { modal: "#legalMaterialModal", focus: "#legalMaterialTitle" },
   flash: { modal: "#flashcardModal", focus: "#flashcardSubject" },
+  organize: { modal: "#organizeModal", focus: "#organizeSuggestBtn" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -93,6 +94,52 @@ function estruturaCleanFilters(filters, subjects, topics) {
   if (!subject || subject === "none") topic = "";
   if (topic && topic !== "none" && maps.topicById.get(topic)?.subjectId !== subject) topic = "";
   return { subject, topic };
+}
+
+function estruturaNorm(text) {
+  return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Sugere matéria/assunto procurando o NOME de assuntos e matérias cadastrados no texto do item
+ * (título, tema, hashtags, ementa). Só sugere quando o nome aparece como palavra inteira.
+ * Retorna { subjectId, topicId, reason } ou null.
+ */
+function estruturaSuggest(text, subjects, topics, currentSubjectId = "") {
+  const haystack = ` ${estruturaNorm(text)} `;
+  const found = (name) => {
+    const norm = estruturaNorm(name);
+    return norm.length >= 4 && haystack.includes(` ${norm} `) ? norm.length : 0;
+  };
+  let best = null;
+  (topics || []).forEach((topic) => {
+    if (currentSubjectId && topic.subjectId !== currentSubjectId) return; // quem já tem matéria só recebe assunto dela
+    const score = found(topic.name);
+    if (!score) return;
+    const total = score + (topic.subjectId === currentSubjectId ? 100 : 0);
+    if (!best || total > best.score) best = { score: total, subjectId: topic.subjectId, topicId: topic.id, reason: `assunto "${topic.name}" aparece no texto` };
+  });
+  if (best) return { subjectId: best.subjectId, topicId: best.topicId, reason: best.reason };
+  if (currentSubjectId) return null;
+  (subjects || []).forEach((subject) => {
+    // "Direito Constitucional" também casa com "constitucional"
+    const score = Math.max(found(subject.name), found(String(subject.name || "").replace(/^direito\s+/i, "")));
+    if (!score) return;
+    if (!best || score > best.score) best = { score, subjectId: subject.id, topicId: "", reason: `matéria "${subject.name}" aparece no texto` };
+  });
+  return best ? { subjectId: best.subjectId, topicId: "", reason: best.reason } : null;
+}
+
+/** Itens que ainda precisam de vínculo: sem matéria, ou com matéria que tem assuntos mas sem assunto. Sem matéria primeiro. */
+function estruturaOrganizeCandidates(items, subjects, topics) {
+  const maps = erroMaps(subjects, topics);
+  const rank = (item) => {
+    const scope = erroEntryScope(item, maps);
+    if (!scope.subjectId) return 0;
+    if (!scope.topicId && (topics || []).some((topic) => topic.subjectId === scope.subjectId)) return 1;
+    return -1;
+  };
+  return items.filter((item) => rank(item) >= 0).sort((a, b) => rank(a) - rank(b));
 }
 
 function estruturaTypeLabel(type) {
@@ -228,6 +275,30 @@ function estruturaRenderJuris() {
   });
   $("#jurisCrumb").innerHTML = estruturaCrumbHTML("juris", filters, maps);
 
+  // Contagem por tribunal e destaque do tribunal escolhido
+  const scope = state.ui.caseSearchScope === "all" ? "all" : "current";
+  const courtCounts = { STJ: (state.cases.STJ || []).length, STF: (state.cases.STF || []).length };
+  const countLabels = { ALL: courtCounts.STJ + courtCounts.STF, STJ: courtCounts.STJ, STF: courtCounts.STF };
+  $$("[data-court-count]").forEach((node) => (node.textContent = String(countLabels[node.dataset.courtCount] ?? 0)));
+  $("[data-estrutura='courtAll']")?.classList.toggle("active", scope === "all");
+
+  // Aviso de itens sem vínculo (os julgados antigos costumam ficar assim)
+  const pool = section === "cases" ? [...(state.cases.STJ || []), ...(state.cases.STF || [])] : state.legalMaterials || [];
+  const pending = estruturaOrganizeCandidates(pool, state.subjects, state.topics);
+  const noSubject = pending.filter((item) => !erroEntryScope(item, maps).subjectId).length;
+  const bar = $("#jurisOrganizeBar");
+  if (bar) {
+    const noun = section === "cases" ? ["julgado", "julgados"] : ["material", "materiais"];
+    bar.innerHTML = pending.length
+      ? `<div class="organize-bar"><span>${noSubject ? `<strong>${noSubject}</strong> ${noSubject === 1 ? noun[0] : noun[1]} sem matéria` : `<strong>${pending.length}</strong> ${pending.length === 1 ? noun[0] : noun[1]} sem assunto`}${noSubject && pending.length > noSubject ? ` e mais ${pending.length - noSubject} sem assunto` : ""}.</span><button class="button secondary" data-estrutura="organize" type="button">Organizar por matéria e assunto</button></div>`
+      : "";
+  }
+  const active = Boolean(state.ui.caseSearch || state.ui.legalMaterialSearch || filters.subject || estruturaUI.materialType !== "all");
+  $$('[data-estrutura="clearJuris"]').forEach((button) => {
+    button.classList.toggle("primary", active);
+    button.classList.toggle("ghost", !active);
+  });
+
   // Filtro por tipo (só em Leis e tabelas), com contagem
   const types = $("#jurisMaterialTypes");
   if (types) {
@@ -312,6 +383,124 @@ function estruturaRenderFlashLibrary() {
 function cycleSetValueIfIdleSafe(selector, value) {
   const input = $(selector);
   if (input && document.activeElement !== input) input.value = value || "";
+}
+
+/* ------------------------------------------------------------------ */
+/* Organizar: vincular julgados/materiais antigos a matéria e assunto   */
+/* ------------------------------------------------------------------ */
+
+function estruturaItemText(item, kind) {
+  if (kind === "material") {
+    return [item.title, item.reference, legalMaterialTypeLabel(item.type), item.type === "image" ? "" : richTextToPlain(item.content), item.source].join(" ");
+  }
+  return [item.title, item.theme, normalizeHashtags(item.tags).join(" "), richTextToPlain(item.summary), item.source].join(" ");
+}
+
+function estruturaTopicOptions(subjectId, selected) {
+  const list = state.topics.filter((topic) => topic.subjectId === subjectId);
+  return `<option value="">— sem assunto —</option>${list.map((topic) => `<option value="${topic.id}" ${topic.id === selected ? "selected" : ""}>${escapeHTML(topic.name)}</option>`).join("")}`;
+}
+
+function estruturaOrganizeRowHTML(item, kind, court, suggestOnlyEmpty = true) {
+  const scope = erroEntryScope(item, erroMaps(state.subjects, state.topics));
+  const text = estruturaItemText(item, kind);
+  const suggestion = estruturaSuggest(text, state.subjects, state.topics, scope.subjectId);
+  const useSuggestion = suggestion && (!scope.topicId || !suggestOnlyEmpty) && (suggestion.subjectId === scope.subjectId || !scope.subjectId);
+  const subjectId = useSuggestion ? suggestion.subjectId : scope.subjectId;
+  const topicId = useSuggestion ? suggestion.topicId : scope.topicId;
+  const excerpt = richTextToPlain(kind === "material" ? item.content || "" : item.summary || "").slice(0, 110);
+  const title = item.title || "Sem título";
+  return `
+    <div class="organize-row ${useSuggestion ? "is-suggested" : ""}" data-id="${item.id}" data-kind="${kind}" data-orig-subject="${scope.subjectId}" data-orig-topic="${scope.topicId}">
+      <div class="organize-info">
+        <strong>${escapeHTML(title)}</strong>
+        ${court ? `<span class="tag">${escapeHTML(court)}</span>` : kind === "material" ? `<span class="tag">${escapeHTML(legalMaterialTypeLabel(item.type))}</span>` : ""}
+        ${excerpt ? `<small class="muted-note">${escapeHTML(excerpt)}</small>` : ""}
+        <small class="organize-hint">${useSuggestion ? `Sugestão: ${escapeHTML(suggestion.reason)}.` : ""}</small>
+      </div>
+      <select class="organize-subject" aria-label="Matéria de ${escapeHTML(title)}">
+        <option value="">— sem matéria —</option>
+        ${state.subjects.map((subject) => `<option value="${subject.id}" ${subject.id === subjectId ? "selected" : ""}>${escapeHTML(subject.name)}</option>`).join("")}
+      </select>
+      <select class="organize-topic" aria-label="Assunto de ${escapeHTML(title)}">${estruturaTopicOptions(subjectId, topicId)}</select>
+    </div>`;
+}
+
+function estruturaOpenOrganize(trigger) {
+  const kind = estruturaUI.jurisSection === "material" ? "material" : "case";
+  const pool =
+    kind === "case"
+      ? ["STJ", "STF"].flatMap((court) => (state.cases[court] || []).map((item) => ({ item, court })))
+      : (state.legalMaterials || []).map((item) => ({ item, court: "" }));
+  const courtOf = new Map(pool.map(({ item, court }) => [item, court]));
+  const candidates = estruturaOrganizeCandidates(pool.map(({ item }) => item), state.subjects, state.topics);
+  if (!state.subjects.length) {
+    showToast("Cadastre as matérias em Matérias antes de organizar.");
+    return;
+  }
+  if (!candidates.length) {
+    showToast("Tudo já está vinculado a matéria e assunto.");
+    return;
+  }
+  $("#organizeTitle").textContent = kind === "case" ? "Vincular julgados a matérias e assuntos" : "Vincular materiais a matérias e assuntos";
+  $("#organizeHint").textContent = `${candidates.length} ${candidates.length === 1 ? "item" : "itens"} para organizar. As sugestões vêm do texto (título, tema, hashtags e ementa); confira e ajuste antes de aplicar.`;
+  $("#organizeList").innerHTML = candidates.map((item) => estruturaOrganizeRowHTML(item, kind, courtOf.get(item))).join("");
+  estruturaOpenModal("organize", { returnFocus: trigger });
+}
+
+function estruturaOrganizeChanged(event) {
+  const row = event.target.closest(".organize-row");
+  if (!row) return;
+  if (event.target.classList.contains("organize-subject")) {
+    row.querySelector(".organize-topic").innerHTML = estruturaTopicOptions(event.target.value, "");
+  }
+  row.classList.remove("is-suggested");
+  const hint = row.querySelector(".organize-hint");
+  if (hint) hint.textContent = "";
+}
+
+function estruturaOrganizeApply() {
+  const all = { case: [...(state.cases.STJ || []), ...(state.cases.STF || [])], material: state.legalMaterials || [] };
+  let changed = 0;
+  $$("#organizeList .organize-row").forEach((row) => {
+    const subjectId = row.querySelector(".organize-subject").value;
+    const topicId = row.querySelector(".organize-topic").value;
+    if (subjectId === row.dataset.origSubject && topicId === row.dataset.origTopic) return;
+    const item = all[row.dataset.kind].find((entry) => entry.id === row.dataset.id);
+    if (!item) return;
+    item.subjectId = subjectId;
+    item.topicId = topicId;
+    if (row.dataset.kind === "material") item.updatedAt = new Date().toISOString();
+    changed += 1;
+  });
+  estruturaCloseModal("organize");
+  if (!changed) {
+    showToast("Nenhum vínculo foi alterado.");
+    return;
+  }
+  saveState();
+  render();
+  showToast(`${changed} ${changed === 1 ? "item vinculado" : "itens vinculados"} a matéria e assunto.`);
+}
+
+function estruturaOrganizeSuggestAll() {
+  const rows = $$("#organizeList .organize-row");
+  let filled = 0;
+  rows.forEach((row) => {
+    const kind = row.dataset.kind;
+    const pool = kind === "case" ? [...(state.cases.STJ || []), ...(state.cases.STF || [])] : state.legalMaterials || [];
+    const item = pool.find((entry) => entry.id === row.dataset.id);
+    if (!item) return;
+    const scope = erroEntryScope(item, erroMaps(state.subjects, state.topics));
+    const suggestion = estruturaSuggest(estruturaItemText(item, kind), state.subjects, state.topics, scope.subjectId);
+    if (!suggestion || (scope.subjectId && suggestion.subjectId !== scope.subjectId)) return;
+    row.querySelector(".organize-subject").value = suggestion.subjectId;
+    row.querySelector(".organize-topic").innerHTML = estruturaTopicOptions(suggestion.subjectId, suggestion.topicId);
+    row.classList.add("is-suggested");
+    row.querySelector(".organize-hint").textContent = `Sugestão: ${suggestion.reason}.`;
+    filled += 1;
+  });
+  showToast(filled ? `${filled} sugestões preenchidas. Confira antes de aplicar.` : "Não achei matéria ou assunto citados nos textos.");
 }
 
 /* ------------------------------------------------------------------ */
@@ -419,6 +608,24 @@ function estruturaHandleClick(event) {
       estruturaCloseModal(button.dataset.kind);
       return;
     }
+    if (type === "courtAll") {
+      state.ui.caseSearchScope = "all";
+      saveState();
+      renderCases();
+      return;
+    }
+    if (type === "organize") {
+      estruturaOpenOrganize(button);
+      return;
+    }
+    if (type === "organizeSuggest") {
+      estruturaOrganizeSuggestAll();
+      return;
+    }
+    if (type === "organizeApply") {
+      estruturaOrganizeApply();
+      return;
+    }
     if (type === "materialType") {
       estruturaUI.materialType = button.dataset.type || "all";
       renderLegalMaterials();
@@ -473,6 +680,7 @@ function estruturaHandleClick(event) {
 
 function bindEstruturaEvents() {
   document.addEventListener("click", estruturaHandleClick);
+  document.addEventListener("change", estruturaOrganizeChanged);
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
@@ -499,5 +707,5 @@ function bindEstruturaEvents() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { estruturaBuildNav, estruturaScopeOk, estruturaCleanFilters };
+  module.exports = { estruturaBuildNav, estruturaScopeOk, estruturaCleanFilters, estruturaSuggest, estruturaOrganizeCandidates };
 }

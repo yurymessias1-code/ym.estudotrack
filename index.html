@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="assets/favicon-estudos-track.png" />
     <meta name="theme-color" content="#0f766e" />
     <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="styles.css?v=20261204-estrutura" />
+    <link rel="stylesheet" href="styles.css?v=20261205-organizar" />
   </head>
   <body>
     <div class="app-shell">
@@ -1088,8 +1088,9 @@
             </div>
             <div class="heading-actions">
               <div class="segmented" id="jurisCourtTabs" role="tablist" aria-label="Tribunal">
-                <button class="segment active" data-case-tab="STJ" role="tab" type="button">STJ</button>
-                <button class="segment" data-case-tab="STF" role="tab" type="button">STF</button>
+                <button class="segment active" data-estrutura="courtAll" role="tab" type="button">Todos <small data-court-count="ALL">0</small></button>
+                <button class="segment" data-case-tab="STJ" role="tab" type="button">STJ <small data-court-count="STJ">0</small></button>
+                <button class="segment" data-case-tab="STF" role="tab" type="button">STF <small data-court-count="STF">0</small></button>
               </div>
               <button class="button primary" id="jurisAddBtn" data-estrutura="add" data-kind="case" type="button">Adicionar jurisprudência</button>
             </div>
@@ -1113,6 +1114,7 @@
 
             <section class="panel error-main">
               <div id="jurisCrumb"></div>
+              <div id="jurisOrganizeBar"></div>
 
               <div id="jurisCasesPane">
                 <div class="panel-header">
@@ -1124,13 +1126,6 @@
                 <form class="case-filter-form" id="caseFilterForm">
                   <label class="sr-only" for="caseSearch">Buscar nas jurisprudências</label>
                   <input id="caseSearch" type="search" autocomplete="off" placeholder="Buscar só nas jurisprudências: título, tese, tema, matéria ou assunto" />
-                  <div class="case-search-scope-row">
-                    <span>Pesquisar em</span>
-                    <div class="segmented compact-segmented" role="tablist" aria-label="Escopo da pesquisa">
-                      <button class="segment active" data-case-search-scope="current" type="button">Aba atual</button>
-                      <button class="segment" data-case-search-scope="all" type="button">STJ + STF</button>
-                    </div>
-                  </div>
                   <div class="filter-footer">
                     <span id="caseFilterSummary">Todos os julgados cadastrados.</span>
                     <button class="button ghost" data-estrutura="clearJuris" type="button">Limpar filtros</button>
@@ -2331,6 +2326,27 @@
     </div>
 
 
+    <div class="modal-backdrop estrutura-backdrop hidden" id="organizeModal" role="dialog" aria-modal="true" aria-labelledby="organizeTitle">
+      <div class="modal-card estrutura-card" tabindex="-1">
+        <button class="estrutura-close" data-estrutura="close" data-kind="organize" type="button" aria-label="Fechar janela">×</button>
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Organizar</p>
+            <h3 id="organizeTitle">Vincular a matérias e assuntos</h3>
+            <p class="muted-note" id="organizeHint"></p>
+          </div>
+        </div>
+        <div class="inline-actions organize-actions">
+          <button class="mini-button" id="organizeSuggestBtn" data-estrutura="organizeSuggest" type="button">Sugerir pelo texto</button>
+        </div>
+        <div class="organize-list" id="organizeList"></div>
+        <div class="form-actions">
+          <button class="button primary" data-estrutura="organizeApply" type="button">Aplicar vínculos</button>
+          <button class="button ghost" data-estrutura="close" data-kind="organize" type="button">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
     <nav class="bottom-nav" aria-label="Atalhos">
       <button class="bottom-nav-item active" data-view="hoje" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8M5 10v10h14V10" /></svg>
@@ -2364,7 +2380,7 @@
     <script src="sessao.js?v=20261203-jarevisei"></script>
     <script src="mesclar.js?v=20261203-jarevisei"></script>
     <script src="retencao.js?v=20261117-sync"></script>
-    <script src="estrutura.js?v=20261204-estrutura"></script>
-    <script src="app.js?v=20261204-estrutura"></script>
+    <script src="estrutura.js?v=20261205-organizar"></script>
+    <script src="app.js?v=20261205-organizar"></script>
   </body>
 </html>

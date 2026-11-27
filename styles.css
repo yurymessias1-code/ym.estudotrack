@@ -5352,3 +5352,79 @@ body.modal-open {
     padding: 16px;
   }
 }
+
+/* ---------- Organizar julgados e materiais antigos ---------- */
+
+.organize-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent, #0f766e);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.juris-sections .segment small,
+#jurisCourtTabs .segment small {
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.organize-list {
+  display: grid;
+  gap: 10px;
+  max-height: 52vh;
+  margin: 12px 0;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.organize-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(150px, 1fr) minmax(150px, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.organize-row.is-suggested {
+  border-color: var(--accent, #0f766e);
+}
+
+.organize-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.organize-info .muted-note,
+.organize-hint {
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.organize-hint {
+  color: var(--accent, #0f766e);
+}
+
+@media (max-width: 760px) {
+  .organize-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.organize-info .tag {
+  justify-self: start;
+}
+
+.organize-info .muted-note {
+  font-weight: 400;
+}

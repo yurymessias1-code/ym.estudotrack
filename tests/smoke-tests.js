@@ -47,7 +47,7 @@ assert(html.includes("data-question-precision-range=\"day\""), "Filtro diario de
 assert(html.includes("questionPrecisionSummary"), "Resumo de precisao por periodo ausente.");
 assert(html.includes("questionReviewReminders"), "Lembretes de revisao por pior desempenho ausentes.");
 assert(html.includes("caseCourtSelect"), "Seletor de tribunal no cadastro de jurisprudencia ausente.");
-assert(html.includes("data-case-search-scope=\"all\""), "Busca geral STJ + STF ausente.");
+assert(html.includes("data-estrutura=\"courtAll\""), "Botao Todos (STJ + STF) ausente.");
 assert(html.includes("backupShortcutPanel"), "Atalho visivel de backup no painel ausente.");
 assert(html.includes("data-action=\"downloadBackup\""), "Acao direta de download de backup ausente.");
 assert(html.includes("reportCompetitionFilter"), "Filtro de relatorios por concurso ausente.");
@@ -312,5 +312,5 @@ const runAll = fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8"
 console.log("Smoke tests OK: estrutura principal validada.");
 
 // Jurisprudências e Flashcards: menu por matéria/assunto, janelas de cadastro e busca da própria aba
-["jurisNav", "jurisAddBtn", "caseModal", "legalMaterialModal", "flashcardModal", "flashNav", "flashcardSearch", "caseSearch", "legalMaterialSearch"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
+["jurisNav", "jurisAddBtn", "caseModal", "legalMaterialModal", "flashcardModal", "flashNav", "flashcardSearch", "caseSearch", "legalMaterialSearch", "organizeModal", "organizeList", "jurisOrganizeBar"].forEach((id) => assert(html.includes(`id="${id}"`), `Elemento #${id} ausente.`));
 assert(fs.readFileSync(path.join(__dirname, "e2e", "run-all.js"), "utf8").includes("estrutura.e2e.js"), "run-all.js nao inclui o roteiro da estrutura.");

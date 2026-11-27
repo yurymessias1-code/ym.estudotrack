@@ -75,10 +75,10 @@ const typeInEditor = async (page, selector, text) => {
   // busca só da aba (STJ): a ADI do STF não aparece, e o menu acompanha a busca
   await page.fill("#caseSearch", "imunidade");
   assert.strictEqual(await page.locator("#caseList .case-card").count(), 0, "ADI é do STF; busca da aba atual não pode achar");
-  await page.click('[data-case-search-scope="all"]');
+  await page.click('[data-estrutura="courtAll"]');
   assert.strictEqual(await page.locator("#caseList .case-card").count(), 1, "escopo STJ + STF acha a ADI");
   await page.click('[data-estrutura="clearJuris"] >> nth=0');
-  await page.click('[data-case-search-scope="current"]');
+  await page.click('[data-case-tab="STJ"]');
   assert.strictEqual(await page.inputValue("#caseSearch"), "");
 
   // editar: abre a janela já preenchida; Esc fecha
@@ -96,6 +96,49 @@ const typeInEditor = async (page, selector, text) => {
   await page.click('#caseModal [data-estrutura="close"]');
   assert(await isHidden(page, "#caseModal"));
   await page.click('#jurisNav .is-all');
+
+  // ---------------- Julgados antigos, sem matéria/assunto ----------------
+  await page.click('[data-estrutura="courtAll"]');
+  assert.strictEqual(await page.locator("#caseList .case-card").count(), 3, "Todos mostra STJ e STF juntos");
+  assert((await page.locator('[data-court-count="ALL"]').textContent()).trim() === "3");
+  await page.evaluate(() => {
+    state.cases.STJ.push(normalizeCaseItem({ title: "Julgado antigo sobre improbidade", summary: "<p>texto qualquer</p>" }), normalizeCaseItem({ title: "Sem pista nenhuma" }));
+    state.cases.STF.push(normalizeCaseItem({ title: "ADI antiga", theme: "Poder Legislativo" }));
+    saveState();
+    renderCases();
+  });
+  assert.strictEqual(await page.locator("#caseList .case-card").count(), 6, "julgados antigos aparecem mesmo sem vínculo");
+  assert((await page.locator("#caseList .error-group-title").allTextContents()).join("|").includes("Sem matéria"));
+  assert((await page.locator("#jurisOrganizeBar").textContent()).includes("3"), "aviso conta os 3 sem matéria");
+  await page.click('#jurisOrganizeBar [data-estrutura="organize"]');
+  assert(!(await isHidden(page, "#organizeModal")));
+  assert.strictEqual(await page.locator("#organizeList .organize-row").count(), 3);
+  const rowInfo = await page.evaluate(() =>
+    [...document.querySelectorAll("#organizeList .organize-row")].map((row) => [
+      row.querySelector("strong").textContent,
+      row.querySelector(".organize-subject option:checked").textContent.trim(),
+      row.querySelector(".organize-topic option:checked").textContent.trim(),
+    ])
+  );
+  const byTitle = Object.fromEntries(rowInfo.map(([title, subject, topic]) => [title, [subject, topic]]));
+  assert.deepStrictEqual(byTitle["Julgado antigo sobre improbidade"], ["Direito Administrativo", "Improbidade"]);
+  assert.deepStrictEqual(byTitle["ADI antiga"], ["Direito Constitucional", "Poder Legislativo"]);
+  assert.deepStrictEqual(byTitle["Sem pista nenhuma"], ["— sem matéria —", "— sem assunto —"]);
+  await page.screenshot({ path: "estrutura-organizar.png", fullPage: false });
+  // o usuário ajusta o que não tinha pista e aplica
+  await page.locator('#organizeList .organize-row:has-text("Sem pista nenhuma") .organize-subject').selectOption({ label: "Direito Constitucional" });
+  await page.click('[data-estrutura="organizeApply"]');
+  assert(await isHidden(page, "#organizeModal"));
+  const linked = await page.evaluate(() => {
+    const all = [...state.cases.STJ, ...state.cases.STF];
+    const topicName = (id) => state.topics.find((t) => t.id === id)?.name || "";
+    const subjectName = (id) => state.subjects.find((x) => x.id === id)?.name || "";
+    return all.filter((item) => /antig|pista/.test(item.title)).map((item) => [item.title, subjectName(item.subjectId), topicName(item.topicId)]);
+  });
+  assert.deepStrictEqual(linked.find(([title]) => title.startsWith("Julgado antigo")), ["Julgado antigo sobre improbidade", "Direito Administrativo", "Improbidade"]);
+  assert.deepStrictEqual(linked.find(([title]) => title === "Sem pista nenhuma"), ["Sem pista nenhuma", "Direito Constitucional", ""]);
+  assert((await page.locator("#caseList .error-group-title").allTextContents()).join("|").includes("Sem matéria") === false, "nada mais sem matéria");
+  await page.click('[data-case-tab="STJ"]');
 
   // ---------------- Leis e tabelas ----------------
   await page.click('[data-juris-section="material"]');
@@ -178,7 +221,7 @@ const typeInEditor = async (page, selector, text) => {
   await page.fill("#profilePin", "1234");
   await page.click("#profileAccessBtn");
   await page.waitForTimeout(700);
-  assert.deepStrictEqual(await page.evaluate(() => [state.cases.STJ.length, state.cases.STF.length, state.legalMaterials.length, state.flashcards.length]), [2, 1, 1, 3]);
+  assert.deepStrictEqual(await page.evaluate(() => [state.cases.STJ.length, state.cases.STF.length, state.legalMaterials.length, state.flashcards.length]), [4, 2, 1, 3]);
 
   assert.deepStrictEqual(errors, [], "erros no console: " + errors.join(" | "));
   await browser.close();
